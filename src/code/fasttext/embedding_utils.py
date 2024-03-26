@@ -13,7 +13,8 @@ import fasttext
 def my_tokenizer(s: str):
     if type(s) is not str:
         return str(s)
-    return [ss for ss in [re.sub('[^a-z]+', '', x) for x in s.lower().split()] if ss != '']
+    return re.findall(r'[a-z]+|[0-9]{1,4}', s.lower())
+
 
 def np_cosine_similarity(a1, a2):
     return np.dot(a1, a2) / (np.linalg.norm(a1) * np.linalg.norm(a2))
@@ -52,7 +53,7 @@ class TableEncoder:
                 [self.model.get_vector(token) \
                  for token in cell], # compute cell embedding
                 axis=0
-                ) if type(cell) in [str, list] else np.zeros(self.model_size)
+                ) if type(cell) in [str, list] and len(cell) > 0 else np.zeros(self.model_size)
 
     def embedding_row(self, row: list):
         return \
@@ -64,15 +65,15 @@ class TableEncoder:
     def embedding_column(self, column: list):
         return \
             np.mean(                
-                [
+                np.array([
                     self.embedding_cell(cell) 
                     for cell in column
-                ],
+                ]),
                 axis=0
             )
 
     def create_row_embeddings(self, df: pd.DataFrame, add_label=False):
-        labels_embedding = list(map(my_tokenizer, df.columns))
+        labels_embedding = list(map(my_tokenizer, df.columns)) if add_label else None
         return \
             (     
                 self.embedding_row(row.apply(my_tokenizer).to_list()) if not add_label \
@@ -84,7 +85,8 @@ class TableEncoder:
     def create_column_embeddings(self, df: pd.DataFrame, add_label=False):
         return \
             (
-                self.embedding_column(df[column].apply(my_tokenizer).to_list()) if not add_label \
+                self.embedding_column(df[column].apply(my_tokenizer).to_list()) \
+                    if not add_label \
                     else self.embedding_column(df[column].apply(my_tokenizer).to_list() + [my_tokenizer(df[column].name)])
                 for column in df.columns
             )
@@ -141,4 +143,5 @@ def show_most_similar_rows(compared_rows: pd.DataFrame,
         p = df2.loc[r2]
         print(f"#{i}: {cosim}\n\t{r1}: {' '.join([str(c) for c in s])}\n\t{r2}: {' '.join([str(c) for c in p])}")
         print()
+
 
