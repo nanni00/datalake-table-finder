@@ -13,7 +13,7 @@ import fasttext
 def my_tokenizer(s: str):
     if type(s) is not str:
         return str(s)
-    return [re.sub('[^a-z]+', '', x) for x in s.lower().split()]
+    return [ss for ss in [re.sub('[^a-z]+', '', x) for x in s.lower().split()] if ss != '']
 
 def np_cosine_similarity(a1, a2):
     return np.dot(a1, a2) / (np.linalg.norm(a1) * np.linalg.norm(a2))
@@ -54,33 +54,38 @@ class TableEncoder:
                 axis=0
                 ) if type(cell) in [str, list] else np.zeros(self.model_size)
 
-    def embedding_row(self, row):
+    def embedding_row(self, row: list):
         return \
             np.mean(
                 [self.embedding_cell(cell) for cell in row],
                 axis=0
             )
 
-    def embedding_column(self, column):
+    def embedding_column(self, column: list):
         return \
-            np.mean(
+            np.mean(                
                 [
-                    self.embedding_cell(cell)
+                    self.embedding_cell(cell) 
                     for cell in column
                 ],
                 axis=0
             )
 
-    def create_row_embeddings(self, df: pd.DataFrame):
+    def create_row_embeddings(self, df: pd.DataFrame, add_label=False):
+        labels_embedding = list(map(my_tokenizer, df.columns))
         return \
             (     
-                self.embedding_row(row.apply(my_tokenizer)) for _, row in df.iterrows()
+                self.embedding_row(row.apply(my_tokenizer).to_list()) if not add_label \
+                    else self.embedding_row(row.apply(my_tokenizer).to_list() + labels_embedding) 
+                
+                 for _, row in df.iterrows()
             )
     
-    def create_column_embeddings(self, df: pd.DataFrame):
+    def create_column_embeddings(self, df: pd.DataFrame, add_label=False):
         return \
             (
-                self.embedding_column(df[column].apply(my_tokenizer))                 
+                self.embedding_column(df[column].apply(my_tokenizer).to_list()) if not add_label \
+                    else self.embedding_column(df[column].apply(my_tokenizer).to_list() + [my_tokenizer(df[column].name)])
                 for column in df.columns
             )
 
@@ -89,7 +94,8 @@ class TableEncoder:
 def compare_embeddings_of(df1: pd.DataFrame, df2: pd.DataFrame,
                           tabenc: TableEncoder,
                           on:str='columns',
-                          sort_by_cosine_similarity=True
+                          sort_by_cosine_similarity=True,
+                          add_label=False
                           ) -> pd.DataFrame:
     """
     Compare column/row embeddings of two datasets. Each embedding of df1 is compared with 
@@ -101,7 +107,8 @@ def compare_embeddings_of(df1: pd.DataFrame, df2: pd.DataFrame,
     
     if on == 'columns':
         comparisons = pd.DataFrame(columns=['C1', 'C2', 'cosine similarity'])
-        emb1, emb2 = list(tabenc.create_column_embeddings(df1)), list(tabenc.create_column_embeddings(df2))
+        emb1 = list(tabenc.create_column_embeddings(df1, add_label))
+        emb2 = list(tabenc.create_column_embeddings(df2, add_label))
         for i, column1 in enumerate(df1.columns):
             for j, column2 in enumerate(df2.columns):
 
