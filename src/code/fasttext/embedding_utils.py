@@ -2,12 +2,17 @@ import re
 import numpy as np
 import pandas as pd
 
+import warnings
+warnings.filterwarnings('ignore')
+
 
 import compress_fasttext
 import fasttext
 
 
 def my_tokenizer(s: str):
+    if type(s) is not str:
+        return str(s)
     return [re.sub('[^a-z]+', '', x) for x in s.lower().split()]
 
 def np_cosine_similarity(a1, a2):
@@ -40,7 +45,6 @@ class TableEncoder:
             raise Exception('You must pass a specification for the model')
         
         self.model_size = self.model.vector_size
-
             
     def embedding_cell(self, cell):
         return \
@@ -57,12 +61,6 @@ class TableEncoder:
                 axis=0
             )
 
-    def create_row_embeddings(self, df: pd.DataFrame):
-        return \
-            (     
-                self.embedding_row(row) for _, row in df.iterrows()
-            )
-    
     def embedding_column(self, column):
         return \
             np.mean(
@@ -73,6 +71,12 @@ class TableEncoder:
                 axis=0
             )
 
+    def create_row_embeddings(self, df: pd.DataFrame):
+        return \
+            (     
+                self.embedding_row(row.apply(my_tokenizer)) for _, row in df.iterrows()
+            )
+    
     def create_column_embeddings(self, df: pd.DataFrame):
         return \
             (
@@ -84,19 +88,23 @@ class TableEncoder:
 
 def compare_embeddings_of(df1: pd.DataFrame, df2: pd.DataFrame,
                           tabenc: TableEncoder,
-                          on_columns=True,
+                          on:str='columns',
                           sort_by_cosine_similarity=True
                           ) -> pd.DataFrame:
     """
     Compare column/row embeddings of two datasets. Each embedding of df1 is compared with 
     each embedding of df2 (quadratic complexity) 
     """
+
+    if on not in {'columns', 'rows'}:
+        raise AttributeError(f"'on' parameter accepts only 'rows' or 'columns': {on} passed.")
     
-    if on_columns:
+    if on == 'columns':
         comparisons = pd.DataFrame(columns=['C1', 'C2', 'cosine similarity'])
         emb1, emb2 = list(tabenc.create_column_embeddings(df1)), list(tabenc.create_column_embeddings(df2))
         for i, column1 in enumerate(df1.columns):
             for j, column2 in enumerate(df2.columns):
+
                 emb_1_i, emb_2_j = emb1[i], emb2[j]
                 cosim = np_cosine_similarity(emb_1_i, emb_2_j)
                 comparisons.loc[len(comparisons)] = [column1, column2, cosim]
