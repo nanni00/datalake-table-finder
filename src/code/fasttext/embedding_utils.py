@@ -5,19 +5,37 @@ import pandas as pd
 import warnings
 warnings.filterwarnings('ignore')
 
-
 import compress_fasttext
 import fasttext
 
+from nltk.corpus import stopwords
 
-def my_tokenizer(s: str):
+
+stopwords_set = set(stopwords.words('english'))
+
+def my_tokenizer(s: str, keepnumbers=True):
     if type(s) is not str:
         return str(s)
-    return re.findall(r'[a-z]+|[0-9]{1,4}', s.lower())
+    # ISSUE: this return any substring with 1 to 4 digits, for example
+    # 369155,29421 --> ['3691', '55', '2942', '1']
+    # maybe it's better to return a number only if it's originally between 0 and 9999...
+    if keepnumbers:
+        return [x for x in re.findall(r'[a-z]+|[0-9]{1,4}', s.lower()) if x not in stopwords_set]
+    else:
+        return [x for x in re.findall(r'[a-z]+', s.lower()) if x not in stopwords_set]
 
 
 def np_cosine_similarity(a1, a2):
     return np.dot(a1, a2) / (np.linalg.norm(a1) * np.linalg.norm(a2))
+
+
+def drop_columns_with_only_nan(df: pd.DataFrame, threshold:float=0.8):
+    to_drop = []
+    for col in df.columns:
+        if df[col].notna().shape[0] < df[col].shape[0] * threshold:
+            to_drop.append(col)
+    
+    return df.drop(to_drop, axis=1)
 
 
 
@@ -53,7 +71,9 @@ class TableEncoder:
                 [self.model.get_vector(token) \
                  for token in cell], # compute cell embedding
                 axis=0
-                ) if type(cell) in [str, list] and len(cell) > 0 else np.zeros(self.model_size)
+                ) \
+                    if type(cell) in [str, list] and len(cell) > 0 \
+                        else np.zeros(self.model_size)
 
     def embedding_row(self, row: list):
         return \
@@ -72,22 +92,22 @@ class TableEncoder:
                 axis=0
             )
 
-    def create_row_embeddings(self, df: pd.DataFrame, add_label=False):
+    def create_row_embeddings(self, df: pd.DataFrame, add_label=False, keepnumbers=True):
         labels_embedding = list(map(my_tokenizer, df.columns)) if add_label else None
         return \
             (     
-                self.embedding_row(row.apply(my_tokenizer).to_list()) if not add_label \
-                    else self.embedding_row(row.apply(my_tokenizer).to_list() + labels_embedding) 
+                self.embedding_row(row.apply(my_tokenizer, args=(keepnumbers, )).to_list()) if not add_label \
+                    else self.embedding_row(row.apply(my_tokenizer, args=(keepnumbers, )).to_list() + labels_embedding) 
                 
                  for _, row in df.iterrows()
             )
     
-    def create_column_embeddings(self, df: pd.DataFrame, add_label=False):
+    def create_column_embeddings(self, df: pd.DataFrame, add_label=False, keepnumbers=True):
         return \
             (
-                self.embedding_column(df[column].apply(my_tokenizer).to_list()) \
+                self.embedding_column(df[column].apply(my_tokenizer, args=(keepnumbers, )).to_list()) \
                     if not add_label \
-                    else self.embedding_column(df[column].apply(my_tokenizer).to_list() + [my_tokenizer(df[column].name)])
+                    else self.embedding_column(df[column].apply(my_tokenizer, args=(keepnumbers, )).to_list() + [my_tokenizer(df[column].name, keepnumbers)])
                 for column in df.columns
             )
 
@@ -97,7 +117,8 @@ def compare_embeddings_of(df1: pd.DataFrame, df2: pd.DataFrame,
                           tabenc: TableEncoder,
                           on:str='columns',
                           sort_by_cosine_similarity=True,
-                          add_label=False
+                          add_label=False,
+                          keepnumbers=True
                           ) -> pd.DataFrame:
     """
     Compare column/row embeddings of two datasets. Each embedding of df1 is compared with 
@@ -109,8 +130,8 @@ def compare_embeddings_of(df1: pd.DataFrame, df2: pd.DataFrame,
     
     if on == 'columns':
         comparisons = pd.DataFrame(columns=['C1', 'C2', 'cosine similarity'])
-        emb1 = list(tabenc.create_column_embeddings(df1, add_label))
-        emb2 = list(tabenc.create_column_embeddings(df2, add_label))
+        emb1 = list(tabenc.create_column_embeddings(df1, add_label, keepnumbers))
+        emb2 = list(tabenc.create_column_embeddings(df2, add_label, keepnumbers))
         for i, column1 in enumerate(df1.columns):
             for j, column2 in enumerate(df2.columns):
 
@@ -119,7 +140,8 @@ def compare_embeddings_of(df1: pd.DataFrame, df2: pd.DataFrame,
                 comparisons.loc[len(comparisons)] = [column1, column2, cosim]
     else:
         comparisons = pd.DataFrame(columns=['R1', 'R2', 'cosine similarity'])
-        emb1, emb2 = list(tabenc.create_row_embeddings(df1)), list(tabenc.create_row_embeddings(df2))
+        emb1 = list(tabenc.create_row_embeddings(df1, add_label, keepnumbers))
+        emb2 = list(tabenc.create_row_embeddings(df2, add_label, keepnumbers))
         for i, emb_s in enumerate(emb1):
             for j, emb_p in enumerate(emb2):
                 cosim = np_cosine_similarity(emb_s, emb_p)
