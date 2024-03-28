@@ -81,20 +81,20 @@ class TableEncoder:
                     if type(cell) in [str, list] and len(cell) > 0 \
                         else np.zeros(self.model_size)
 
-    def embedding_row(self, row: list):
-        return \
-            np.mean(
-                np.array(
-                    [self.embedding_cell(cell) for cell in row if type(cell) in [str, list] and len(cell) > 0],
-                ),
-                axis=0
-            )
-
     def embedding_column(self, column: list):
         return \
             np.mean(                
                 np.array(
                     [self.embedding_cell(cell) for cell in column if type(cell) in [str, list] and len(cell) > 0]
+                ),
+                axis=0
+            )
+    
+    def embedding_row(self, row: list):
+        return \
+            np.mean(
+                np.array(
+                    [self.embedding_cell(cell) for cell in row if type(cell) in [str, list] and len(cell) > 0],
                 ),
                 axis=0
             )
@@ -135,6 +135,41 @@ class TableEncoder:
                 embeddings.append(e)
         
         return embeddings
+    
+    def full_embedding(self, df: pd.DataFrame, add_label=False, keepnumbers=True):
+        # ok, the embeddings seem to be the same of only column/row version
+        embedding_matrix = \
+            np.array(
+                [
+                    [self.embedding_cell(my_tokenizer(cell, keepnumbers)) for cell in row]
+                    for _, row in (pd.concat([df, pd.DataFrame([df.columns], columns=df.columns)]) if add_label else df).iterrows() 
+                ]
+            )
+        
+        column_embeddings = np.mean(embedding_matrix, axis=0)
+        embedding_matrix = embedding_matrix[:-1, :, :] if add_label else embedding_matrix
+
+        if add_label:
+            labels_embedding = \
+                np.repeat(
+                    np.expand_dims(
+                        np.array(
+                            list(map(self.embedding_cell, 
+                                     map(lambda x: my_tokenizer(x, keepnumbers), df.columns)
+                                    )
+                                )
+                            ),
+                        0), 
+                    df.shape[0], axis=0
+                ) \
+
+            embedding_matrix = np.concatenate((embedding_matrix, labels_embedding), axis=1)
+        
+        row_embeddings = np.mean(embedding_matrix, axis=1)
+
+        return row_embeddings, column_embeddings
+        
+
 
 
 def compare_embeddings_of(df1: pd.DataFrame, df2: pd.DataFrame,
