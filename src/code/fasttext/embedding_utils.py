@@ -1,5 +1,7 @@
+import itertools
 import re
 import string
+from typing import List
 import numpy as np
 import pandas as pd
 
@@ -15,11 +17,11 @@ from nltk.corpus import stopwords
 stopwords_set = set(stopwords.words('english'))
 
 
-def my_tokenizer(s: str, keepnumbers=True):
+def my_tokenizer(s: str, remove_numbers=False):
     #if type(s) is not str:
     #    return str(s)
     s = str(s)
-    if keepnumbers:
+    if not remove_numbers:
         return [            
             x for x in re.findall(r'\b([a-z]+|\d{1}|\d{2}|\d{3}|\d{4})\b', s.lower()) 
             if x not in stopwords_set
@@ -99,35 +101,28 @@ class TableEncoder:
                 axis=0
             )
 
-    def create_row_embeddings(self, df: pd.DataFrame, add_label=False, keepnumbers=True):
+    def create_row_embeddings(self, df: pd.DataFrame, add_label=False, remove_numbers=False):
         labels_embedding = list(map(my_tokenizer, df.columns)) if add_label else None
         embeddings = []
         for _, row in df.iterrows():
             if add_label:
-                e = self.embedding_row(row.apply(my_tokenizer, args=(keepnumbers, )).to_list() + labels_embedding)
+                e = self.embedding_row(row.apply(my_tokenizer, args=(remove_numbers, )).to_list() + labels_embedding)
             else:
-                e = self.embedding_row(row.apply(my_tokenizer, args=(keepnumbers, )).to_list())
+                e = self.embedding_row(row.apply(my_tokenizer, args=(remove_numbers, )).to_list())
 
             if type(e) is np.float64: # case the embedding is nan
                 embeddings.append(np.zeros(self.model_size))
             else:
                 embeddings.append(e)
         return embeddings 
-        #return \
-        #    (     
-        #        self.embedding_row(row.apply(my_tokenizer, args=(keepnumbers, )).to_list()) if not add_label \
-        #            else self.embedding_row(row.apply(my_tokenizer, args=(keepnumbers, )).to_list() + labels_embedding) 
-        #        
-        #         for _, row in df.iterrows()
-        #    )
-    
-    def create_column_embeddings(self, df: pd.DataFrame, add_label=False, keepnumbers=True):
+
+    def create_column_embeddings(self, df: pd.DataFrame, add_label=False, remove_numbers=False):
         embeddings = []
         for column in df.columns:
             if add_label:
-                e = self.embedding_column(df[column].apply(my_tokenizer, args=(keepnumbers, )).to_list() + [my_tokenizer(df[column].name, keepnumbers)])
+                e = self.embedding_column(df[column].apply(my_tokenizer, args=(remove_numbers, )).to_list() + [my_tokenizer(df[column].name, remove_numbers)])
             else:
-                e = self.embedding_column(df[column].apply(my_tokenizer, args=(keepnumbers, )).to_list())
+                e = self.embedding_column(df[column].apply(my_tokenizer, args=(remove_numbers, )).to_list())
 
             if type(e) is np.float64:
                 embeddings.append(np.zeros(self.model_size))
@@ -135,13 +130,24 @@ class TableEncoder:
                 embeddings.append(e)
         
         return embeddings
-    
-    def full_embedding(self, df: pd.DataFrame, add_label=False, keepnumbers=True):
+
+    def create_embeddings(self, df: pd.DataFrame, 
+                          on='columns', 
+                          add_label:bool=False,
+                          remove_numbers:bool=False):
+        if on == 'rows':
+            return self.create_row_embeddings(df, add_label, remove_numbers)
+        elif on == 'columns':
+            return self.create_column_embeddings(df, add_label, remove_numbers)
+        else:
+            raise AttributeError(f"Parameter 'on' accepts only values 'rows' or 'columns', passed {on}.")
+
+    def full_embedding(self, df: pd.DataFrame, add_label=False, remove_numbers=False):
         # ok, the embeddings seem to be the same of only column/row version
         embedding_matrix = \
             np.array(
                 [
-                    [self.embedding_cell(my_tokenizer(cell, keepnumbers)) for cell in row]
+                    [self.embedding_cell(my_tokenizer(cell, remove_numbers)) for cell in row]
                     for _, row in (pd.concat([df, pd.DataFrame([df.columns], columns=df.columns)]) if add_label else df).iterrows() 
                 ]
             )
@@ -154,30 +160,29 @@ class TableEncoder:
                 np.repeat(
                     np.expand_dims(
                         np.array(
-                            list(map(self.embedding_cell, 
-                                     map(lambda x: my_tokenizer(x, keepnumbers), df.columns)
+                            list(
+                                map(self.embedding_cell, 
+                                    map(lambda x: my_tokenizer(x, remove_numbers), df.columns)
                                     )
                                 )
                             ),
                         0), 
                     df.shape[0], axis=0
-                ) \
-
+                )
+        
             embedding_matrix = np.concatenate((embedding_matrix, labels_embedding), axis=1)
-        
         row_embeddings = np.mean(embedding_matrix, axis=1)
-
         return row_embeddings, column_embeddings
-        
 
 
 
-def compare_embeddings_of(df1: pd.DataFrame, df2: pd.DataFrame,
+def compare_embeddings(df1: pd.DataFrame, df2: pd.DataFrame,
                           tabenc: TableEncoder,
                           on:str='columns',
-                          sort_by_cosine_similarity=True,
-                          add_label=False,
-                          keepnumbers=True
+                          sort_by_cosine_similarity:bool=True,
+                          add_label:bool|List[bool]=False,
+                          remove_numbers:bool|List[bool]=False,
+                          delta:bool=False
                           ) -> pd.DataFrame:
     """
     Compare column/row embeddings of two datasets. Each embedding of df1 is compared with 
@@ -187,28 +192,46 @@ def compare_embeddings_of(df1: pd.DataFrame, df2: pd.DataFrame,
     if on not in {'columns', 'rows'}:
         raise AttributeError(f"'on' parameter accepts only 'rows' or 'columns': {on} passed.")
     
-    if on == 'columns':
-        comparisons = pd.DataFrame(columns=['C1', 'C2', 'cosine similarity'])
-        emb1 = tabenc.create_column_embeddings(df1, add_label, keepnumbers)
-        emb2 = tabenc.create_column_embeddings(df2, add_label, keepnumbers)
-        for i, column1 in enumerate(df1.columns):
-            for j, column2 in enumerate(df2.columns):
+    add_label = [add_label] if type(add_label) is bool else add_label
+    remove_numbers = [remove_numbers] if type(remove_numbers) is bool else remove_numbers
 
-                emb_1_i, emb_2_j = emb1[i], emb2[j]
-                cosim = np_cosine_similarity(emb_1_i, emb_2_j)
-                comparisons.loc[len(comparisons)] = [column1, column2, cosim]
-    else:
-        comparisons = pd.DataFrame(columns=['R1', 'R2', 'cosine similarity'])
-        emb1 = tabenc.create_row_embeddings(df1, add_label, keepnumbers)
-        emb2 = tabenc.create_row_embeddings(df2, add_label, keepnumbers)
-        for i, emb_s in enumerate(emb1):
-            for j, emb_p in enumerate(emb2):
-                cosim = np_cosine_similarity(emb_s, emb_p)
-                comparisons.loc[len(comparisons)] = [i, j, cosim]
+    embeddings1, embeddings2 = [], []
+    columns = []
 
-    comparisons = comparisons.convert_dtypes()
+    for al, rn in itertools.product(add_label, remove_numbers):
+        tag = f"cosine similarity{'-wlabel' if al else ''}{'-nonum' if rn else ''}"
+        columns.append(tag)
+        
+        embeddings1.append(tabenc.create_embeddings(df1, on, al, rn)),
+        embeddings2.append(tabenc.create_embeddings(df2, on, al, rn))
+
+    comparisons = pd.DataFrame(columns=['DF1', 'DF2'] + columns)
+
+    for i in range(len(embeddings1[0])):
+        for j in range(len(embeddings2[0])):
+            cosim = []
+            for k in range(len(columns)):
+                cosim.append(
+                    np_cosine_similarity(embeddings1[k][i], embeddings2[k][j])
+                )
+            
+            idx_i, idx_j = (df1.columns[i], df2.columns[j]) if on == 'columns' else (i, j)
+            comparisons.loc[len(comparisons)] = [idx_i, idx_j] + cosim
+    
+    if delta:
+        new_columns = ['DF1', 'DF2', 'cosine similarity']
+        columns.remove('cosine similarity')
+        i = 1
+        for c in columns:
+            comparisons[f'delta#{i}'] = (comparisons['cosine similarity'] - comparisons[c]).apply(lambda x: format(x, ".3f"))
+            new_columns.extend([c, f'delta#{i}'])
+            i += 1
+        comparisons = comparisons[new_columns]
+
+    comparisons = comparisons.convert_dtypes().rename({'DF1': 'C1' if on == 'columns' else 'R1', 
+                                                       'DF2': 'C2' if on == 'columns' else 'R2'}, axis=1)
     return comparisons if not sort_by_cosine_similarity \
-        else comparisons.sort_values(by='cosine similarity', ascending=False, ignore_index=True)
+        else comparisons.sort_values(by=comparisons.columns[2], ascending=False, ignore_index=True)
 
 
 def show_most_similar_rows(compared_rows: pd.DataFrame, 
