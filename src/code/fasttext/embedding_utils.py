@@ -118,11 +118,12 @@ class TableEncoder:
 
     def create_column_embeddings(self, df: pd.DataFrame, add_label=False, remove_numbers=False):
         embeddings = []
-        for column in df.columns:
+        for i, column in enumerate(df.columns):
             if add_label:
-                e = self.embedding_column(df[column].apply(my_tokenizer, args=(remove_numbers, )).to_list() + [my_tokenizer(df[column].name, remove_numbers)])
+                e = self.embedding_column(df.iloc[:, i].apply(my_tokenizer, args=(remove_numbers, )).to_list() \
+                                          + [my_tokenizer(column, remove_numbers)]) # why not simply my_tokenizer(column, remove_numbers)?
             else:
-                e = self.embedding_column(df[column].apply(my_tokenizer, args=(remove_numbers, )).to_list())
+                e = self.embedding_column(df.iloc[:, i].apply(my_tokenizer, args=(remove_numbers, )).to_list())
 
             if type(e) is np.float64:
                 embeddings.append(np.zeros(self.model_size))
