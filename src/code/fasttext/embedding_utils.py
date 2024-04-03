@@ -143,7 +143,10 @@ class TableEncoder:
         else:
             raise AttributeError(f"Parameter 'on' accepts only values 'rows' or 'columns', passed {on}.")
 
-    def full_embedding(self, df: pd.DataFrame, add_label=False, remove_numbers=False):
+    def full_embedding(self, 
+                       df: pd.DataFrame, 
+                       add_label=False, remove_numbers=False
+                       ) -> tuple[pd.DataFrame, pd.DataFrame]:
         # ok, the embeddings seem to be the same of only column/row version
         embedding_matrix = \
             np.array(
