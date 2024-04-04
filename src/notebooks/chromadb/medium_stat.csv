@@ -1,0 +1,7 @@
+test ID,VDB name,dataset,batch size,with metadata,total time (s)
+0,v0,medium_train_tables.jsonl,500,True,547.0204923152924
+1,v1,medium_train_tables.jsonl,500,False,478.5210647583008
+2,v2,medium_train_tables.jsonl,1000,True,560.31534075737
+3,v3,medium_train_tables.jsonl,1000,False,538.824010848999
+4,v4,medium_train_tables.jsonl,3500,True,659.11399102211
+5,v5,medium_train_tables.jsonl,3500,False,623.8381843566895

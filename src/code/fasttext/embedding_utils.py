@@ -147,6 +147,8 @@ class TableEncoder:
                        df: pd.DataFrame, 
                        add_label=False, remove_numbers=False
                        ) -> tuple[pd.DataFrame, pd.DataFrame]:
+        """
+        Creates and returns (in order) both row and column embeddings """
         # ok, the embeddings seem to be the same of only column/row version
         embedding_matrix = \
             np.array(
