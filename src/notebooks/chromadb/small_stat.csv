@@ -1,7 +1,0 @@
-test ID ,VDB name ,dataset                  ,batch size ,with metadata ,total time (s)
-      0 ,v0       ,small_train_tables.jsonl ,       200 ,True          ,59.35216403007507
-      1 ,v1       ,small_train_tables.jsonl ,       200 ,False         ,64.95932745933533
-      2 ,v2       ,small_train_tables.jsonl ,       500 ,True          ,66.88956379890442
-      3 ,v3       ,small_train_tables.jsonl ,       500 ,False         ,53.462029695510864
-      4 ,v4       ,small_train_tables.jsonl ,      1000 ,True          ,58.416810512542725
-      5 ,v5       ,small_train_tables.jsonl ,      1000 ,False         ,53.081225633621216

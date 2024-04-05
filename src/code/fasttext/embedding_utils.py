@@ -146,10 +146,9 @@ class TableEncoder:
     def full_embedding(self, 
                        df: pd.DataFrame, 
                        add_label=False, remove_numbers=False
-                       ) -> tuple[pd.DataFrame, pd.DataFrame]:
+                       ) -> tuple[np.array, np.array]:
         """
         Creates and returns (in order) both row and column embeddings """
-        # ok, the embeddings seem to be the same of only column/row version
         embedding_matrix = \
             np.array(
                 [
@@ -172,13 +171,16 @@ class TableEncoder:
                                     )
                                 )
                             ),
-                        0), 
-                    df.shape[0], axis=0
+                        axis=0), 
+                    repeats=df.shape[0], axis=0
                 )
         
             embedding_matrix = np.concatenate((embedding_matrix, labels_embedding), axis=1)
         row_embeddings = np.mean(embedding_matrix, axis=1)
-        return row_embeddings, column_embeddings
+        # return row_embeddings, column_embeddings
+        # fastText handles FLOAT32 
+        return np.float32(row_embeddings), np.float32(column_embeddings)
+
 
 
 
