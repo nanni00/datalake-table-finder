@@ -5,6 +5,7 @@ _root_path = '/home/giovanni/unimore/TESI/src/'
 
 class _DataPath:
     base =                  _root_path + 'data/'
+    mywikitables =          _root_path + 'data/my_wikitables/'
     wikitables =            _root_path + 'data/wikitables/'
 
 

@@ -1,10 +1,12 @@
-import itertools
 import os
+import itertools
 from time import time
+from pprint import pprint
 
 import jsonlines
 import pandas as pd
 from tqdm import tqdm
+
 import chromadb
 
 from code.utils.settings import DefaultPath
@@ -12,7 +14,12 @@ from code.fasttext.embedding_utils import TableEncoder
 from code.utils.utils import rebuild_table
 
 
-DEBUG = False
+DEBUG = True
+
+REMOVE_DATABASE_AT_EACH_STEP = False
+KEEP_ONLY_DATABASES_WITH_n_tables = [2500, 5000]
+
+STATISTICS_FILENAME = 'single_collection.csv'
 
 # in the train_tables.jsonl file
 N_TOTAL_WIKITABLES = 570171
@@ -33,14 +40,18 @@ def get_index_size(start_path):
 def get_db_size(db_path):
     return os.path.getsize(db_path)
 
+
+
 os.system(f'rm -rf {DefaultPath.db_path.chroma}')
 os.system(f'mkdir {DefaultPath.db_path.chroma}')
 
+
 add_label =         True
 remove_numbers =    False
-with_metadatas =    False
+with_metadatas =    True
+metadata_format = 'table:str,row:int,column:int'
 
-n_tables_step = [100, 250, 500, 1000, 2500, 5000, 10000, 25000, 50000]
+n_tables_step = [100, 250, 500, 1000, 2500, 5000]#, 10000, 25000, 50000]
 
 tabenc = TableEncoder()
 
@@ -52,10 +63,12 @@ stat = pd.DataFrame(
         'n_tables', 
         'n_tables (% sloth_tables)', 
         'n_tables (% train_tables)',
+        'total processed embeddings',
         'batch_size',
         'add_label',
         'remobe_numbers',
         'with_metadatas',
+        'metadata_format',
         'reading time (s)',
         'reading time (%)',
         'rebuilding time (s)',
@@ -67,12 +80,12 @@ stat = pd.DataFrame(
         'total time (s)',
         'db size (GB)',
         'index size (GB)',
-        'db size / index size'
+        'db-over-index size fraction'
         ]
     )
 
 
-for id_test, (n_tables, add_label) in enumerate(itertools.product(n_tables_step, [True])):
+for id_test, (n_tables, add_label) in enumerate(itertools.product(n_tables_step, [False, True])):
     print(f'########## RUNNING TEST {id_test} --- n_tables {n_tables} --- add_label {add_label} ##########')
     db_name = f'v_{id_test}_{n_tables}'
     batch_size = 250
@@ -82,21 +95,23 @@ for id_test, (n_tables, add_label) in enumerate(itertools.product(n_tables_step,
                         settings=chromadb.config.Settings(anonymized_telemetry=False)
                         )
     
-    try: chroma_client.delete_collection('rows')
+    try: chroma_client.delete_collection('rows-columns')
     except: pass
-    finally: row_collection = chroma_client.create_collection('rows')
+    finally: 
+        rows_columns_collection = chroma_client.create_collection(
+            name='rows-columns',
+            metadata={"hnsw:space": "cosine"}
+        )
     
-    try: chroma_client.delete_collection('columns')
-    except: pass
-    finally: column_collection = chroma_client.create_collection('columns')
-
     total_reading_time, total_rebuilding_time, total_embedding_time, total_storing_time = 0, 0, 0, 0
     total_read_tables = 0
+    total_processed_embeddings = 0
 
     start_test_time = time()
     with jsonlines.open(DefaultPath.data_path.wikitables + 'sloth_tables.jsonl') as reader:
         while total_read_tables < n_tables:
             batch = []
+            table_ids = []
             
             # reading tables for the current batch
             start_reading_time = time()
@@ -104,13 +119,12 @@ for id_test, (n_tables, add_label) in enumerate(itertools.product(n_tables_step,
             for table in reader:
                 j += 1
                 batch.append(table)
+                table_ids.append(table['_id'])
                 if j >= batch_size:
                     break
             end_reading_time = time()
             
             if DEBUG: print(f'Reading done: len(batch)={len(batch)}')
-
-            total_read_tables += len(batch)
 
             # rebuildings as dataframes
             start_rebuilding_time = time()
@@ -147,43 +161,52 @@ for id_test, (n_tables, add_label) in enumerate(itertools.product(n_tables_step,
                 print(f'len(row_emb)={len(row_emb)}')
                 print(f'len(col_emb)={len(col_emb)}')
 
-            metadatas = None #if not with_metadatas else [[] for i in range(len(embeddings))]
+            if with_metadatas:
+                metadatas = []
+                final_embeddings = []
+        
+                for i_table in range(len(batch)):
 
-            ids = \
-                [
-                    [
-                        [
-                            f"{batch[batch_table_idx]['_id']}#{row_id}" 
-                            for row_id in range(len(embeddings[batch_table_idx][0]))
-                        ],
-                        [
-                            f"{batch[batch_table_idx]['_id']}#{column_id}" 
-                            for column_id in range(len(embeddings[batch_table_idx][1]))
-                        ]
-                    ]
-                    for batch_table_idx in range(len(batch))
-                ]
+                    metadatas.extend([
+                        {
+                            'table': table_ids[i_table], 
+                            'is_row': True, 
+                            'idx': i_row
+                        } for i_row in range(embeddings[i_table][0].shape[0])])
+                    
+                    metadatas.extend([
+                        {
+                            'table': table_ids[i_table], 
+                            'is_row': False, 
+                            'idx': i_column
+                        } for i_column in range(embeddings[i_table][1].shape[0])])
+                    
+                    final_embeddings.extend(
+                        [emb for emb in embeddings[i_table][0].tolist() + embeddings[i_table][1].tolist()]
+                    )
+            ids = list(map(str, range(total_processed_embeddings, total_processed_embeddings + len(metadatas))))
+
             if DEBUG:
-                print(f'ids built: len(ids)={len(ids)}')
-                print(f'shape of ids: {[(len(id[0]), len(id[1])) for id in ids]}')
-                print(f'len row id = {len([row_id for id in ids for row_id in id[0]])}')
-                print(f'len col id = {len([col_id for id in ids for col_id in id[1]])}')
-                print(f'len row embeddings = {len([row_emb for embedding in embeddings for row_emb in embedding[0]])}')
-                print(f'len column embeddings = {len([row_emb for embedding in embeddings for row_emb in embedding[1]])}')
+                print(f'metadatas built: len(metadatas)={len(metadatas)}')
+                pprint(metadatas)
+                print(f'shape final embeddings: {len(final_embeddings)}')
+                print(f'len(final_embeddings[0]) = {len(final_embeddings[0])}')
+                print(f'len(final_embeddings[40]) = {len(final_embeddings[40])}')                      
 
-            row_collection.add(
-                ids=[row_id for id in ids for row_id in id[0]],
+            assert len(metadatas) == len(final_embeddings)
+            assert len(ids) == len(final_embeddings)
+            assert all([len(emb) == 300 for emb in final_embeddings])
+
+            rows_columns_collection.add(
+                ids=ids,
                 metadatas=metadatas,
-                embeddings=[row_emb.tolist() for embedding in embeddings for row_emb in embedding[0]]
-            )
-            
-            column_collection.add(
-                ids=[col_id for id in ids for col_id in id[1]],
-                metadatas=metadatas,
-                embeddings=[col_emb.tolist() for embedding in embeddings for col_emb in embedding[1]]
+                embeddings=final_embeddings
             )
 
             end_storing_time = time()
+
+            total_read_tables += len(batch)
+            total_processed_embeddings += len(final_embeddings)
 
             total_reading_time += end_reading_time - start_reading_time
             total_rebuilding_time += end_rebuilding_time - start_rebuilding_time
@@ -205,10 +228,12 @@ for id_test, (n_tables, add_label) in enumerate(itertools.product(n_tables_step,
         n_tables,
         n_tables * 100 / N_TOTAL_SLOTH_TABLES,
         n_tables * 100 / N_TOTAL_WIKITABLES,
+        total_processed_embeddings,
         batch_size,
         add_label,
         remove_numbers,
         with_metadatas,
+        metadata_format,
         total_reading_time,
         total_reading_time * 100/ total_time,
         total_rebuilding_time,
@@ -237,11 +262,12 @@ for id_test, (n_tables, add_label) in enumerate(itertools.product(n_tables_step,
         'total time (s)',
         'db size (GB)',
         'index size (GB)',
-        'db size / index size']:
+        'db-over-index size fraction']:
         stat[c] = stat[c].apply(lambda x: float(format(x, '.5f')))
     
     # avoid memory run out
-    os.system(f"rm -rf {DefaultPath.db_path.chroma + db_name}")
-    stat.to_csv(DefaultPath.data_path.wikitables + 'global_stat.csv', index=False)
+    if REMOVE_DATABASE_AT_EACH_STEP and n_tables not in KEEP_ONLY_DATABASES_WITH_n_tables:
+        os.system(f"rm -rf {DefaultPath.db_path.chroma + db_name}")
+    stat.to_csv(DefaultPath.data_path.wikitables + STATISTICS_FILENAME, index=False)
 
 
