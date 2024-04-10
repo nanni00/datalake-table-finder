@@ -7,6 +7,7 @@ import pandas as pd
 
 import warnings
 warnings.filterwarnings('ignore')
+import tqdm
 
 import compress_fasttext
 import fasttext
@@ -215,7 +216,7 @@ def compare_embeddings(df1: pd.DataFrame, df2: pd.DataFrame,
 
     comparisons = pd.DataFrame(columns=['DF1', 'DF2'] + columns)
 
-    for i in range(len(embeddings1[0])):
+    for i in tqdm.tqdm(range(len(embeddings1[0]))):
         for j in range(len(embeddings2[0])):
             cosim = []
             for k in range(len(columns)):
