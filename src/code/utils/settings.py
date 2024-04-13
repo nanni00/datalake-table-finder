@@ -1,5 +1,3 @@
-
-
 _root_path = '/home/giovanni/unimore/TESI/src/'
 
 
@@ -18,6 +16,9 @@ class _ModelPath:
 class _DBPath:
     base =                  _root_path + 'db/'
     chroma =                _root_path + 'db/chroma/'
+    faiss =                 _root_path + 'db/faiss/'
+
+
 
 class DefaultPath:
     model_path = _ModelPath
