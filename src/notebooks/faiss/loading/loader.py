@@ -39,23 +39,33 @@ stat_fields = [
     'column batch timestep'
 ]
 
+if __name__ == '__main__':
+    print('Running as main.')
+    test_id = 0
+    n_tables_read = 50000
+    add_label = True
+    batch_size = 500
+    to_remove = False
+    JSONL_TABLE_FILE = DefaultPath.data_path.wikitables + 'threshold_r5-c2-a50/sloth-tables-r5-c2-a50.jsonl'
+    version = 'vCastorp'
+else:
+    if len(sys.argv) != 8:
+        print(f'Error: usage is python {sys.argv[0]} <test_id> <n_tables_read> <add_label> <batch_size> <to_remove> <jsonl_table_file> <version>')
+        sys.exit(0)
+    print('Test called.')
+    test_id =           sys.argv[1]
+    n_tables_read =     eval(sys.argv[2])
+    add_label =         eval(sys.argv[3])
+    batch_size =        eval(sys.argv[4]) # #vectors passed to the index each time
+    to_remove =         eval(sys.argv[5])
+    JSONL_TABLE_FILE =  sys.argv[6]
+    version =           sys.argv[7]
 
-if len(sys.argv) != 6:
-    print(f'Error: usage is python {sys.argv[0]} <test_id> <n_tables_read> <add_label> <batch_size> <to_remove>')
-    sys.exit(0)
-
-test_id =       sys.argv[1]
-n_tables_read = eval(sys.argv[2])
-add_label =     eval(sys.argv[3])
-batch_size =    eval(sys.argv[4]) # #vectors passed to the index each time
-to_remove =     eval(sys.argv[5])
 
 metric = 'L2'
-
-version = 'v1-testing-lut/'
 db_name = f"{test_id}_{n_tables_read}_add_label_{add_label}_{metric}"
 
-DB_ROOT_PATH =          DefaultPath.db_path.faiss + version + f'{db_name}/'
+DB_ROOT_PATH =          DefaultPath.db_path.faiss + version + os.path.sep + f'{db_name}/'
 ROW_INDEX_FILEPATH =    DB_ROOT_PATH + 'row_index.index'
 COLUMN_INDEX_FILEPATH = DB_ROOT_PATH + 'column_index.index'
 ROW_LUT_FILEPATH =      DB_ROOT_PATH + 'row_lut.json'
@@ -70,8 +80,8 @@ if os.path.exists(DB_ROOT_PATH):
 else:
     os.mkdir(DB_ROOT_PATH)
 
-STATISTICS_FILENAME =   DefaultPath.data_path.wikitables + 'faiss_stat/v1_3.csv'
-
+STATISTICS_FILENAME =   DefaultPath.data_path.wikitables + f'faiss_stat/{version}.csv'
+JSON_STAT_FILEPATH =    DB_ROOT_PATH + 'info_metadata.json'
 
 # using a better fastText version
 # model_name = 'ft_cc.en.300_freqprune_400K_100K_pq_300.bin'
@@ -110,7 +120,7 @@ print(f"##################### RUNNING TEST {test_id} : n_tables_read {n_tables_r
 
 start_test_time = time()
 
-with jsonlines.open(DefaultPath.data_path.wikitables + 'sloth_tables.jsonl') as reader:
+with jsonlines.open(JSONL_TABLE_FILE) as reader:
     
     while n_tables_really_read < n_tables_read:
         n_batch_row_emb = 0
@@ -119,7 +129,8 @@ with jsonlines.open(DefaultPath.data_path.wikitables + 'sloth_tables.jsonl') as 
         batch_col_emb = None
 
         start_batch_preindex_time = time()
-        while (n_tables_really_read < n_tables_read) and (n_batch_row_emb < batch_size) and (n_batch_column_emb < batch_size) and (json_table := reader.read()):
+        for json_table in reader:
+        # while (n_tables_really_read < n_tables_read) and (n_batch_row_emb < batch_size) and (n_batch_column_emb < batch_size) and (json_table := reader.read()):
             print(f"{round(time() - start_test_time)}: read tables: {n_tables_really_read} ({round(n_tables_really_read * 100 / n_tables_read, 3)}%)", end='\r')
             table = rebuild_table(json_table)
             n_tables_really_read += 1
@@ -142,8 +153,13 @@ with jsonlines.open(DefaultPath.data_path.wikitables + 'sloth_tables.jsonl') as 
             batch_col_emb = column_embeddings if batch_col_emb is None else np.concatenate([batch_col_emb, column_embeddings])
             total_concatenate_time += (time() - start_concatenate_time)
 
-        total_preindex_time += (time() - start_batch_preindex_time)
+            if (n_tables_really_read >= n_tables_read - 1) or (n_batch_row_emb >= batch_size) or (n_batch_column_emb >= batch_size):
+                break
 
+
+        total_preindex_time += (time() - start_batch_preindex_time)
+        if batch_row_emb is None or batch_col_emb is None:
+            break  
         start_row_index_time = time()
         row_index.add(batch_row_emb)
         total_row_index_time += (time() - start_row_index_time)
@@ -206,7 +222,7 @@ stat_fields = [
 
 stat_record = [
     test_id,                                                                        # test_id
-    n_tables_read,                                                                  # n_tables_read
+    n_tables_really_read,                                                                  # n_tables_read
     n_row_embeddings,                                                               # n_row_embeddings
     n_column_embeddings,                                                            # n_column_embeddings
     model_name,                                                                     # module name
@@ -236,6 +252,11 @@ stat_record = [
     row_batch_timesteps,
     column_batch_timesteps
 ]
+
+info_to_json = dict(zip(stat_fields, stat_record))
+with open(JSON_STAT_FILEPATH) as writer:
+    json.dump(info_to_json, writer)
+
 
 if os.path.exists(STATISTICS_FILENAME):
     stat = pd.read_csv(STATISTICS_FILENAME)

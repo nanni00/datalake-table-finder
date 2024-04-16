@@ -13,5 +13,5 @@ for id_test, (n, add_label, batch_size) in enumerate(product(n_tables, [True], b
     # to_remove = n < 25000
     if n < 10000 and batch_size > 10000: continue
 
-    os.system(f"python analysis_loading_v1.py {id_test} {n} {add_label} {batch_size} {to_remove}")
+    os.system(f"python loader.py {id_test} {n} {add_label} {batch_size} {to_remove}")
 

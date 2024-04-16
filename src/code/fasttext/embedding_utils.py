@@ -24,12 +24,12 @@ def my_tokenizer(s: str, remove_numbers=False):
     s = str(s)
     if not remove_numbers:
         return [            
-            x for x in re.findall(r'\b([a-z]+|\d{1}|\d{2}|\d{3}|\d{4})\b', s.lower()) 
+            x for x in re.findall(r'\b([a-zA-z]+|\d{1}|\d{2}|\d{3}|\d{4})\b', s) 
             if x not in stopwords_set
         ]
     else:
         return [
-            x for x in re.findall(r'[a-z]+', s.lower())
+            x for x in re.findall(r'[a-z]+', s)
             if x not in stopwords_set
         ]
 
@@ -51,11 +51,12 @@ def drop_columns_with_only_nan(df: pd.DataFrame, threshold:float=0.8):
 
 class TableEncoder:
     available_models = {
-        'cc.en.300.compressed.bin': '/home/giovanni/unimore/TESI/src/models/fastText/cc.en.300.compressed.bin'
+        'cc.en.300.compressed': '/home/giovanni/unimore/TESI/src/models/fastText/cc.en.300.compressed.bin',
+        'ft_cc.en.300_freqprune_400K_100K_pq_300': '/home/giovanni/unimore/TESI/src/models/fastText/ft_cc.en.300_freqprune_400K_100K_pq_300.bin'
     }
 
     def __init__(self, 
-                 model: str|compress_fasttext.compress.CompressedFastTextKeyedVectors|fasttext.FastText._FastText|None='cc.en.300.compressed.bin',
+                 model: str|compress_fasttext.compress.CompressedFastTextKeyedVectors|fasttext.FastText._FastText|None='cc.en.300.compressed',
                  model_path: str|None=None
                  ):
 
@@ -191,7 +192,9 @@ def compare_embeddings(df1: pd.DataFrame, df2: pd.DataFrame,
                           sort_by_cosine_similarity:bool=True,
                           add_label:bool|List[bool]=False,
                           remove_numbers:bool|List[bool]=False,
-                          delta:bool=False
+                          delta:bool=False,
+                          show_progress=False,
+                          leave_progress_bar=False
                           ) -> pd.DataFrame:
     """
     Compare column/row embeddings of two datasets. Each embedding of df1 is compared with 
@@ -216,7 +219,7 @@ def compare_embeddings(df1: pd.DataFrame, df2: pd.DataFrame,
 
     comparisons = pd.DataFrame(columns=['DF1', 'DF2'] + columns)
 
-    for i in tqdm.tqdm(range(len(embeddings1[0]))):
+    for i in tqdm.tqdm(range(len(embeddings1[0])), disable=not show_progress, leave=leave_progress_bar):
         for j in range(len(embeddings2[0])):
             cosim = []
             for k in range(len(columns)):
