@@ -10,42 +10,9 @@ warnings.filterwarnings('ignore')
 import tqdm
 
 import compress_fasttext
-import fasttext
+# import fasttext
 
-from nltk.corpus import stopwords
-
-# tr = str.maketrans('', '', string.punctuation.replace('-', '')) # to keep minus sign
-stopwords_set = set(stopwords.words('english'))
-
-
-def my_tokenizer(s: str, remove_numbers=False):
-    #if type(s) is not str:
-    #    return str(s)
-    s = str(s)
-    if not remove_numbers:
-        return [            
-            x for x in re.findall(r'\b([a-zA-z]+|\d{1}|\d{2}|\d{3}|\d{4})\b', s) 
-            if x not in stopwords_set
-        ]
-    else:
-        return [
-            x for x in re.findall(r'[a-z]+', s)
-            if x not in stopwords_set
-        ]
-
-
-def np_cosine_similarity(a1, a2):
-    return np.dot(a1, a2) / (np.linalg.norm(a1) * np.linalg.norm(a2))
-
-
-def drop_columns_with_only_nan(df: pd.DataFrame, threshold:float=0.8):
-    to_drop = []
-    for col in df.columns:
-        if df[col].notna().shape[0] < df[col].shape[0] * threshold:
-            to_drop.append(col)
-    
-    return df.drop(to_drop, axis=1)
-
+from code.utils.utils import *
 
 
 
@@ -56,7 +23,7 @@ class TableEncoder:
     }
 
     def __init__(self, 
-                 model: str|compress_fasttext.compress.CompressedFastTextKeyedVectors|fasttext.FastText._FastText|None='cc.en.300.compressed',
+                 model: str|compress_fasttext.compress.CompressedFastTextKeyedVectors|None='cc.en.300.compressed',
                  model_path: str|None=None
                  ):
 
@@ -224,7 +191,7 @@ def compare_embeddings(df1: pd.DataFrame, df2: pd.DataFrame,
             cosim = []
             for k in range(len(columns)):
                 cosim.append(
-                    np_cosine_similarity(embeddings1[k][i], embeddings2[k][j])
+                    cosine_similarity(embeddings1[k][i], embeddings2[k][j])
                 )
             
             idx_i, idx_j = (df1.columns[i], df2.columns[j]) if on == 'columns' else (i, j)

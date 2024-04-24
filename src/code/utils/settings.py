@@ -1,10 +1,13 @@
-_root_path = '/home/giovanni/unimore/TESI/src/'
+import os
+
+# remember to set the env variable TESI_ROOT_PATH 
+_root_path = '/home/giovanni/unimore/tesi-magistrale/src/' # os.environ['TESI_SRC_PATH']
 
 
 class _DataPath:
     base =                  _root_path + 'data/'
     mywikitables =          _root_path + 'data/my_wikitables/'
-    wikitables =            _root_path + 'data/wikitables/'
+    wikitables =            _root_path + 'data/turl_sloth_wikitables/'
 
 
 class _ModelPath:

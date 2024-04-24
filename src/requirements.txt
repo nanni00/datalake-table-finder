@@ -1,0 +1,10 @@
+numpy
+pandas
+polars
+jsonlines
+nltk
+tqdm
+compress-fasttext
+
+chromadb
+# faiss
