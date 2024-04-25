@@ -12,7 +12,7 @@ conf = pyspark.SparkConf() \
 
 spark_context = pyspark.SparkContext(conf=conf)
 
-ROOT_TEST_DIR = DefaultPath.data_path.wikitables + 'threshold_r5-c2-a50/'
+ROOT_TEST_DIR = DefaultPath.data_path.wikitables + 'threshold_r5-c2-a50/josie-test'
 
 input_set_file = ROOT_TEST_DIR + 'sloth_tables_n10.set'
 output_raw_tokens_file = ROOT_TEST_DIR + 'sloth_tables_n10.raw-token'
