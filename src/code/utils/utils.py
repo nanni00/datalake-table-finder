@@ -1,3 +1,4 @@
+import os
 import re 
 import numpy as np
 import pandas as pd
@@ -7,7 +8,7 @@ from nltk.corpus import stopwords
 # tr = str.maketrans('', '', string.punctuation.replace('-', '')) # to keep minus sign
 
 try:
-    nltk.data.find('stopwords')
+    nltk.data.find('stopwords', f"{os.environ['HOME']}/nltk_data")
 except LookupError:
     nltk.download('stopwords')
     
