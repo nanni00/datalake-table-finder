@@ -1,12 +1,129 @@
-import os
-from pprint import pprint
-import sys
-import pyspark
 import mmh3
-import pyspark.storagelevel
+import spacy
+import pyspark
+import jsonlines
+import pandas as pd
+from pandas.api.types import is_numeric_dtype
+
 from code.utils.settings import DefaultPath
+from code.utils.utils import print_info, rebuild_table, my_tokenizer
 
 
+
+def _infer_column_type(column: list, check_column_threshold:int=3, nlp=None|spacy.Language) -> str:
+    NUMERICAL_NER_TAGS = {'DATE', 'TIME', 'PERCENT', 'MONEY', 'QUANTITY', 'CARDINAL'}
+    parsed_values = nlp.pipe(column)
+    ner_tags = {token.ent_type_ for cell in parsed_values for token in cell}
+    ner_tags = (ner_tags.pop() for _ in range(check_column_threshold))
+    rv = sum(1 if tag in NUMERICAL_NER_TAGS else -1 for tag in ner_tags)
+    return 'real' if rv > 0 else 'text'
+    
+
+def _create_set_with_inferring_column_dtype(df: pd.DataFrame, check_column_threshold:int=3, nlp=None|spacy.Language):
+    tokens_set = set()
+    for i in range(len(df.columns)):
+        try:
+            if is_numeric_dtype(df.iloc[:, i]) or _infer_column_type(df.iloc[:, i].to_list()) == 'real':
+                continue
+        except: # may give error with strange tables
+            continue
+        for token in df.iloc[:, i].unique():
+            tokens_set.add(token)
+
+    return tokens_set
+
+
+def _create_set_with_my_tokenizer(df: pd.DataFrame):
+    tokens_set = set()
+    for i in range(len(df.columns)):
+        if is_numeric_dtype(df.iloc[:, i]):
+            continue
+        for token in df.iloc[:, i].unique():
+            for t in my_tokenizer(token, remove_numbers=True):
+                tokens_set.add(t.lower())
+
+    return tokens_set
+
+
+@print_info(msg_before='Extracting intitial sets...', msg_after='Completed.', time=True)
+def extract_starting_sets_from_tables(tables_file, final_set_file, ntables_to_load_as_set=10, with_:str='mytok', **kwargs):
+    if with_ not in {'mytok', 'infer'}:
+        raise AttributeError(f"Parameter with_ must be a value in {{'mytok', 'infer'}}")
+    if with_ == 'infer':
+        nlp = spacy.load('en_core_web_sm')
+
+    with jsonlines.open(tables_file) as table_reader:
+        with open(final_set_file, 'w') as set_writer:
+            for i, json_table in enumerate(table_reader):
+                if i >= ntables_to_load_as_set:
+                    break                
+                table = rebuild_table(json_table).convert_dtypes()
+                if with_ == 'mytok':
+                    table_set = _create_set_with_my_tokenizer(table)
+                else:
+                    table_set = _create_set_with_inferring_column_dtype(table, nlp=nlp, **kwargs)
+                set_writer.write(
+                    str(i) + ',' + ','.join(table_set) + '\n'
+                )
+                # print(i, len(table_set))
+
+
+@print_info(msg_before='Creating raw tokens...', msg_after='Completed.')
+def create_raw_tokens(input_set_file, output_raw_tokens_file, single_txt=True, spark_context=None):
+    if not spark_context:
+        conf = pyspark.SparkConf() \
+            .setAppName('CreateIndex') \
+                # .set('spark.executor.memory', '100g') \
+                # .set('spark.driver.memory', '5g')
+        spark_context = pyspark.SparkContext(conf=conf)
+    
+    skip_tokens = set()
+
+    sets = spark_context.textFile(input_set_file) \
+        .map(
+            lambda line: line.split(',')
+        ) \
+        .map(
+            lambda line: (
+                int(line[0]),
+                [token for token in line[1:] if token not in skip_tokens]
+        )
+    )
+
+    if single_txt:
+        sets = sets \
+            .flatMap(
+                lambda sid_tokens: \
+                    [
+                        (token, sid_tokens[0]) 
+                        for token in sid_tokens[1]
+                    ]
+                ) \
+                    .map(
+                        lambda token_sid: f'{token_sid[0]} {token_sid[1]}\n'
+                    ).collect()
+        with open(output_raw_tokens_file, 'w') as f:
+            f.writelines(sets)
+    else:
+        sets \
+            .flatMap(
+                lambda sid_tokens: 
+                    [
+                        (token, sid_tokens[0]) 
+                        for token in sid_tokens[1]
+                    ]
+                ) \
+                    .map(
+                        lambda token_sid: f'{token_sid[0]} {token_sid[1]}'
+                    ).saveAsTextFile(output_raw_tokens_file)
+
+
+
+
+
+
+
+@print_info(msg_before='Creating integer sets and inverted index...', msg_after='Completed.', time=True)
 def create_index(input_set_file, output_integer_set_file, output_inverted_list_file, spark_context=None):
     if not spark_context:
         conf = pyspark.SparkConf() \
@@ -19,7 +136,7 @@ def create_index(input_set_file, output_integer_set_file, output_inverted_list_f
     skip_tokens = set()
 
     # STAGE 1: BUILD TOKEN TABLE
-    print('STAGE 1: BUILD TOKEN TABLE')
+    # print('STAGE 1: BUILD TOKEN TABLE')
     # Load sets and filter out removed token
     sets = spark_context \
         .textFile(input_set_file) \
@@ -132,7 +249,7 @@ def create_index(input_set_file, output_integer_set_file, output_inverted_list_f
 
     # STAGE 2: CREATE INTEGER SETS
     # Create sets and replace text tokens with token index
-    print('STAGE 2: CREATE INTEGER SETS')
+    # print('STAGE 2: CREATE INTEGER SETS')
 
     integer_sets = posting_lists_with_group_ids \
         .flatMap(
@@ -153,7 +270,7 @@ def create_index(input_set_file, output_integer_set_file, output_inverted_list_f
     # Create new posting lists and join the previous inverted
     # lists to obtain the final posting lists with all the information
 
-    print('STAGE 3: CREATE THE FINAL POSTING LISTS')
+    # print('STAGE 3: CREATE THE FINAL POSTING LISTS')
 
     posting_lists = integer_sets \
         .flatMap(
@@ -182,16 +299,33 @@ def create_index(input_set_file, output_integer_set_file, output_inverted_list_f
 
     # STAGE 4: SAVE INTEGER SETS AND FINAL POSTING LISTS
 
-    print('STAGE 4: SAVE INTEGER SETS AND FINAL POSTING LISTS')
+    # print('STAGE 4: SAVE INTEGER SETS AND FINAL POSTING LISTS')
+    def sets_format_string(t):
+        sid, indices = t
+        return "{}|{}|{}|{{{}}}\n".format(sid, len(indices), len(indices), ','.join(map(str, indices)))
+
     integer_sets = integer_sets.map(
         # (sid, indices)
-        lambda t: f"{t[0]} {' '.join(map(str, t[1]))}\n"
+        lambda t: sets_format_string(t) #f"{t[0]}, {','.join(map(str, t[1]))}\n"
     ).collect() #.saveAsTextFile(output_integer_set_file)
 
 
+    def postlist_format_string(t):
+        token, raw_token, gid, sets = t
+        freq = len(sets)
+        set_ids = ','.join([str(s[0]) for s in sets])
+        set_sizes = ','.join([str(s[1]) for s in sets])
+        set_pos = ','.join([str(s[2]) for s in sets])
+
+        return "{}|{}|{}|{}|{{{}}}|{{{}}}|{{{}}}|{}\n" \
+            .format(
+                token, freq, gid, 1, set_ids, set_sizes, set_pos, bytes(raw_token.encode('utf-8'))
+            )
+
     posting_lists = posting_lists.map(
         # token, rawToken, gid, sets
-        lambda t: f"{t[0]} {t[1]} {t[2]} {' '.join(map(str, t[3]))}\n"
+        # lambda t: f"{t[0]} {t[1]} {t[2]} {' '.join(map(str, t[3]))}\n"
+        lambda t: postlist_format_string(t)
     ).collect() # .saveAsTextFile(output_inverted_list_file)
 
 

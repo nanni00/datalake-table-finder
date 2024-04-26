@@ -1,19 +1,39 @@
 import os
-import re 
+import re
+from time import time 
 import numpy as np
 import pandas as pd
 import nltk
-from nltk.corpus import stopwords
 
 # tr = str.maketrans('', '', string.punctuation.replace('-', '')) # to keep minus sign
 
 try:
-    nltk.data.find('stopwords', f"{os.environ['HOME']}/nltk_data")
+    # nltk.data.find('stopwords', f"{os.environ['HOME']}/nltk_data")
+    from nltk.corpus import stopwords
 except LookupError:
     nltk.download('stopwords')
+    from nltk.corpus import stopwords
     
 stopwords_set = set(stopwords.words('english'))
 
+
+
+def print_info(**dec_kwargs):
+    def decorator(func):
+        def wrapper(*args, **kwargs):
+            if 'msg_before' in dec_kwargs: print(dec_kwargs['msg_before'])
+            start = time()
+            
+            results = func(*args, **kwargs)
+            
+            end = time()
+
+            if 'time' in dec_kwargs: 
+                print(f'Elapsed time: {round(end - start, 3)}s')
+            if 'msg_after' in dec_kwargs: print(dec_kwargs['msg_after'])
+            return results
+        return wrapper
+    return decorator
 
 
 def round_to(n, precision):
