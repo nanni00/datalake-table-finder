@@ -1,7 +1,11 @@
+import binascii
+import re
 import mmh3
 import spacy
+import random
 import pyspark
 import jsonlines
+import numpy as np
 import pandas as pd
 from pandas.api.types import is_numeric_dtype
 
@@ -12,9 +16,13 @@ from code.utils.utils import print_info, rebuild_table, my_tokenizer
 
 def _infer_column_type(column: list, check_column_threshold:int=3, nlp=None|spacy.Language) -> str:
     NUMERICAL_NER_TAGS = {'DATE', 'TIME', 'PERCENT', 'MONEY', 'QUANTITY', 'CARDINAL'}
-    parsed_values = nlp.pipe(column)
+    # column = set(column)
+    if '' in column: column.remove('')
+    idxs = range(0, len(column) - 1) if len(column) <= check_column_threshold else random.sample(range(0, len(column)), check_column_threshold)
+    
+    parsed_values = nlp.pipe([column[i] for i in idxs])
     ner_tags = {token.ent_type_ for cell in parsed_values for token in cell}
-    ner_tags = (ner_tags.pop() for _ in range(check_column_threshold))
+    
     rv = sum(1 if tag in NUMERICAL_NER_TAGS else -1 for tag in ner_tags)
     return 'real' if rv > 0 else 'text'
     
@@ -22,15 +30,12 @@ def _infer_column_type(column: list, check_column_threshold:int=3, nlp=None|spac
 def _create_set_with_inferring_column_dtype(df: pd.DataFrame, check_column_threshold:int=3, nlp=None|spacy.Language):
     tokens_set = set()
     for i in range(len(df.columns)):
-        try:
-            if is_numeric_dtype(df.iloc[:, i]) or _infer_column_type(df.iloc[:, i].to_list()) == 'real':
-                continue
-        except: # may give error with strange tables
+        if is_numeric_dtype(df.iloc[:, i]) or _infer_column_type(df.iloc[:, i].unique().tolist(), check_column_threshold, nlp) == 'real':
             continue
         for token in df.iloc[:, i].unique():
             tokens_set.add(token)
-
     return tokens_set
+
 
 
 def _create_set_with_my_tokenizer(df: pd.DataFrame):
@@ -83,11 +88,11 @@ def create_raw_tokens(input_set_file, output_raw_tokens_file, single_txt=True, s
         .map(
             lambda line: line.split(',')
         ) \
-        .map(
-            lambda line: (
-                int(line[0]),
-                [token for token in line[1:] if token not in skip_tokens]
-        )
+            .map(
+                lambda line: (
+                    int(line[0]),
+                    [token for token in line[1:] if token not in skip_tokens]
+            )
     )
 
     if single_txt:
@@ -116,11 +121,6 @@ def create_raw_tokens(input_set_file, output_raw_tokens_file, single_txt=True, s
                     .map(
                         lambda token_sid: f'{token_sid[0]} {token_sid[1]}'
                     ).saveAsTextFile(output_raw_tokens_file)
-
-
-
-
-
 
 
 @print_info(msg_before='Creating integer sets and inverted index...', msg_after='Completed.', time=True)
@@ -177,13 +177,21 @@ def create_index(input_set_file, output_integer_set_file, output_inverted_list_f
     posting_lists_sorted = token_sets \
         .groupByKey() \
             .map(
-            lambda token_sids: (token_sids[0], sorted(list(token_sids[1])))
+                # t: (token, setIDs)
+                lambda t: (t[0], sorted(list(t[1])))
             ) \
                 .map(
-                    lambda token_sids: (token_sids[0], token_sids[1], mmh3.hash_bytes(bytes(token_sids[1]))) # is ok?
+                    # t: (token, setIDs)
+                    lambda t: \
+                        (
+                            t[0], 
+                            t[1], 
+                            mmh3.hash_bytes(np.array(t[1]))
+                        ) # is ok?
                 ) \
                     .sortBy(
-                        lambda tok_sids_hash: (len(tok_sids_hash[1]), tok_sids_hash[2], tok_sids_hash[1])
+                        # t: (token, setIDs, hash)
+                        lambda t: (len(t[1]), t[2], t[1])
                     ) \
                         .zipWithIndex() \
                             .map(
@@ -269,6 +277,21 @@ def create_index(input_set_file, output_integer_set_file, output_inverted_list_f
     # STAGE 3: CREATE THE FINAL POSTING LISTS
     # Create new posting lists and join the previous inverted
     # lists to obtain the final posting lists with all the information
+    def sets_format_string(t):
+        sid, indices = t
+        return "{}|{}|{}|{{{}}}".format(sid, len(indices), len(indices), ','.join(map(str, indices)))
+
+    def postlist_format_string(t):
+        token, raw_token, gid, sets = t
+        freq = len(sets)
+        set_ids = ','.join([str(s[0]) for s in sets])
+        set_sizes = ','.join([str(s[1]) for s in sets])
+        set_pos = ','.join([str(s[2]) for s in sets])
+
+        return "{}|{}|{}|{}|{{{}}}|{{{}}}|{{{}}}|{}" \
+            .format(
+                token, freq, gid, 1, set_ids, set_sizes, set_pos, binascii.hexlify(bytes(str(raw_token), 'utf-8'))
+            )
 
     # print('STAGE 3: CREATE THE FINAL POSTING LISTS')
 
@@ -295,33 +318,27 @@ def create_index(input_set_file, output_integer_set_file, output_inverted_list_f
                         .map(
                             # (token, (sets, (gid, rawToken, _)))
                             lambda t: (t[0], t[1][1][1], t[1][1][0], t[1][0])
-                        )
-
+                        ) \
+                            .map(
+                                lambda t: postlist_format_string(t)
+                            )
+    
     # STAGE 4: SAVE INTEGER SETS AND FINAL POSTING LISTS
-
     # print('STAGE 4: SAVE INTEGER SETS AND FINAL POSTING LISTS')
-    def sets_format_string(t):
-        sid, indices = t
-        return "{}|{}|{}|{{{}}}\n".format(sid, len(indices), len(indices), ','.join(map(str, indices)))
 
+    integer_sets.map(
+        lambda t: sets_format_string(t)
+    ).saveAsTextFile(output_integer_set_file)
+
+    posting_lists.saveAsTextFile(output_inverted_list_file)
+
+    """
     integer_sets = integer_sets.map(
         # (sid, indices)
         lambda t: sets_format_string(t) #f"{t[0]}, {','.join(map(str, t[1]))}\n"
     ).collect() #.saveAsTextFile(output_integer_set_file)
 
-
-    def postlist_format_string(t):
-        token, raw_token, gid, sets = t
-        freq = len(sets)
-        set_ids = ','.join([str(s[0]) for s in sets])
-        set_sizes = ','.join([str(s[1]) for s in sets])
-        set_pos = ','.join([str(s[2]) for s in sets])
-
-        return "{}|{}|{}|{}|{{{}}}|{{{}}}|{{{}}}|{}\n" \
-            .format(
-                token, freq, gid, 1, set_ids, set_sizes, set_pos, bytes(raw_token.encode('utf-8'))
-            )
-
+            
     posting_lists = posting_lists.map(
         # token, rawToken, gid, sets
         # lambda t: f"{t[0]} {t[1]} {t[2]} {' '.join(map(str, t[3]))}\n"
@@ -334,10 +351,10 @@ def create_index(input_set_file, output_integer_set_file, output_inverted_list_f
     with open(output_integer_set_file, 'w') as f:
         f.writelines(integer_sets) 
 
-
     with open(output_inverted_list_file, 'w') as f:
         f.writelines(posting_lists) 
 
+    """
 
 if __name__ == '__main__':
     ROOT_TEST_DIR = DefaultPath.data_path.wikitables + 'threshold_r5-c2-a50/josie-test/'
