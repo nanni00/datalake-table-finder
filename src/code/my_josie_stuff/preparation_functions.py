@@ -1,13 +1,13 @@
-import binascii
-import re
 import mmh3
 import spacy
 import random
 import pyspark
+import binascii
 import jsonlines
 import numpy as np
 import pandas as pd
 from pandas.api.types import is_numeric_dtype
+from tqdm import tqdm
 
 from code.utils.settings import DefaultPath
 from code.utils.utils import print_info, rebuild_table, my_tokenizer
@@ -51,17 +51,22 @@ def _create_set_with_my_tokenizer(df: pd.DataFrame):
 
 
 @print_info(msg_before='Extracting intitial sets...', msg_after='Completed.', time=True)
-def extract_starting_sets_from_tables(tables_file, final_set_file, ntables_to_load_as_set=10, with_:str='mytok', **kwargs):
+def extract_starting_sets_from_tables(tables_file, 
+                                      final_set_file,
+                                      id_table_file,
+                                      ntables_to_load_as_set=10, with_:str='mytok', **kwargs):
     if with_ not in {'mytok', 'infer'}:
         raise AttributeError(f"Parameter with_ must be a value in {{'mytok', 'infer'}}")
     if with_ == 'infer':
         nlp = spacy.load('en_core_web_sm')
+    
+    id_table = pd.DataFrame(columns=['josieID', 'slothID'])
 
     with jsonlines.open(tables_file) as table_reader:
         with open(final_set_file, 'w') as set_writer:
-            for i, json_table in enumerate(table_reader):
+            for i, json_table in tqdm(enumerate(table_reader), total=ntables_to_load_as_set):
                 if i >= ntables_to_load_as_set:
-                    break                
+                    break
                 table = rebuild_table(json_table).convert_dtypes()
                 if with_ == 'mytok':
                     table_set = _create_set_with_my_tokenizer(table)
@@ -70,7 +75,10 @@ def extract_starting_sets_from_tables(tables_file, final_set_file, ntables_to_lo
                 set_writer.write(
                     str(i) + ',' + ','.join(table_set) + '\n'
                 )
+                id_table.loc[len(id_table)] = [i, json_table['_id']]
                 # print(i, len(table_set))
+    
+    id_table.to_csv(id_table_file, index=False)
 
 
 @print_info(msg_before='Creating raw tokens...', msg_after='Completed.')

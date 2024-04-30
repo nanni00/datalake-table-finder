@@ -11,8 +11,21 @@ _SET_IDXNAME = 'sets_id_idx'
 _INVERTED_LISTS_IDXNAME = 'inverted_lists_token_idx'
 
 
-@print_info(msg_before='Creating database tables...', msg_after='Completed.')
-def create_tables(db:psycopg.Cursor, prefix:str=None):
+@print_info(msg_before='Dropping database...', msg_after='Completed.')
+def drop_database(db:psycopg.Cursor, dbname:str):
+    db.execute(f""" 
+               SELECT 'DROP DATABASE {dbname}' 
+               WHERE EXISTS (SELECT FROM pg_database WHERE datname = '{dbname}'); """)
+
+@print_info(msg_before='Creating database...', msg_after='Completed.')
+def create_db(db:psycopg.Cursor, dbname:str):
+    db.execute(f""" 
+               SELECT 'CREATE DATABASE {dbname}' 
+               WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = '{dbname}'); """)
+
+
+@print_info(msg_before='Dropping tables...', msg_after='Completed.')
+def drop_tables(db:psycopg.Cursor, prefix:str=None):
     prefix = prefix + '_' if prefix else ''
     
     db.execute(
@@ -21,6 +34,17 @@ def create_tables(db:psycopg.Cursor, prefix:str=None):
         """        
     )
 
+    db.execute(
+        f"""
+        DROP TABLE IF EXISTS {prefix}{_SET_TNAME};
+        """        
+    )
+
+
+@print_info(msg_before='Creating database tables...', msg_after='Completed.')
+def create_tables(db:psycopg.Cursor, prefix:str=None):
+    prefix = prefix + '_' if prefix else ''
+    
     db.execute(
         f"""              
         CREATE TABLE {prefix}{_INVERTED_LISTS_TNAME} (
@@ -34,12 +58,6 @@ def create_tables(db:psycopg.Cursor, prefix:str=None):
             raw_token bytea NOT NULL
         );        
         """
-    )
-
-    db.execute(
-        f"""
-        DROP TABLE IF EXISTS {prefix}{_SET_TNAME};
-        """        
     )
 
     db.execute(

@@ -75,3 +75,8 @@ def my_tokenizer(s: str, remove_numbers=False):
 
 def cosine_similarity(a1:np.array, a2:np.array):
     return np.dot(a1, a2) / (np.linalg.norm(a1) * np.linalg.norm(a2))
+
+
+def get_int_from_(s: str):
+    return [int(x) for x in re.findall(r'\d+', s)]
+    
