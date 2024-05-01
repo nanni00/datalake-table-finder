@@ -11,9 +11,8 @@ from code.my_josie_stuff.preparation_functions import extract_starting_sets_from
 from code.my_josie_stuff.josie_results_analysis import extract_from_josie_results_pairs_and_overlaps
 
 
-def do_test(n_tables=500, spark_context=None):
+def do_test(n_tables=500, spark_context=None, k=3):
     ############# SET UP #############
-    maindb = 'giovanni'
     dbname = f'sloth{n_tables}'
     table_db_prefix = dbname
 
@@ -89,7 +88,7 @@ def do_test(n_tables=500, spark_context=None):
             create_sets_index(cur, table_db_prefix)
             create_inverted_list_index(cur, table_db_prefix)
         conn.commit()
-
+    
     ############# RUNNING JOSIE #############
     josie_cmd_dir = '/home/giovanni/go/src/github.com/ekzhu/josie/cmd'
     os.chdir(josie_cmd_dir)
@@ -102,7 +101,8 @@ def do_test(n_tables=500, spark_context=None):
     os.system(f'go run {josie_cmd_dir}/topk/main.go \
               --pg-database={dbname} \
                 --benchmark={table_db_prefix} \
-                    --output={ROOT_TEST_DIR}')
+                    --output={ROOT_TEST_DIR} \
+                        --k={k}')
     
     ############# ANALYSING JOSIE RESULTS #############
     extract_from_josie_results_pairs_and_overlaps(josie_results_file, pairs_with_overlap_file)
@@ -115,6 +115,6 @@ if __name__ == '__main__':
     
     for n in [100, 1000, 10000]:        
         start = time()
-        do_test(n, spark_context)
+        do_test(n, spark_context, k=5)
         print(f'\n\n\nTotal time for n={n}: {round(time() - start, 3)}s', end='\n\n\n')
 
