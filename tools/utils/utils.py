@@ -1,8 +1,10 @@
 import os
 import re
-from time import time 
+from time import time
+from typing import Literal 
 import numpy as np
 import pandas as pd
+import polars as pl
 import nltk
 
 # tr = str.maketrans('', '', string.punctuation.replace('-', '')) # to keep minus sign
@@ -48,15 +50,38 @@ def round_to_05(n):
     return float(format(round_to(n, 0.05), ".2f"))
 
 
-def rebuild_table(table):
-    return pd.DataFrame(
-        data=[
-            [entry_data['text'] 
-             for entry_data in entry]
-            for entry in table['tableData']
-        ],
-        columns=table['tableHeaders'][0]
-        )
+def rebuild_table(table, mode:Literal['pandas', 'polars', 'polars.lazy']='pandas'):
+    if mode == 'pandas': 
+        return pd.DataFrame(
+            data=[
+                [entry_data['text'] 
+                 for entry_data in entry]
+                for entry in table['tableData']
+            ],
+            columns=table['tableHeaders'][0]
+            )
+    elif mode == 'polars':
+        return pl.DataFrame(
+            data=[
+                [entry_data['text'] 
+                 for entry_data in entry]
+                for entry in table['tableData']
+            ],
+            schema=table['tableHeaders'][0]
+            )
+    elif mode == 'polars.lazy':
+        s = table['tableHeaders'][0]
+        s = [c if s.count(c) == 1 else f'{c}#{i}' for i, c in enumerate(s)]
+        return pl.LazyFrame(
+            data=[
+                [entry_data['text'] 
+                 for entry_data in entry]
+                for entry in table['tableData']
+            ],
+            schema=s #table['tableHeaders'][0]
+            )
+    else:
+        raise ValueError(f'Unknown mode: {mode}')
 
 
 def my_tokenizer(s: str, remove_numbers=False):

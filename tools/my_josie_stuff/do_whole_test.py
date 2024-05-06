@@ -28,7 +28,7 @@ def do_test(n_tables=500, spark_context=None, k=3):
     josie_results_file =        ROOT_TEST_DIR + f'result_k_3.csv'
     josie_to_sloth_id_file =    ROOT_TEST_DIR + 'id_table.csv'
     pairs_with_overlap_file =   ROOT_TEST_DIR + f'pairs_overlap.csv'
-    
+
     if os.path.exists(ROOT_TEST_DIR):
         if input(f'Directory {ROOT_TEST_DIR} already exists: delete it to continue? (y/n) ') == 'y':
             os.system(f'rm -rf {ROOT_TEST_DIR}')
@@ -92,7 +92,7 @@ def do_test(n_tables=500, spark_context=None, k=3):
     ############# RUNNING JOSIE #############
     josie_cmd_dir = '/home/giovanni/go/src/github.com/ekzhu/josie/cmd'
     os.chdir(josie_cmd_dir)
-    
+
     os.system(f'go run {josie_cmd_dir}/sample_costs/main.go \
               --pg-database={dbname} \
                 --pg-table-queries={table_db_prefix}_sets \
@@ -105,7 +105,7 @@ def do_test(n_tables=500, spark_context=None, k=3):
                         --k={k}')
     
     ############# ANALYSING JOSIE RESULTS #############
-    extract_from_josie_results_pairs_and_overlaps(josie_results_file, pairs_with_overlap_file)
+    # extract_from_josie_results_pairs_and_overlaps(josie_results_file, pairs_with_overlap_file)
 
 
 if __name__ == '__main__':
@@ -113,7 +113,7 @@ if __name__ == '__main__':
     spark_context = print_info(msg_before='Creating Spark context...', msg_after='Completed.') \
         (pyspark.SparkContext)(conf=conf)
     
-    for n in [100, 1000, 10000]:        
+    for n in [45673]:        
         start = time()
         do_test(n, spark_context, k=5)
         print(f'\n\n\nTotal time for n={n}: {round(time() - start, 3)}s', end='\n\n\n')

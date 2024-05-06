@@ -1,3 +1,4 @@
+from typing import Literal
 import mmh3
 import spacy
 import random
@@ -37,7 +38,6 @@ def _create_set_with_inferring_column_dtype(df: pd.DataFrame, check_column_thres
     return tokens_set
 
 
-
 def _create_set_with_my_tokenizer(df: pd.DataFrame):
     tokens_set = set()
     for i in range(len(df.columns)):
@@ -54,7 +54,7 @@ def _create_set_with_my_tokenizer(df: pd.DataFrame):
 def extract_starting_sets_from_tables(tables_file, 
                                       final_set_file,
                                       id_table_file,
-                                      ntables_to_load_as_set=10, with_:str='mytok', **kwargs):
+                                      ntables_to_load_as_set=10, with_:Literal['mytok', 'infer']='mytok', **kwargs):
     if with_ not in {'mytok', 'infer'}:
         raise AttributeError(f"Parameter with_ must be a value in {{'mytok', 'infer'}}")
     if with_ == 'infer':
@@ -73,7 +73,7 @@ def extract_starting_sets_from_tables(tables_file,
                 else:
                     table_set = _create_set_with_inferring_column_dtype(table, nlp=nlp, **kwargs)
                 set_writer.write(
-                    str(i) + ',' + ','.join(table_set) + '\n'
+                    str(i) + ','.join(table_set) + '\n'
                 )
                 id_table.loc[len(id_table)] = [i, json_table['_id']]
                 # print(i, len(table_set))
@@ -199,7 +199,7 @@ def create_index(input_set_file, output_integer_set_file, output_inverted_list_f
                 ) \
                     .sortBy(
                         # t: (token, setIDs, hash)
-                        lambda t: (len(t[1]), t[2], t[1])
+                        lambda t: (len(t[1]), t[1] == [], t[2], t[1])
                     ) \
                         .zipWithIndex() \
                             .map(

@@ -1,0 +1,15 @@
+Buongiorno, in questi giorni ho appunto lavorato su josie, ci ho messo un po' perché per la fase di preparazione 
+non ho trovato molta documentazione; la creazione delle posting list iniziali era fatta in Scala/Spark, 
+che non sono riuscito a compilare e ho quindi tradotto il codice in pyspark e poi ho ricostruito lo schema del database 
+dai dump dei benchmark originali.  
+Però in generale sembra che il funzionamento finale sia corretto e i risultati siano giusti (ad es. trova 
+per il topK le tabelle che mi aspetto più simili, quelle che di fatto hanno quasi gli stessi dati)
+
+Ora per procedere, questi risultati del topK di josie possono essere quindi considerati una
+sorta di ground truth, rispetto al bias dato dalla jaccard? Posso ad esempio intersecare
+le coppie date dal topK di josie con le coppie dei risultati di sloth (per scartare le coppie di cui non conosco davvero
+l'area di overlap e l'overlap ratio), e qui suddividere le coppie 
+risultanti stabilendo delle soglie sui valori dell'overlap di josie (come [1, 5), [5,20)...), per poi valutare nelle 
+singole partizioni i confronti tramite embedding.
+In verità però non vorrei aver mal interpretato il discorso relativo all'uso di josie sul ground truth, 
+aspetto vostre indicazioni se questo modo può andare bene o meno.
