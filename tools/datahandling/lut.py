@@ -3,6 +3,9 @@ import json
 
 
 class LUT:
+    """
+    LookUp Table used for keep the ids of indexed vectors on FAISS index
+    """
     def __init__(self, idxs=None, ids=None) -> None:
         self.idxs = idxs if idxs else []
         self.ids = ids if ids else []
@@ -12,7 +15,7 @@ class LUT:
         self.idxs.append(numitems - 1 if len(self.idxs) == 0 else self.idxs[-1] + numitems)
         self.ids.append(id)
 
-    def load(self, json_lut_filepath:str):
+    def _load(self, json_lut_filepath:str):
         with open(json_lut_filepath, 'r') as reader:
             json_lut = json.load(reader)
             try:
@@ -38,3 +41,9 @@ class LUT:
     @property
     def ntotal(self):
         return len(self.idxs)
+    
+
+def load_json(path_to_json_lut):
+    _lut = LUT()
+    _lut._load(path_to_json_lut)
+    return _lut

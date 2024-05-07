@@ -8,24 +8,30 @@ class Table:
         self.headers = []
         self.shape = ()
 
-    def from_pandas(self, df:pd.DataFrame):
-        self.columns = []
-        self.headers = []
-        for i in range(len(df.columns)):
-            self.headers.append(df.columns[i])
-            self.columns.append(df.iloc[:, i].tolist())
-        self.shape = df.shape
-
-    def from_polars(self, df:pl.DataFrame):
-        self.columns = []
-        self.headers = []
-        for i in df.schema: # unique values only here
-            self.headers.append(i)
-            self.columns.append(df.select(pl.col(i))[i].to_list())
-        self.shape = df.shape
-
     def get_tuples(self):
         return [
             [column[i] for column in self.columns]
             for i in range(self.shape[0])
         ]
+    
+    
+def from_pandas(df:pd.DataFrame) -> Table:
+    table = Table()
+    table.columns = []
+    table.headers = []
+    for i in range(len(df.columns)):
+        table.headers.append(df.columns[i])
+        table.columns.append(df.iloc[:, i].tolist())
+    table.shape = df.shape
+
+
+def from_polars(self, df:pl.DataFrame) -> Table:
+    table = Table()
+    table.columns = []
+    table.headers = []
+    for i in df.schema: # unique values only here
+        table.headers.append(i)
+        table.columns.append(df.select(pl.col(i))[i].to_list())
+    table.shape = df.shape
+
+

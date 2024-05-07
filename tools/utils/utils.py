@@ -1,4 +1,3 @@
-import os
 import re
 from time import time
 from typing import Literal 
@@ -25,9 +24,7 @@ def print_info(**dec_kwargs):
         def wrapper(*args, **kwargs):
             if 'msg_before' in dec_kwargs: print(dec_kwargs['msg_before'])
             start = time()
-            
-            results = func(*args, **kwargs)
-            
+            results = func(*args, **kwargs)            
             end = time()
 
             if 'time' in dec_kwargs: 

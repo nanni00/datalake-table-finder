@@ -1,31 +1,29 @@
 import os
 
 # remember to set the env variable TESI_ROOT_PATH 
-# _root_path = '/home/giovanni/unimore/tesi-magistrale/' # os.environ['TESI_SRC_PATH']
-# root_project_path = _root_path
+root_project_path = os.environ['TESI_PATH']
 
-root_project_path = '/home/giovanni/unimore/tesi-magistrale/' # os.environ['TESI_PATH'] + '/'
 
 class _DataPath:
-    base =                  root_project_path + 'data/'
-    mywikitables =          root_project_path + 'data/my_wikitables/'
-    wikitables =            root_project_path + 'data/turl_sloth_wikitables/'
+    base =                  root_project_path + '/data'
+    mywikitables =          root_project_path + '/data/my_wikitables'
+    wikitables =            root_project_path + '/data/turl_sloth_wikitable/'
 
 
 class _ModelPath:
-    base =                  root_project_path + 'models/'
-    fasttext =              root_project_path + 'models/fastText/'
-    pre_trained_TaBERT =    root_project_path + 'models/pre-trained-TaBERT/'
+    base =                  root_project_path + '/models'
+    fasttext =              root_project_path + '/models/fastText'
+    pre_trained_TaBERT =    root_project_path + '/models/pre-trained-TaBERT'
 
 
 class _DBPath:
-    base =                  root_project_path + 'db/'
-    chroma =                root_project_path + 'db/chroma/'
-    faiss =                 root_project_path + 'db/faiss/'
+    base =                  root_project_path + '/db'
+    chroma =                root_project_path + '/db/chroma'
+    faiss =                 root_project_path + '/db/faiss'
 
 
 class _JosieStuffPath:
-    base =                  root_project_path + 'JOSIE/'
+    base =                  root_project_path + '/JOSIE'
 
 
 class DefaultPath:

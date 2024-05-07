@@ -1,6 +1,16 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+Created on Tue May  7 10:19:28 2024
+
+@author: giovanni
+"""
+
+from abc import ABC, abstractmethod
+from tools.utils.table import Table
+from tools.utils.utils import my_tokenizer, cosine_similarity
+
 import itertools
-import re
-import string
 from typing import List
 import numpy as np
 import pandas as pd
@@ -12,15 +22,53 @@ import tqdm
 import compress_fasttext
 # import fasttext
 
-from code.utils.utils import *
+from sentence_transformers import SentenceTransformer
+
+
+class TableEncoder(ABC):
+    @abstractmethod()
+    def encode_table(self, table, **kwargs):
+        pass
+    
+    @abstractmethod()
+    def get_encoding_dimension(self):
+        pass
+    
+    
+    
+class SentenceTableEncoder(TableEncoder):
+    def __init__(self, model_name="all-MiniLM-L6-v2"):
+        self.model = SentenceTransformer(model_name)
+
+    def encode_table(self, table:Table, with_labels=False, normalize_embeddings=False):
+        row_embs = self.model.encode([
+                '|'.join([
+                    f'{h},{cell}'if with_labels else str(cell)
+                    for (h, cell) in zip(table.headers, t)]) 
+                for t in table.get_tuples()
+            ],
+            normalize_embeddings=normalize_embeddings
+        )
+
+        col_embs = self.model.encode([
+                f"{h},{','.join(map(str, col))}" if with_labels else ','.join(map(str, col))
+                for h, col in zip(table.headers, table.columns)
+            ],
+            normalize_embeddings=normalize_embeddings
+        )
+
+        return row_embs, col_embs
+
+    def get_encoding_dimension(self):
+        return self.model.get_sentence_embedding_dimension()
 
 
 
-class TableEncoder:
+
+class FastTextEncoder(TableEncoder):
     available_models = {
-        'cc.en.300.compressed': '/home/giovanni/unimore/TESI/src/models/fastText/cc.en.300.compressed.bin',
-        'ft_cc.en.300_freqprune_400K_100K_pq_300': '/home/giovanni/unimore/TESI/src/models/fastText/ft_cc.en.300_freqprune_400K_100K_pq_300.bin'
-    }
+    
+        }
 
     def __init__(self, 
                  model: str|compress_fasttext.compress.CompressedFastTextKeyedVectors|None='cc.en.300.compressed',
@@ -112,7 +160,7 @@ class TableEncoder:
         else:
             raise AttributeError(f"Parameter 'on' accepts only values 'rows' or 'columns', passed {on}.")
 
-    def full_embedding(self, 
+    def encode_table(self, 
                        df: pd.DataFrame, 
                        add_label=False, remove_numbers=False
                        ) -> tuple[np.array, np.array]:
@@ -150,7 +198,8 @@ class TableEncoder:
         # fastText handles FLOAT32 
         return np.float32(row_embeddings), np.float32(column_embeddings)
 
-
+    def get_encoding_dimension(self):
+        return 300
 
 
 def compare_embeddings(df1: pd.DataFrame, df2: pd.DataFrame,
