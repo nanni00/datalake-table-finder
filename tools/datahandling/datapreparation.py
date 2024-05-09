@@ -8,6 +8,7 @@ Created on Tue May  7 11:00:42 2024
 
 import json
 import faiss
+import random
 import jsonlines
 import pandas as pd
 from tqdm import tqdm
@@ -26,7 +27,8 @@ def convert_jsonl_to_csv_folder(
         path_to_ids_file:str|None=None,
         only_first_n:int|None=None,
         ids_subset:set[str]|None=None,
-        with_spec:dict[str:int]|None=None):
+        with_spec:dict[str:int]|None=None,
+        to_index_perc:float=0.8):
     
     if not any([only_first_n, ids_subset, with_spec]):
         raise ValueError('At least one option among only_first_n, ids_subset and with_spec must be specified.')
@@ -58,14 +60,21 @@ def convert_jsonl_to_csv_folder(
     print('All the requested tables have been read.')
     jreader.close()
     
+    # only 80% of these IDs will be actually used for building the index
+    # the remaining 20% is used for testing, as completely new tables
+    index_ids = random.sample(read_ids, round(len(read_ids) * to_index_perc))
+    test_ids = [tid for tid in read_ids if tid not in index_ids]
+    
+    
     if path_to_ids_file:
       with open(path_to_ids_file, 'w') as writer:
           json.dump(
               {
                   'only_first_n': only_first_n,
                   'with_spec': with_spec,
-                  'ids_subset': ids_subset,
-                  'ids': read_ids                    
+                  'ids_subset_only': ids_subset,
+                  'index_tables_ids': index_ids,
+                  'test_tables_ids': test_ids
               },
               writer
           )
@@ -86,7 +95,7 @@ def create_embeddings_for_tables(
     
     row_lut = lut.LUT()
     column_lut = lut.LUT()
-    
+    print('Start embedding tables and loading them into the FAISS index...')
     for tid in tqdm(table_ids):
         df = pd.read_csv(f'{path_to_csv_folder}/{tid}')
         t = table.from_pandas(df)
@@ -103,4 +112,4 @@ def create_embeddings_for_tables(
     
     row_lut.save(f'{path_to_index_folder}/row_lut.json')
     column_lut.save(f'{path_to_index_folder}/column_lut.json')
-        
+    print('All the tables have been embedded and loaded into the index.')

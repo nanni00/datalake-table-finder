@@ -1,7 +1,6 @@
 import os
 import json
 import faiss
-import random
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -9,15 +8,38 @@ import matplotlib.pyplot as plt
 from pprint import pprint
 from collections import defaultdict
 
-
 import tools.utils.table as table
 from tools.datahandling.datapreparation import convert_jsonl_to_csv_folder, create_embeddings_for_tables
 from tools.datahandling.lut import load_json
 from tools.utils.settings import DefaultPath as dp
-from tools.table_encoding.table_encoder import SentenceTableEncoder
+from tools.table_encoding.table_encoder import table_encoder_factory
 
 from sloth import sloth
 
+
+def show_overlaps(topk_with_sloth:pd.DataFrame, r_id, path_to_csv_folder):
+    for idx, row in topk_with_sloth.iterrows():
+        if row[-1] == 0:
+            continue
+        else:
+            x = input(f'Table {row[0]} has an overlap of {row[-1]}: see it? (y/n/exit) ')
+            if x == 'y':        
+                s_id = row[0]
+                        
+                r_df = pd.read_csv(f'{path_to_csv_folder}/{r_id}')
+                s_df = pd.read_csv(f'{path_to_csv_folder}/{s_id}')
+                
+                r_table = table.from_pandas(r_df)
+                s_table = table.from_pandas(s_df)
+                
+                res, metr = sloth(r_table.columns, s_table.columns, verbose=False)
+                print(len(res), len(res[0][0]), len(res[0][1]), len(res[0][0]) * len(res[0][1]))
+                print(res)
+                
+            elif x == 'n':
+                continue
+            else:
+                break
 
 
 def get_top_k_most_similar_tables_count_only(table:table.Table, tabenc, ridx, cidx, rlut, clut, search_index_k:int=5, k:int=3, alpha:float=1, beta:float=1):
@@ -48,8 +70,6 @@ def get_top_k_most_similar_tables_count_only(table:table.Table, tabenc, ridx, ci
         
     res = sorted(list(zip(cnt, cnt.values())), key=lambda x: x[1][2], reverse=True)
     return res[:k] if k >= 0 else res
-
-
 
 
 def get_top_k_most_similar_tables_count_and_dist(
@@ -154,13 +174,7 @@ def get_top_k_most_similar_tables_count_and_dist(
 
 
 
-
-
-
-def main1():
-    only_first_n = 5000
-    spec = {'min_rows':5, 'min_columns':2, 'min_area':50}
-    dcode = f'/n{only_first_n}-r{spec["min_rows"]}-c{spec["min_columns"]}-a{spec["min_area"]}'    
+def main1(dcode, encoder_type, only_first_n=None, spec=None):
     
     path_to_jsonl_file =            dp.data_path.wikitables +       '/train_tables.jsonl'
     path_to_wiki_subset_folder =    dp.data_path.wikitables +       dcode
@@ -169,10 +183,11 @@ def main1():
     path_to_csv_folder =            path_to_wiki_subset_folder +    '/csv'
     path_to_index_folder =          path_to_wiki_subset_folder +    '/index'
     
+    # setup the directories
     for d in [
-            #path_to_wiki_subset_folder, 
+            path_to_wiki_subset_folder, 
             path_to_csv_folder, 
-            #path_to_index_folder
+            path_to_index_folder
             ]:
         
         if os.path.exists(d):
@@ -180,6 +195,9 @@ def main1():
         
         if not os.path.exists(d):
             os.mkdir(d)
+            
+    # load the table encoder
+    tabenc = table_encoder_factory(encoder_type)
         
     # Convert the huge JSONL file in many small CSV file into the specified directory
     convert_jsonl_to_csv_folder(
@@ -189,37 +207,30 @@ def main1():
         only_first_n=only_first_n,
         with_spec=spec
     )
-    return
+    
     
     # Get the IDs of tables read and converted in the previous step
     with open(path_to_info_file) as reader:
         info = json.load(reader)
-        table_ids = info['ids']
-        
-    # only 80% of these IDs will be actually used for building the index
-    # the remaining 20% is used for testing, as completely new tables
-    index_ids = random.sample(table_ids, round(len(table_ids) * 0.8))
-    test_ids = [tid for tid in table_ids if tid not in index_ids]
     
+    index_ids = info['index_tables_ids']
+    test_ids = info['test_tables_ids']
+        
     if input(f'{len(index_ids)} tables will be embedded and loaded into a new index (eta {len(index_ids) * 3.5}s): continue? (y/n) ') != 'y':
         return
     
-    # Loading the table encoder
-    tabenc = SentenceTableEncoder()
     
     # Create the embeddings for the sampled tables
     create_embeddings_for_tables(
         path_to_csv_folder, 
         path_to_index_folder, 
-        index_ids, 
+        index_ids,
         tabenc,
         with_labels=False,
         normalize_embeddings=True
     )
     
-    # sanity check, ensuring everything is setup correctly
-    
-    k = 3
+    # sanity check, ensuring everything is setup correctly:
     
     # loading index and LUTs
     row_index = faiss.read_index(f'{path_to_index_folder}/row_index.index') 
@@ -234,37 +245,33 @@ def main1():
     s_table = table.from_pandas(df)
     
     # computing the top-K 
+    k = 3
     topk = get_top_k_most_similar_tables_count_only(s_table, tabenc, row_index, column_index, row_lut, column_lut, k)
     
     topk_with_sloth = []
-    
-    for tabid, tabsim in topk:
+    for tabid, (rv, cv, tabsim) in topk:
         rdf = pd.read_csv(f'{path_to_csv_folder}/{tabid}')
         r_table = table.from_pandas(rdf)
         res, metrics = sloth(r_table.columns, s_table.columns, verbose=False)
         
         largest_overlap_area = 0 if len(res) == 0 else len(res[0][0]) * len(res[0][1])
-        topk_with_sloth.append((tabid, round(tabsim, 3), largest_overlap_area))
+        topk_with_sloth.append((tabid, rv, cv, round(tabsim, 3), largest_overlap_area))
         
     pprint(topk_with_sloth)
     
 
-def main2():
-    only_first_n = 5000
-    spec = {'min_rows':5, 'min_columns':2, 'min_area':50}
-    dcode = f'/n{only_first_n}-r{spec["min_rows"]}-c{spec["min_columns"]}-a{spec["min_area"]}'    
-    
+def main2(dcode, encoder_type, only_first_n=None, spec=None):
     path_to_wiki_subset_folder =    dp.data_path.wikitables +       dcode
     
     path_to_info_file =             path_to_wiki_subset_folder +    '/info.json'
     path_to_csv_folder =            path_to_wiki_subset_folder +    '/csv'
     path_to_index_folder =          path_to_wiki_subset_folder +    '/index'
     
-    k = -1
-          
-    # Loading the table encoder
-    tabenc = SentenceTableEncoder()
+    # load the table encoder
+    tabenc = table_encoder_factory(encoder_type)
     
+    k = 20
+          
     # loading index and LUTs
     row_index = faiss.read_index(f'{path_to_index_folder}/row_index.index') 
     column_index = faiss.read_index(f'{path_to_index_folder}/column_index.index')
@@ -275,14 +282,12 @@ def main2():
     # Get the IDs of tables read and converted in the previous step
     with open(path_to_info_file) as reader:
         info = json.load(reader)
-        table_ids = info['ids']
+        test_ids = info['test_tables_ids']
         
-    index_ids = row_lut.ids
-    test_ids = [tid for tid in table_ids if tid not in index_ids]
-     
     # obtaining a sample table from the test ids set
-    n_id = 15
-    df = pd.read_csv(f'{path_to_csv_folder}/{test_ids[n_id]}')
+    n_id = 9
+    r_id = test_ids[n_id]
+    df = pd.read_csv(f'{path_to_csv_folder}/{r_id}')
     s_table = table.from_pandas(df)
 
     topk = get_top_k_most_similar_tables_count_only(s_table, 
@@ -307,23 +312,18 @@ def main2():
     topk_with_sloth = pd.DataFrame(topk_with_sloth, columns=['id', 'cnt_row', 'cnt_col', 'tabsim', 'overlap'])
     pprint(topk_with_sloth)
     
-    import matplotlib.pyplot as plt
-    
     plt.plot(range(len(topk_with_sloth)), topk_with_sloth['overlap'],   label='overlap')
     plt.plot(range(len(topk_with_sloth)), topk_with_sloth['tabsim'],    label='tabsim')
     plt.plot(range(len(topk_with_sloth)), topk_with_sloth['cnt_row'],   label='cnt_row')
     plt.plot(range(len(topk_with_sloth)), topk_with_sloth['cnt_col'],   label='cnt_col')
     plt.legend()
     plt.show()
-    return topk_with_sloth
+    
+    show_overlaps(topk_with_sloth, r_id, path_to_csv_folder)
+    
     
 
-
-def main3():
-    only_first_n = 5000
-    spec = {'min_rows':5, 'min_columns':2, 'min_area':50}
-    dcode = f'/n{only_first_n}-r{spec["min_rows"]}-c{spec["min_columns"]}-a{spec["min_area"]}'    
-    
+def main3(dcode, encoder_type, only_first_n=None, spec=None):
     path_to_wiki_subset_folder =    dp.data_path.wikitables +       dcode
     
     path_to_info_file =             path_to_wiki_subset_folder +    '/info.json'
@@ -331,9 +331,9 @@ def main3():
     path_to_index_folder =          path_to_wiki_subset_folder +    '/index'
     
     k = -1
-          
-    # Loading the table encoder
-    tabenc = SentenceTableEncoder()
+    
+    # load the table encoder
+    tabenc = table_encoder_factory(encoder_type)
     
     # loading index and LUTs
     row_index = faiss.read_index(f'{path_to_index_folder}/row_index.index') 
@@ -351,7 +351,7 @@ def main3():
     test_ids = [tid for tid in table_ids if tid not in index_ids]
      
     # obtaining a sample table from the test ids set
-    n_id = 15
+    n_id = 22
     r_id = test_ids[n_id]
     df = pd.read_csv(f'{path_to_csv_folder}/{r_id}')
     s_table = table.from_pandas(df)
@@ -393,32 +393,24 @@ def main3():
     plt.legend()
     plt.show()
     
-    for idx, row in topk_with_sloth.iterrows():
-        if row[3] == 0:
-            continue
-        else:
-            x = input(f'Table {row[0]} has an overlap of {row[3]}: see it? (y/n/exit) ')
-            if x == 'y':        
-                s_id = row[0]
-                        
-                r_df = pd.read_csv(f'{path_to_csv_folder}/{r_id}')
-                s_df = pd.read_csv(f'{path_to_csv_folder}/{s_id}')
-                
-                r_table = table.from_pandas(r_df)
-                s_table = table.from_pandas(s_df)
-                
-                res, metr = sloth(r_table.columns, s_table.columns, verbose=False)
-                print(len(res), len(res[0][0]), len(res[0][1]), len(res[0][0]) * len(res[0][1]))
-                print(res)
-                
-            elif x == 'n':
-                continue
-            else:
-                break
+    show_overlaps(topk_with_sloth, r_id, path_to_csv_folder)
 
 
 
 if __name__ == '__main__':
-    # main1()
-    res = main2()
-    # main3()
+    
+    encoder_type = 'sentransf'
+    only_first_n = 500
+    spec = {'min_rows':5, 'min_columns':2, 'min_area':50}
+    
+    dcode = f'/{encoder_type}-n{only_first_n}-r{spec["min_rows"]}-c{spec["min_columns"]}-a{spec["min_area"]}'    
+        
+    # main1(dcode, encoder_type, only_first_n, spec) # creation of the index and csv files
+    main2(dcode, encoder_type, only_first_n, spec)
+    # main3(dcode, encoder_type, only_first_n, spec)
+    
+    
+    
+    
+    
+    

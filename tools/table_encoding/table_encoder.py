@@ -7,6 +7,7 @@ Created on Tue May  7 10:19:28 2024
 """
 
 from abc import ABC, abstractmethod
+from tools.utils.settings import DefaultPath as defpath
 from tools.utils.table import Table
 from tools.utils.utils import my_tokenizer, cosine_similarity
 
@@ -65,31 +66,29 @@ class SentenceTableEncoder(TableEncoder):
 
 
 
-class FastTextEncoder(TableEncoder):
+class FastTextTableEncoder(TableEncoder):
     available_models = {
-    
+            "fasttext-en-mini":  defpath.model_path.fasttext + '/fasttext-en-mini'
         }
 
     def __init__(self, 
                  model, #: str|compress_fasttext.compress.CompressedFastTextKeyedVectors|None='cc.en.300.compressed',
                  model_path: str|None=None
                  ):
-
+        """
         if model:
             if type(model) is str:
-                if model in TableEncoder.available_models:
-                    # self.model = compress_fasttext.models.CompressedFastTextKeyedVectors.load(TableEncoder.available_models[model])
-                    pass
+                if model in FastTextEncoder.available_models:
+                    self.model = compress_fasttext.models.CompressedFastTextKeyedVectors.load(TableEncoder.available_models[model])                    
                 else:
                     raise KeyError(f'Unknown model code: {model}')
             else:
                 self.model = model
         elif model_path:
-            # self.model = compress_fasttext.models.CompressedFastTextKeyedVectors.load(model_path)
-            self.model = None
+            self.model = compress_fasttext.models.CompressedFastTextKeyedVectors.load(model_path)            
         else:
             raise Exception('You must pass a specification for the model')
-        
+        """      
         self.model_size = self.model.vector_size
             
     def embedding_cell(self, cell):
@@ -196,12 +195,33 @@ class FastTextEncoder(TableEncoder):
         
             embedding_matrix = np.concatenate((embedding_matrix, labels_embedding), axis=1)
         row_embeddings = np.mean(embedding_matrix, axis=1)
-        # return row_embeddings, column_embeddings
+
         # fastText handles FLOAT32 
         return np.float32(row_embeddings), np.float32(column_embeddings)
 
     def get_encoding_dimension(self):
         return 300
+
+
+
+
+def table_encoder_factory(encoder_type, *args):
+    
+    # Loading the table encoder
+    if encoder_type == 'sentransf':
+        return SentenceTableEncoder()
+    elif encoder_type == 'fasttext':
+        return FastTextTableEncoder('fasttext-en-mini')
+    
+
+
+
+
+
+
+
+
+
 
 
 def compare_embeddings(df1: pd.DataFrame, df2: pd.DataFrame,

@@ -1,7 +1,7 @@
 import os
 
 # remember to set the env variable TESI_ROOT_PATH 
-root_project_path = os.environ['TESI_PATH']
+root_project_path = os.environ['THESYS_PATH']
 
 
 class _DataPath:
@@ -12,7 +12,7 @@ class _DataPath:
 
 class _ModelPath:
     base =                  root_project_path + '/models'
-    fasttext =              root_project_path + '/models/fastText'
+    fasttext =              root_project_path + '/models/fasttext'
     pre_trained_TaBERT =    root_project_path + '/models/pre-trained-TaBERT'
 
 

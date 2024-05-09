@@ -4,8 +4,9 @@ polars
 jsonlines
 nltk
 tqdm
-compress-fasttext
+scipy<1.13
+compress-fasttext           # compress-fasttext[full] for advanced tasks
 sentence-transformers
 faiss-cpu
-faiss-gpu
+# faiss-gpu                 # stricly needs conda, not pyenv
 chromadb
