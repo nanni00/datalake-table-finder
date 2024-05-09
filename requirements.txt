@@ -5,6 +5,7 @@ jsonlines
 nltk
 tqdm
 compress-fasttext
-
+sentence-transformers
+faiss-cpu
+faiss-gpu
 chromadb
-# faiss

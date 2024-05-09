@@ -12,7 +12,7 @@ import jsonlines
 import pandas as pd
 from tqdm import tqdm
 
-import lut
+import tools.datahandling.lut as lut
 import tools.utils.table as table
 from tools.utils.utils import rebuild_table
 from tools.table_encoding.table_encoder import TableEncoder
@@ -59,17 +59,16 @@ def convert_jsonl_to_csv_folder(
     jreader.close()
     
     if path_to_ids_file:
-        with open(path_to_ids_file, 'w') as writer:
-            writer.writelines(read_ids)
-            
-    with open(f'{path_to_csv_folder}/info.json', 'w') as writer:
-        json.dump(
-            {
-                'only_first_n': only_first_n,
-                'with_spec': with_spec,
-                'ids_subset': ids_subset                    
-            }
-        )
+      with open(path_to_ids_file, 'w') as writer:
+          json.dump(
+              {
+                  'only_first_n': only_first_n,
+                  'with_spec': with_spec,
+                  'ids_subset': ids_subset,
+                  'ids': read_ids                    
+              },
+              writer
+          )
 
 
 
@@ -81,7 +80,7 @@ def create_embeddings_for_tables(
         with_labels=False,
         normalize_embeddings=False):
     
-    d = tabenc.get_encoding_size()
+    d = tabenc.get_encoding_dimension()
     row_index = faiss.IndexFlatL2(d)
     column_index = faiss.IndexFlatL2(d)
     

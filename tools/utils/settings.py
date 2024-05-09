@@ -7,7 +7,7 @@ root_project_path = os.environ['TESI_PATH']
 class _DataPath:
     base =                  root_project_path + '/data'
     mywikitables =          root_project_path + '/data/my_wikitables'
-    wikitables =            root_project_path + '/data/turl_sloth_wikitable/'
+    wikitables =            root_project_path + '/data/turl_sloth_wikitables'
 
 
 class _ModelPath:

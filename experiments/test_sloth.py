@@ -15,32 +15,30 @@ r_id,s_id,jsim,o_a,a%
 
 import pandas as pd
 from sloth import sloth
-from tools.utils.table import Table
+from tools.utils.table import from_pandas
 from tools.utils.settings import DefaultPath as defpath
 
 r_id, s_id = '15182906-1', '33954290-1'
 # r_id, s_id = '14772277-1', '32928438-1'
 # r_id, s_id = '2198024-3', '38093453-3'
-r_id, s_id = '20941454-14', '37358124-1'
+r_id, s_id =  '2728523-1', '13581128-1'
 
-r_df = pd.read_csv(defpath.data_path.wikitables +
-                      f'threshold-r5-c2-a50/csv/{r_id}')
-s_df = pd.read_csv(defpath.data_path.wikitables +
-                      f'threshold-r5-c2-a50/csv/{s_id}')
+csv_dir = defpath.data_path.wikitables + '/n5000-r5-c2-a50/csv/'
 
-r_table = Table()
-r_table.from_pandas(r_df)
-s_table = Table()
-s_table.from_pandas(s_df)
+r_df = pd.read_csv(csv_dir + r_id)
+s_df = pd.read_csv(csv_dir + s_id)
 
-print(r_table.columns)
-print()
-print(s_table.columns)
+r_table = from_pandas(r_df)
+s_table = from_pandas(s_df)
 
-res, metr = sloth(r_table.columns, s_table.columns)
+# print(r_table.columns)
+#print()
+# print(s_table.columns)
+
+res, metr = sloth(r_table.columns, s_table.columns, verbose=False)
 print(len(res), len(res[0][0]), len(res[0][1]))
 print(len(res[0][0]) * len(res[0][1]))
-
+print(res)
 # Restructure the table as the list of its columns, ignoring the headers
 def parse_table(table, num_cols, num_headers):
     return [[row[i] for row in table[num_headers:]] for i in range(0, num_cols)]

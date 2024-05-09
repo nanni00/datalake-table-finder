@@ -19,18 +19,18 @@ import warnings
 warnings.filterwarnings('ignore')
 import tqdm
 
-import compress_fasttext
+# import compress_fasttext
 # import fasttext
 
 from sentence_transformers import SentenceTransformer
 
 
 class TableEncoder(ABC):
-    @abstractmethod()
+    @abstractmethod
     def encode_table(self, table, **kwargs):
         pass
     
-    @abstractmethod()
+    @abstractmethod
     def get_encoding_dimension(self):
         pass
     
@@ -71,20 +71,22 @@ class FastTextEncoder(TableEncoder):
         }
 
     def __init__(self, 
-                 model: str|compress_fasttext.compress.CompressedFastTextKeyedVectors|None='cc.en.300.compressed',
+                 model, #: str|compress_fasttext.compress.CompressedFastTextKeyedVectors|None='cc.en.300.compressed',
                  model_path: str|None=None
                  ):
 
         if model:
             if type(model) is str:
                 if model in TableEncoder.available_models:
-                    self.model = compress_fasttext.models.CompressedFastTextKeyedVectors.load(TableEncoder.available_models[model])
+                    # self.model = compress_fasttext.models.CompressedFastTextKeyedVectors.load(TableEncoder.available_models[model])
+                    pass
                 else:
                     raise KeyError(f'Unknown model code: {model}')
             else:
                 self.model = model
         elif model_path:
-            self.model = compress_fasttext.models.CompressedFastTextKeyedVectors.load(model_path)
+            # self.model = compress_fasttext.models.CompressedFastTextKeyedVectors.load(model_path)
+            self.model = None
         else:
             raise Exception('You must pass a specification for the model')
         

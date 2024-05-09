@@ -16,22 +16,24 @@ class Table:
     
     
 def from_pandas(df:pd.DataFrame) -> Table:
-    table = Table()
-    table.columns = []
-    table.headers = []
+    tab = Table()
+    tab.columns = []
+    tab.headers = []
     for i in range(len(df.columns)):
-        table.headers.append(df.columns[i])
-        table.columns.append(df.iloc[:, i].tolist())
-    table.shape = df.shape
+        tab.headers.append(df.columns[i])
+        tab.columns.append(df.iloc[:, i].tolist())
+    tab.shape = df.shape
+    return tab
 
 
 def from_polars(self, df:pl.DataFrame) -> Table:
-    table = Table()
-    table.columns = []
-    table.headers = []
+    tab = Table()
+    tab.columns = []
+    tab.headers = []
     for i in df.schema: # unique values only here
-        table.headers.append(i)
-        table.columns.append(df.select(pl.col(i))[i].to_list())
-    table.shape = df.shape
+        tab.headers.append(i)
+        tab.columns.append(df.select(pl.col(i))[i].to_list())
+    tab.shape = df.shape
+    return tab
 
 
