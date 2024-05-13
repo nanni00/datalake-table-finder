@@ -1,12 +1,15 @@
 numpy
 pandas
 polars
+pyspark
 jsonlines
 nltk
 tqdm
 scipy<1.13
 compress-fasttext           # compress-fasttext[full] for advanced tasks
+torch==2.2.*
 sentence-transformers
 faiss-cpu
 # faiss-gpu                 # stricly needs conda, not pyenv
 chromadb
+psycopg

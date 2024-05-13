@@ -23,7 +23,8 @@ class _DBPath:
 
 
 class _JosieStuffPath:
-    base =                  root_project_path + '/JOSIE'
+    base =                  root_project_path + '/doc-stuff/josie'
+    data =                  root_project_path + '/doc-stuff/josie/data'
 
 
 class DefaultPath:

@@ -174,15 +174,30 @@ def get_top_k_most_similar_tables_count_and_dist(
 
 
 
-def main1(dcode, encoder_type, only_first_n=None, spec=None):
-    
-    path_to_jsonl_file =            dp.data_path.wikitables +       '/train_tables.jsonl'
-    path_to_wiki_subset_folder =    dp.data_path.wikitables +       dcode
-    
-    path_to_info_file =             path_to_wiki_subset_folder +    '/info.json'
-    path_to_csv_folder =            path_to_wiki_subset_folder +    '/csv'
-    path_to_index_folder =          path_to_wiki_subset_folder +    '/index'
-    
+
+
+encoder_type = 'sentransf'
+only_first_n = 500
+spec = {'min_rows':5, 'min_columns':2, 'min_area':50}
+
+dcode = f'/{encoder_type}-n{only_first_n}-r{spec["min_rows"]}-c{spec["min_columns"]}-a{spec["min_area"]}'    
+
+path_to_jsonl_file =            dp.data_path.wikitables +       '/train_tables.jsonl'
+path_to_wiki_subset_folder =    dp.data_path.wikitables +       dcode
+
+path_to_info_file =             path_to_wiki_subset_folder +    '/info.json'
+path_to_csv_folder =            path_to_wiki_subset_folder +    '/csv'
+path_to_index_folder =          path_to_wiki_subset_folder +    '/index'
+
+# load the table encoder
+tabenc = table_encoder_factory(encoder_type)
+  
+
+
+
+
+
+def main1(dcode, encoder_type, only_first_n=None, spec=None):    
     # setup the directories
     for d in [
             path_to_wiki_subset_folder, 
@@ -196,9 +211,6 @@ def main1(dcode, encoder_type, only_first_n=None, spec=None):
         if not os.path.exists(d):
             os.mkdir(d)
             
-    # load the table encoder
-    tabenc = table_encoder_factory(encoder_type)
-        
     # Convert the huge JSONL file in many small CSV file into the specified directory
     convert_jsonl_to_csv_folder(
         path_to_jsonl_file, 
@@ -261,14 +273,6 @@ def main1(dcode, encoder_type, only_first_n=None, spec=None):
     
 
 def main2(dcode, encoder_type, only_first_n=None, spec=None):
-    path_to_wiki_subset_folder =    dp.data_path.wikitables +       dcode
-    
-    path_to_info_file =             path_to_wiki_subset_folder +    '/info.json'
-    path_to_csv_folder =            path_to_wiki_subset_folder +    '/csv'
-    path_to_index_folder =          path_to_wiki_subset_folder +    '/index'
-    
-    # load the table encoder
-    tabenc = table_encoder_factory(encoder_type)
     
     k = 20
           
@@ -324,17 +328,8 @@ def main2(dcode, encoder_type, only_first_n=None, spec=None):
     
 
 def main3(dcode, encoder_type, only_first_n=None, spec=None):
-    path_to_wiki_subset_folder =    dp.data_path.wikitables +       dcode
-    
-    path_to_info_file =             path_to_wiki_subset_folder +    '/info.json'
-    path_to_csv_folder =            path_to_wiki_subset_folder +    '/csv'
-    path_to_index_folder =          path_to_wiki_subset_folder +    '/index'
-    
     k = -1
-    
-    # load the table encoder
-    tabenc = table_encoder_factory(encoder_type)
-    
+
     # loading index and LUTs
     row_index = faiss.read_index(f'{path_to_index_folder}/row_index.index') 
     column_index = faiss.read_index(f'{path_to_index_folder}/column_index.index')
@@ -349,7 +344,7 @@ def main3(dcode, encoder_type, only_first_n=None, spec=None):
         
     index_ids = row_lut.ids
     test_ids = [tid for tid in table_ids if tid not in index_ids]
-     
+    
     # obtaining a sample table from the test ids set
     n_id = 22
     r_id = test_ids[n_id]
@@ -364,7 +359,6 @@ def main3(dcode, encoder_type, only_first_n=None, spec=None):
                                          alpha=1, beta=0.01,
                                          gamma=1, delta=0.5
                                          )
-    
     
     topk_df = pd.DataFrame(topk, columns=['id', 'cnt', 'meandist'])
     topk_df = topk_df.sort_values(by=['cnt', 'meandist'], ascending=[False, True])
@@ -398,13 +392,7 @@ def main3(dcode, encoder_type, only_first_n=None, spec=None):
 
 
 if __name__ == '__main__':
-    
-    encoder_type = 'sentransf'
-    only_first_n = 500
-    spec = {'min_rows':5, 'min_columns':2, 'min_area':50}
-    
-    dcode = f'/{encoder_type}-n{only_first_n}-r{spec["min_rows"]}-c{spec["min_columns"]}-a{spec["min_area"]}'    
-        
+      
     # main1(dcode, encoder_type, only_first_n, spec) # creation of the index and csv files
     main2(dcode, encoder_type, only_first_n, spec)
     # main3(dcode, encoder_type, only_first_n, spec)
