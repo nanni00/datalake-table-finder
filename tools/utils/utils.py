@@ -47,7 +47,7 @@ def round_to_05(n):
     return float(format(round_to(n, 0.05), ".2f"))
 
 
-def rebuild_table(table, mode:Literal['pandas', 'polars', 'polars.lazy']='pandas'):
+def rebuild_table(table, mode:Literal['pandas', 'polars', 'polars.lazy', 'text']='pandas'):
     if mode == 'pandas': 
         return pd.DataFrame(
             data=[
@@ -77,6 +77,10 @@ def rebuild_table(table, mode:Literal['pandas', 'polars', 'polars.lazy']='pandas
             ],
             schema=s #table['tableHeaders'][0]
             )
+    elif mode == 'text':
+        header = '\t'.join([str(h) for h in table['tableHeaders'][0]])
+        data = '\n'.join(['\t'.join(str(entry_data['text']) for entry_data in entry) for entry in table['tableData']])
+        return f'{header}\n{data}'
     else:
         raise ValueError(f'Unknown mode: {mode}')
 

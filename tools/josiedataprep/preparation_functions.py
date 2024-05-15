@@ -17,6 +17,7 @@ from tools.utils.settings import DefaultPath
 from tools.utils.utils import print_info, my_tokenizer
 
 import multiprocessing as mp
+import jenkspy
 
 
 def _infer_column_type(column: list, check_column_threshold:int=3, nlp=None|spacy.Language) -> str:
@@ -59,10 +60,9 @@ def _create_set_with_my_tokenizer(df: pd.DataFrame):
 def _create_set_with_all_tokens(df, bag:bool=False):
     if not bag:
         if type(df) == pd.DataFrame:
-            return {str(token) for i in range(len(df.columns)) for token in df.iloc[:, i].unique() if not pd.isna(token) and token}
+            return {str(token).replace('\n', '\t').replace('|', ' ') for i in range(len(df.columns)) for token in df.iloc[:, i].unique() if not pd.isna(token) and token}
         elif type(df) == pl.DataFrame:
             pass
-
 
 
 def parallel_extract_starting_sets_from_tables(input_tables_csv_dir, 
@@ -81,7 +81,7 @@ def parallel_extract_starting_sets_from_tables(input_tables_csv_dir,
         
         for i, id_table in enumerate(ids, start=offset):
             # read the csv
-            table = pd.read_csv(input_tables_csv_dir + f'/{id_table}').convert_dtypes()
+            table = pd.read_csv(input_tables_csv_dir + f'/{id_table}', sep='\t').convert_dtypes()
             
             # extract the token set
             if with_ == 'mytok':
@@ -96,7 +96,7 @@ def parallel_extract_starting_sets_from_tables(input_tables_csv_dir,
                 raise AttributeError("Parameter with_ must be a value in {'mytok', 'infer', 'set', 'bag'}")
             
             # the table set
-            set_q.put(f"{i + offset},{','.join(table_set)}\n")
+            set_q.put(f"{i + offset}|{'|'.join(table_set)}\n")      #### !!! Here we use "|", not comma ","
             
             # original table id - integer id
             id_metadata_q.put(f'{id_table},{i + offset}\n')
@@ -112,7 +112,7 @@ def parallel_extract_starting_sets_from_tables(input_tables_csv_dir,
                 num_na = table.iloc[:, id_col].isna().sum()
                 column_stat_q.put(f"{','.join(map(str, [i + offset, id_col, table.shape[1], num_distinct, num_na, round(num_na / table.shape[1], 5)]))}\n")
         
-        print(f'Worker {os.getpid()} completed')
+        # print(f'Worker {os.getpid()} completed')
         set_q.put(f'Process {os.getpid()} completed')
         id_metadata_q.put(f'Process {os.getpid()} completed')
         table_stat_q.put(f'Process {os.getpid()} completed')
@@ -127,13 +127,15 @@ def parallel_extract_starting_sets_from_tables(input_tables_csv_dir,
                     if re.match(r'Process \d+ completed', rec):
                         okstop += 1
                         if okstop == os.cpu_count():
-                            break                    
-                    fhandle.write(rec)                    
+                            break
+                    else:
+                        # no need to batch here, there's already a inner IO buffer           
+                        fhandle.write(rec)                    
                 except: pass
 
-    id_metadata_q.put('sloth_id,josie_id')
-    table_stat_q.put('id_table,size,set_size,num_nan,%nan')
-    column_stat_q.put('id_table,id_column,size,num_distincts,num_nan,%nan')
+    id_metadata_q.put('sloth_id,josie_id\n')
+    table_stat_q.put('id_table,size,set_size,num_nan,%nan\n')
+    column_stat_q.put('id_table,id_column,size,num_distincts,num_nan,%nan\n')
 
     ids = os.listdir(input_tables_csv_dir)
     chuncksize = ntables_to_load_as_set // os.cpu_count()
@@ -156,9 +158,12 @@ def parallel_extract_starting_sets_from_tables(input_tables_csv_dir,
     for p in worker_pool: p.join()
     print('Joining writers...')
     for p in writer_pool: p.join()
-        
-    
 
+    print('Emptying queues...')
+    for q in [set_q, table_stat_q, column_stat_q, id_metadata_q]: 
+        while not q.empty():
+            q.get()
+        q.close()
 
 
 @print_info(msg_before='Extracting intitial sets...', msg_after='Completed.')
@@ -293,6 +298,7 @@ def create_raw_tokens(
                     .map(
                         lambda token_sid: f'{token_sid[0]} {token_sid[1]}'
                     ).saveAsTextFile(output_raw_tokens_file)
+
 
 
 @print_info(msg_before='Creating integer sets and inverted index...', msg_after='Completed.', time=True)
@@ -485,21 +491,33 @@ def create_index(input_set_file, output_integer_set_file, output_inverted_list_f
                 ) \
                     .join(posting_lists_with_group_ids) \
                         .map(
-                            # (token, (sets, (gid, rawToken, _)))
+                            # (token, (sets, (gid, rawToken, _))) -> (token, rawToken, gid, sets)
                             lambda t: (t[0], t[1][1][1], t[1][1][0], t[1][0])
-                        ) \
-                            .map(
-                                lambda t: postlist_format_string(t)
-                            )
+                        )
     
     # STAGE 4: SAVE INTEGER SETS AND FINAL POSTING LISTS
     # print('STAGE 4: SAVE INTEGER SETS AND FINAL POSTING LISTS')
-
+    # to load directly into the database
+    """
     integer_sets.map(
         lambda t: sets_format_string(t)
     ).saveAsTextFile(output_integer_set_file)
 
-    posting_lists.saveAsTextFile(output_inverted_list_file)
+    posting_lists.map(
+        lambda t: postlist_format_string(t)
+    ).saveAsTextFile(output_inverted_list_file)
+    """
+
+    integer_sets.map(
+        # (sid, indices) -> "$sid|$indices{'|'}"
+        lambda t: str(t[0]) + '|' + '|'.join([str(x) for x in t[1]])
+    ).saveAsTextFile(output_integer_set_file)
+
+    posting_lists.map(
+        # (token, rawToken, gid, sets) -> "$token|$rawToken|$gid|${sets.mkString("|")}"
+        lambda t: str(t[0]) + '|' + str(t[1]) + '|' + str(t[2]) + '|' + '|'.join([str(x) for x in t[3]])
+    ).saveAsTextFile(output_inverted_list_file)
+
 
     """
     integer_sets = integer_sets.map(
@@ -525,8 +543,93 @@ def create_index(input_set_file, output_integer_set_file, output_inverted_list_f
 
     """
 
+
+def format_spark_set_file(input_file:str, output_formatted_file:str, on_inverted_index=True):
+    def sets_format_string(t):
+        sid, indices = t[0], t[1:]
+        return "{}|{}|{}|{{{}}}\n".format(sid, len(indices), len(indices), ','.join(indices))
+
+    def postlist_format_string(t):
+        token, raw_token, gid, sets = t[0], t[1], t[2], t[3:]
+        sets = list(map(eval, sets))
+        freq = len(sets)
+        set_ids =   ','.join([str(s[0]) for s in sets])
+        set_sizes = ','.join([str(s[1]) for s in sets])
+        set_pos =   ','.join([str(s[2]) for s in sets])
+
+        return "{}|{}|{}|{}|{{{}}}|{{{}}}|{{{}}}|{}\n" \
+            .format(
+                token, freq, gid, 1, set_ids, set_sizes, set_pos, binascii.hexlify(bytes(str(raw_token), 'utf-8'))
+            )
+
+    with open(output_formatted_file, 'w') as writer:
+        for fpart in sorted(os.listdir(input_file)):
+            if not fpart.startswith('part-'):
+                continue
+
+            with open(input_file + '/' + fpart) as reader:
+                # print(f'opening file {input_file + "/" + fpart}...')
+                if on_inverted_index:
+                    writer.writelines(map(lambda line: postlist_format_string(line.strip().split('|')), reader.readlines()))
+                else:
+                    writer.writelines(map(lambda line: sets_format_string(line.strip().split('|')), reader.readlines()))
+
+
+
+
+
+def sample_query_sets(
+    input_csv_results_file,
+    sloth_to_josie_id_file,
+    intervals:list[int]|None=None,
+    bins:int=10,
+    num_sample_per_interval:int=10
+    ) -> tuple[dict, list[int]]:
+
+    sloth_results = pl.scan_csv(input_csv_results_file).select(['r_id', 'overlap_area']).collect()
+
+    if not intervals:
+        # this may take few minutes...
+        intervals = jenkspy.jenks_breaks(sloth_results.select('overlap_area').to_series().to_numpy(), bins)
+        intervals[-1] = np.inf
+
+    samples = {}
+    sampled_ids = set()
+    for interval in list(zip(intervals, intervals[1:] + [np.inf])):
+        subdf = sloth_results.filter((pl.col('overlap_area') >= interval[0]) & (pl.col('overlap_area') < interval[1]))
+        while True:
+            cls_sample = subdf.sample(min(num_sample_per_interval, subdf.shape[0]))
+            
+            if cls_sample.select('r_id').n_unique() != min(num_sample_per_interval, subdf.shape[0]):
+                continue
+
+            if all(s['r_id'] not in sampled_ids for s in cls_sample.rows(named=True)):
+                print(f"Interval [{interval[0]}, {interval[1]}) sampled {len(cls_sample)}")
+                sampled_ids = sampled_ids.union([s['r_id'] for s in cls_sample.rows(named=True)])
+                samples[interval] = [t for t in cls_sample.rows()]
+                break
+    
+    id_conversion = pl.read_csv(sloth_to_josie_id_file)
+    
+    def lookup_for_josie_int_id(sloth_str_id:str):
+        return id_conversion.row(by_predicate=pl.col('sloth_id') == sloth_str_id)[1]
+
+    conv_sampled_ids = list(map(lookup_for_josie_int_id, sampled_ids))
+    # print('sampled_ids:')
+    # print(list(sampled_ids)[:30])
+    # print('converted sampled ids:')
+    # print(conv_sampled_ids[:30])
+    return samples, conv_sampled_ids
+
+
 if __name__ == '__main__':
-    ROOT_TEST_DIR = DefaultPath.data_path.wikitables + 'threshold_r5-c2-a50/josie-test/'
-    input_set_file = ROOT_TEST_DIR + 'sloth_tables_n10.set'
-    output_integer_set_file = ROOT_TEST_DIR + 'sloth_tables_n10.set-2'
-    output_inverted_list_file = ROOT_TEST_DIR + 'sloth_tables_n10.inverted-list'
+    format_spark_set_file(
+        'data/josie-tests/n45673-mset/scala-tables.set-2',
+        'data/josie-tests/n45673-mset/scala-tables-formatted.set-2',
+        False
+    )
+
+    format_spark_set_file(
+        'data/josie-tests/n45673-mset/scala-tables.inverted-list',
+        'data/josie-tests/n45673-mset/scala-tables-formatted.inverted-list'
+    )
