@@ -5,6 +5,8 @@ import warnings
 
 import pandas as pd
 import psycopg.rows
+
+from tools.josiedataprep.extract_tables_with_size_over_threshold import extract_tables_from_jsonl_as_csv_folder
 warnings.filterwarnings('ignore')
 from time import time
 from collections import defaultdict
@@ -27,12 +29,18 @@ from tools.josiedataprep.preparation_functions import (
 )
 
 
-def run_test(n_tables=500, mode='set', use_scala_jar=True, spark_context=None, k=3):
-    ############# SET UP #############
-
+def run_test(
+        n_tables=500, mode='set', 
+        spark_context=None, k=3,
+        user_dbname='user',
+        jsonl_extraction=False, 
+        original_tables_json_file=None,
+        original_sloth_results_file=None,
+        use_scala_jar=True):
     # input files
-    intput_tables_csv_dir =     defpath.data_path.wikitables + '/sloth-subset/csv'
-    input_sloth_res_csv_file =  defpath.data_path.wikitables + '/sloth-subset/sloth-results-r5-c2-a50.csv'
+    tables_subset_directory =   defpath.data_path.wikitables + '/tables-subset'
+    intput_tables_csv_dir =     tables_subset_directory + '/csv'
+    input_sloth_res_csv_file =  tables_subset_directory + '/sloth-results-r5-c2-a50.csv'
     
     # output files
     ROOT_TEST_DIR =             defpath.data_path.base + f'/josie-tests/n{n_tables}-m{mode}'
@@ -51,11 +59,11 @@ def run_test(n_tables=500, mode='set', use_scala_jar=True, spark_context=None, k
     
     runtime_metrics = defaultdict(float)
         
-    dbname = f'n{n_tables}_m{mode}'
-    # table_db_prefix = dbname
+    test_dbname = f'n{n_tables}_m{mode}'
+
+    ############# SET UP #############
     if os.path.exists(ROOT_TEST_DIR):
-        if True:
-        # if input(f'Directory {ROOT_TEST_DIR} already exists: delete it to continue? (y/n) ') == 'y':
+        if input(f'Directory {ROOT_TEST_DIR} already exists: delete it to continue? (yes/no) ') == 'y':
             os.system(f'rm -rf {ROOT_TEST_DIR}')
         else:
             print('Cannot continue if directory already exists. Exiting...')
@@ -69,11 +77,26 @@ def run_test(n_tables=500, mode='set', use_scala_jar=True, spark_context=None, k
     
     if not spark_context:
         conf = pyspark.SparkConf().setAppName('CreateIndex')    
-        spark_context = pyspark.SparkContext(conf=conf)
+        spark_context = pyspark.SparkContext.getOrCreate(conf=conf)
 
     ############# DATA PREPARATION #############
+    if jsonl_extraction:
+        start = time()
+        extract_tables_from_jsonl_as_csv_folder(
+            tables_subset_directory,
+            original_tables_json_file,
+            original_sloth_results_file,
+            intput_tables_csv_dir,
+            input_sloth_res_csv_file,
+            thresholds={
+                'min_rows': 5,
+                'min_columns': 2,
+                'min_area': 50
+            }
+        )
+        runtime_metrics['0.extract_jsonl_tables'] = round(time() - start, 5)
+
     start = time()
-    # extract_starting_sets_from_tables(
     parallel_extract_starting_sets_from_tables(
         input_tables_csv_dir=intput_tables_csv_dir,
         final_set_file=set_file,
@@ -88,7 +111,6 @@ def run_test(n_tables=500, mode='set', use_scala_jar=True, spark_context=None, k
     if use_scala_jar:
         create_raw_tokens_jar_path = defpath.data_path.base + '/josie-tests/create_raw_tokens.jar'
         create_inverted_list_jar_path = defpath.data_path.base + '/josie-tests/indexing.jar'
-        
         print('Start creating raw tokens (JAR mode)...')
         start = time()
         os.system(f"/usr/lib/jvm/java-1.8.0-openjdk-amd64/bin/java -Dfile.encoding=UTF-8 -jar {create_raw_tokens_jar_path}      file://{set_file} file://{raw_tokens_file}")
@@ -136,22 +158,25 @@ def run_test(n_tables=500, mode='set', use_scala_jar=True, spark_context=None, k
 
     ################### DATABASE OPERATIONS ####################
     start = time()
-    with psycopg.connect(f"port=5442 host=/tmp dbname={dbname}") as conn:
+    with psycopg.connect(f"port=5442 host=/tmp dbname={test_dbname}") as conn:
         with conn.cursor() as cur:
             drop_tables(cur)
             create_tables(cur)
             
-            print(f'Inserting inverted lists...')
-            # parts = [p for p in sorted(os.listdir(inverted_list_file)) if p.startswith('part-')]
-            # for part in tqdm(parts, total=len(parts)):
-            #     insert_data_into_inverted_list_table(cur, f'{inverted_list_file}/{part}')
-            insert_data_into_inverted_list_table(cur, inverted_list_file)
-
-            print(f'Inserting integer sets...')
-            # parts = [p for p in sorted(os.listdir(integer_set_file)) if p.startswith('part-')]
-            # for part in tqdm(parts, total=len(parts)):
-            #     insert_data_into_sets_table(cur, f'{integer_set_file}/{part}')
-            insert_data_into_sets_table(cur, integer_set_file)
+            if use_scala_jar:
+                print(f'Inserting inverted lists...')
+                insert_data_into_inverted_list_table(cur, inverted_list_file)
+                print(f'Inserting integer sets...')
+                insert_data_into_sets_table(cur, integer_set_file)
+            
+            if not use_scala_jar:
+                parts = [p for p in sorted(os.listdir(inverted_list_file)) if p.startswith('part-')]
+                for part in tqdm(parts, total=len(parts)):
+                    insert_data_into_inverted_list_table(cur, f'{inverted_list_file}/{part}')
+                parts = [p for p in sorted(os.listdir(integer_set_file)) if p.startswith('part-')]
+                for part in tqdm(parts, total=len(parts)):
+                    insert_data_into_sets_table(cur, f'{integer_set_file}/{part}')
+            
             insert_data_into_query_table(cur, sampled_ids)
 
             create_sets_index(cur)
@@ -160,17 +185,17 @@ def run_test(n_tables=500, mode='set', use_scala_jar=True, spark_context=None, k
     runtime_metrics['4.db_operations'] = round(time() - start, 5)
 
     ############# RUNNING JOSIE #############
-    HOME = os.environ['HOME']
-    josie_cmd_dir = f'{HOME}/go/src/github.com/ekzhu/josie/cmd'
+    GOPATH = os.environ['GOPATH']
+    josie_cmd_dir = f'{GOPATH}/src/github.com/ekzhu/josie/cmd'
     os.chdir(josie_cmd_dir)
 
     start = time()
     os.system(f'go run {josie_cmd_dir}/sample_costs/main.go \
-              --pg-database={dbname} \
+              --pg-database={test_dbname} \
                 --pg-table-queries=queries')
     
     os.system(f'go run {josie_cmd_dir}/topk/main.go \
-              --pg-database={dbname} \
+              --pg-database={test_dbname} \
                     --output={ROOT_TEST_DIR} \
                         --k={k}')
     
@@ -178,24 +203,41 @@ def run_test(n_tables=500, mode='set', use_scala_jar=True, spark_context=None, k
     runtime_metrics['total_time'] = sum(runtime_metrics.values())
 
     ############# GETTING DATABASE STATISTICS #############
-    with psycopg.connect(f"port=5442 host=/tmp dbname={dbname}") as conn:
+    with psycopg.connect(f"port=5442 host=/tmp dbname={test_dbname}") as conn:
         with conn.cursor(row_factory=psycopg.rows.dict_row) as cur:
-            pd.DataFrame(get_statistics_from_(cur, dbname)).to_csv(db_stat_file, index=False)
+            pd.DataFrame(get_statistics_from_(cur, test_dbname)).to_csv(db_stat_file, index=False)
     
     pd.DataFrame([runtime_metrics]).to_csv(runtime_stat_file, index=False)
 
 
-if __name__ == '__main__':
-    # create the SparkContext object (very basic)
-    conf = pyspark.SparkConf().setAppName('CreateIndex')    
-    spark_context = print_info(msg_before='Creating Spark context...', msg_after='Completed.') \
-        (pyspark.SparkContext.getOrCreate)(conf=conf)
-    
-    for n in [45673]:        
-        start = time()
-        run_test(n, mode='set', use_scala_jar=True, spark_context=spark_context, k=3)
-        print(f'\n\n\nTotal time for n={n}: {round(time() - start, 3)}s', end='\n\n\n')
 
-    # stop the SparkContext object
-    spark_context.cancelAllJobs()
-    spark_context.stop()
+
+
+if __name__ == '__main__':
+    # SPECIFICARE CONFIGURAZIONE DEL TEST
+    k = 3
+    mode = 'set'
+    user_dbname = 'nanni'
+    n_tables = 45673    # questo è un parametro ancora poco flessibile, se è un numero diverso
+                        # da quello delle tabelle presenti nella cartella csv va tutto in pappa
+                        # si può ottenere ad es con "ls /path/to/csvdirectory | wc -l"
+
+    use_scala_jar = True
+    jsonl_extraction = False
+    original_tables_jsonl_file = defpath.data_path.wikitables + '/original_turl_train_tables.jsonl'
+    original_sloth_results_file = defpath.data_path.wikitables + '/original_sloth_results.csv'
+
+    start = time()
+    
+    run_test(
+        n_tables=n_tables, 
+        mode=mode, 
+        k=k,
+        user_dbname=user_dbname,
+        use_scala_jar=use_scala_jar,
+        jsonl_extraction=jsonl_extraction,
+        original_sloth_results_file=original_sloth_results_file,
+        original_tables_json_file=original_tables_jsonl_file
+        )
+
+    print(f'\n\n\nTotal time for n={n_tables}: {round(time() - start, 3)}s', end='\n\n\n')

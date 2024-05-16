@@ -1,7 +1,7 @@
 import os
 
 # remember to set the env variable TESI_ROOT_PATH 
-root_project_path = os.environ['THESYS_PATH']
+root_project_path = os.environ['THESIS_PATH']
 
 
 class _DataPath:

@@ -21,7 +21,7 @@ def drop_database(db:psycopg.Cursor, dbname:str):
                WHERE EXISTS (SELECT FROM pg_database WHERE datname = '{dbname}'); """)
 
 @print_info(msg_before='Creating database...', msg_after='Completed.')
-def create_db(db:psycopg.Cursor, dbname:str):
+def create_database(db:psycopg.Cursor, dbname:str):
     db.execute(f""" 
                SELECT 'CREATE DATABASE {dbname}' 
                WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = '{dbname}'); """)
