@@ -210,12 +210,12 @@ func RunWebTableExperiments(db *sql.DB, outputDir string, cpuProfile bool, useMe
 	}
 }
 
-func NanniExperiments(db *sql.DB, k_value int, outputDir string, cpuProfile bool, useMemTokenTable bool) {
-	listTable := 				"inverted_lists"
-	setTable := 				"sets"
-	queryTable := 				"queries"
-	readListCostSampleTable := 	"read_list_cost_samples"
-	readSetCostSampleTable :=  	"read_set_cost_samples"
+func NanniExperiments(db *sql.DB, k_value int, test_tag string, outputDir string, cpuProfile bool, useMemTokenTable bool) {
+	listTable := 				test_tag + "_" + "inverted_lists"
+	setTable := 				test_tag + "_" + "sets"
+	queryTable := 				test_tag + "_" + "queries"
+	readListCostSampleTable := 	test_tag + "_" + "read_list_cost_samples"
+	readSetCostSampleTable :=  	test_tag + "_" + "read_set_cost_samples"
 	k := []int {k_value}
 
 	resetCostFunctionParameters(db, readListCostSampleTable, readSetCostSampleTable)

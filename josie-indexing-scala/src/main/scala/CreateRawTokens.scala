@@ -12,10 +12,6 @@ object CreateRawTokens {
     // .set("spark.driver.memory", "5g")
     val sc = new SparkContext(conf)
 
-    print("Initial arguments: ")
-    print(args.mkString(", "))
-    print("\n")
-
     // necessary to run the jar file
     val hadoopConfig: Configuration = sc.hadoopConfiguration
     hadoopConfig.set("fs.hdfs.impl", classOf[org.apache.hadoop.hdfs.DistributedFileSystem].getName)

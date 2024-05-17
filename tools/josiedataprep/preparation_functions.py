@@ -1,3 +1,4 @@
+from collections import Counter
 import os
 import re
 import mmh3
@@ -57,12 +58,33 @@ def _create_set_with_my_tokenizer(df: pd.DataFrame):
     return tokens_set
 
 
-def _create_set_with_all_tokens(df, bag:bool=False):
-    if not bag:
+def _create_set_with_set_semantic(df):
         if type(df) == pd.DataFrame:
-            return {str(token).replace('\n', '\t').replace('|', ' ') for i in range(len(df.columns)) for token in df.iloc[:, i].unique() if not pd.isna(token) and token}
+            return {str(token).replace('|', ' ') for token in df.values.flatten() if not pd.isna(token) and token}
         elif type(df) == pl.DataFrame:
             pass
+
+
+def _create_set_with_bag_semantic(df):
+        if type(df) == pd.DataFrame:
+            table_set = set()
+            x = df.values.flatten()
+            x = np.frompyfunc(lambda t: str(t).replace('|', ' '), 1, 1)(x)
+            x = np.sort(x[~pd.isna(x)])
+            prev = x[0]
+            tag = 1
+            table_set.add(f'{prev}#{tag}')
+            for token in x[1:]:
+                if token == prev:
+                    tag += 1
+                else:
+                    tag = 1
+                table_set.add(f'{token}#{tag}')
+                prev = token
+            return table_set
+        elif type(df) == pl.DataFrame:
+            pass
+
 
 
 def parallel_extract_starting_sets_from_tables(input_tables_csv_dir, 
@@ -81,7 +103,7 @@ def parallel_extract_starting_sets_from_tables(input_tables_csv_dir,
         
         for i, id_table in enumerate(ids, start=offset):
             # read the csv
-            table = pd.read_csv(input_tables_csv_dir + f'/{id_table}', sep='\t').convert_dtypes()
+            table = pd.read_csv(input_tables_csv_dir + f'/{id_table}')
             
             # extract the token set
             if with_ == 'mytok':
@@ -89,9 +111,9 @@ def parallel_extract_starting_sets_from_tables(input_tables_csv_dir,
             elif with_ == 'infer':
                 table_set = _create_set_with_inferring_column_dtype(table, nlp=nlp, **kwargs)
             elif with_ == 'set':
-                table_set = _create_set_with_all_tokens(table, bag=False)
+                table_set = _create_set_with_set_semantic(table)
             elif with_ == 'bag':
-                table_set = _create_set_with_all_tokens(table, bag=True)
+                table_set = _create_set_with_bag_semantic(table)
             else:
                 raise AttributeError("Parameter with_ must be a value in {'mytok', 'infer', 'set', 'bag'}")
             
@@ -110,7 +132,7 @@ def parallel_extract_starting_sets_from_tables(input_tables_csv_dir,
             for id_col in range(len(table.columns)):
                 num_distinct = table.iloc[:, id_col].unique().shape[0]
                 num_na = table.iloc[:, id_col].isna().sum()
-                column_stat_q.put(f"{','.join(map(str, [i + offset, id_col, table.shape[1], num_distinct, num_na, round(num_na / table.shape[1], 5)]))}\n")
+                column_stat_q.put(f"{','.join(map(str, [i + offset, id_col, table.shape[1], num_distinct, num_na, round(num_na / table.shape[0], 5)]))}\n")
         
         # print(f'Worker {os.getpid()} completed')
         set_q.put(f'Process {os.getpid()} completed')
@@ -199,9 +221,9 @@ def extract_starting_sets_from_tables(input_tables_csv_dir,
             elif with_ == 'infer':
                 table_set = _create_set_with_inferring_column_dtype(table, nlp=nlp, **kwargs)
             elif with_ == 'set':
-                table_set = _create_set_with_all_tokens(table, bag=False)
+                table_set = _create_set_with_set_semantic(table, bag=False)
             elif with_ == 'bag':
-                table_set = _create_set_with_all_tokens(table, bag=True)
+                table_set = _create_set_with_set_semantic(table, bag=True)
             else:
                 raise AttributeError("Parameter with_ must be a value in {'mytok', 'infer', 'set', 'bag'}")
             

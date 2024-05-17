@@ -64,7 +64,7 @@ def extract_tables_from_jsonl_as_csv_folder(
                 and (MIN_COLUMN_THRESHOLD <= ncols <= MAX_COLUMN_THRESHOLD) \
                 and (MIN_AREA_THRESHOLD <= area <= MAX_AREA_THRESHOLD):
 
-                rebuild_table(jtable, mode='pandas').to_csv(output_csv_tables_directory + f'/{jtable["_id"]}')
+                rebuild_table(jtable, mode='pandas').to_csv(output_csv_tables_directory + f'/{jtable["_id"]}', index=False)
                 # with open(output_csv_tables_dir + f'/{jtable["_id"]}', 'w') as f:
                 #     f.write(rebuild_table(jtable, mode='text')) # forse non funziona proprio benissimissimo
                 final_sample_ids.add(jtable['_id'])

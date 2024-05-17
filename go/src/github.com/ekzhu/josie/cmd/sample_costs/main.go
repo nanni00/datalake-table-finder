@@ -13,7 +13,7 @@ import (
 
 var (
 	pgServer, pgPort, pgDatabase				 	string
-	benchmark										string
+	test_tag										string
 	pgTableSets                                  	string
 	pgTableLists                                 	string
 	pgTableQueries                               	string
@@ -27,13 +27,13 @@ var (
 func main() {
 	flag.StringVar(&pgServer, "pg-server", "localhost", "Postgres server addresss")
 	flag.StringVar(&pgPort, "pg-port", "5442", "Postgres server port")
-	flag.StringVar(&pgDatabase, "pg-database", 										"sloth500", "Postgres database name")
-	flag.StringVar(&benchmark, "benchmark", 										"sloth500", "The name of the benchmark dataset to use")
-	flag.StringVar(&pgTableSets, "pg-table-sets", 									"test_1_sets", "Postgres table for sets")
-	flag.StringVar(&pgTableLists, "pg-table-lists", 								"sloth500_inverted_lists", "Postgres table for inverted lists")
-	flag.StringVar(&pgTableQueries, "pg-table-queries", 							"sloth500_queries", "Postgres table for the query sets")
-	flag.StringVar(&pgTableReadSetCostSamples, "pg-table-read-set-cost-samples", 	"sloth500_read_set_cost_samples", "Postgres table for samples for read set cost estimation")
-	flag.StringVar(&pgTableReadListCostSamples, "pg-table-read-list-cost-samples", 	"sloth500_read_list_cost_samples", "Postgres table for samples for read list cost estimation")
+	flag.StringVar(&pgDatabase, "pg-database", 										"nanni", "Postgres database name")
+	flag.StringVar(&test_tag, "test_tag", 											"n45673_mset", "The name of the benchmark dataset to use")
+	flag.StringVar(&pgTableSets, "pg-table-sets", 									"n45673_mset_sets", "Postgres table for sets")
+	flag.StringVar(&pgTableLists, "pg-table-lists", 								"n45673_mset_inverted_lists", "Postgres table for inverted lists")
+	flag.StringVar(&pgTableQueries, "pg-table-queries", 							"n45673_mset_queries", "Postgres table for the query sets")
+	flag.StringVar(&pgTableReadSetCostSamples, "pg-table-read-set-cost-samples", 	"n45673_mset_read_set_cost_samples", "Postgres table for samples for read set cost estimation")
+	flag.StringVar(&pgTableReadListCostSamples, "pg-table-read-list-cost-samples", 	"n45673_mset_read_list_cost_samples", "Postgres table for samples for read list cost estimation")
 	flag.IntVar(&minListLength, "cost-min-list-size", 0, "Minimum list length for cost estimation")
 	flag.IntVar(&maxListLength, "cost-max-list-size", 3000, "Maximum list length for cost estimation")
 	flag.IntVar(&listLengthStep, "cost-list-size-step", 100, "Step size for cost estimation")
@@ -45,10 +45,10 @@ func main() {
 	}
 	defer db.Close()
 	
-	pgTableSets := 					"sets"
-	pgTableLists := 				"inverted_lists"
-	pgTableReadSetCostSamples := 	"read_set_cost_samples"
-	pgTableReadListCostSamples := 	"read_list_cost_samples"
+	pgTableSets := 					test_tag + "_" + "sets"
+	pgTableLists := 				test_tag + "_" + "inverted_lists"
+	pgTableReadSetCostSamples := 	test_tag + "_" + "read_set_cost_samples"
+	pgTableReadListCostSamples := 	test_tag + "_" + "read_list_cost_samples"
 
 	sampleReadSetCost(db, pgTableSets, pgTableQueries, pgTableReadSetCostSamples)
 	sampleReadListCost(db, pgTableLists, pgTableReadListCostSamples, minListLength, maxListLength, listLengthStep, samplePerStep)
@@ -74,8 +74,8 @@ func sampleReadSetCost(db *sql.DB, pgTableSets, pgTableQueries, pgTableReadSetCo
 	if err != nil {
 		panic(err)
 	}
-	for i, id := range sampleSetIDs {
-		log.Printf("Read set id = %d, #%d/%d", id, i+1, len(sampleSetIDs))
+	for _, id := range sampleSetIDs {
+		// log.Printf("Read set id = %d, #%d/%d", id, i+1, len(sampleSetIDs))
 		start := time.Now()
 		s := joise.SetTokens(db, pgTableSets, id)
 		dur := time.Since(start)
@@ -115,7 +115,7 @@ func sampleReadListCost(db *sql.DB, pgTableLists, pgTableReadListCostSamples str
 	ORDER BY random()
 	LIMIT $3;`, pq.QuoteIdentifier(pgTableReadListCostSamples), pq.QuoteIdentifier(pgTableLists))
 	for l := minLength; l < maxLength; l += step {
-		log.Printf("Sample %d lists with length = (%d, %d]", sampleSizePerStep, l, l+step)
+		// log.Printf("Sample %d lists with length = (%d, %d]", sampleSizePerStep, l, l+step)
 		_, err := db.Exec(s, l, l+step, sampleSizePerStep)
 		if err != nil {
 			panic(err)
