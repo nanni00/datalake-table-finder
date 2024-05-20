@@ -84,6 +84,14 @@ def extract_tables_from_jsonl_as_csv_folder(
 
 
 
+
+
+
+
+
+
+
+
 if __name__ == '__main__':
     ROW_THRESHOLD = 5
     COLUMN_THRESHOLD = 2

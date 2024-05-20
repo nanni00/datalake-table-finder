@@ -1,12 +1,17 @@
-from collections import Counter
+from collections import Counter, defaultdict
 import os
 import re
 import mmh3
 import time
+import pymongo.collection
 import spacy
 import random
 import pyspark
+from pyspark.sql import SparkSession
+from pyspark.sql import types
+import pymongo
 import binascii
+import jsonlines
 import numpy as np
 import pandas as pd
 import polars as pl
@@ -19,6 +24,10 @@ from tools.utils.utils import print_info, my_tokenizer
 
 import multiprocessing as mp
 import jenkspy
+
+_TOKEN_TAG_SEPARATOR = '@#'
+
+
 
 
 def _infer_column_type(column: list, check_column_threshold:int=3, nlp=None|spacy.Language) -> str:
@@ -58,17 +67,17 @@ def _create_set_with_my_tokenizer(df: pd.DataFrame):
     return tokens_set
 
 
-def _create_set_with_set_semantic(df):
-        if type(df) == pd.DataFrame:
-            return {str(token).replace('|', ' ') for token in df.values.flatten() if not pd.isna(token) and token}
-        elif type(df) == pl.DataFrame:
-            pass
+def _create_set_with_set_semantic(indata):
+        if type(indata) == pd.DataFrame:
+            return {str(token).replace('|', ' ') for token in indata.values.flatten() if not pd.isna(token) and token}
+        elif type(indata) == list:
+            return list({str(token).replace('|', ' ') for column in indata for token in column if not pd.isna(token) and token})
 
 
-def _create_set_with_bag_semantic(df):
-        if type(df) == pd.DataFrame:
+def _create_set_with_bag_semantic(indata):
+        if type(indata) == pd.DataFrame:
             table_set = set()
-            x = df.values.flatten()
+            x = indata.values.flatten()
             x = np.frompyfunc(lambda t: str(t).replace('|', ' '), 1, 1)(x)
             x = np.sort(x[~pd.isna(x)])
             prev = x[0]
@@ -82,8 +91,117 @@ def _create_set_with_bag_semantic(df):
                 table_set.add(f'{token}#{tag}')
                 prev = token
             return table_set
-        elif type(df) == pl.DataFrame:
-            pass
+        elif type(indata) == list: # when creating with mongodb stuff
+            counter = defaultdict(int) # is that better? More space but no sort operation            
+            def _create_token_tag(token):
+                counter[token] += 1
+                return f'{token}{_TOKEN_TAG_SEPARATOR}{counter[token]}'
+            return [_create_token_tag(str(token).replace('|', ' ')) for column in indata for token in column if not pd.isna(token) and token]
+
+
+def _create_token_set(data, mode):
+    if mode == 'set':
+        return list({str(token).replace('|', ' ') for column in data for token in column if not pd.isna(token) and token})
+    elif mode == 'bag':
+        counter = defaultdict(int) # is that better? More space but no sort operation            
+        def _create_token_tag(token):
+            counter[token] += 1
+            return f'{token}{_TOKEN_TAG_SEPARATOR}{counter[token]}'
+        return [_create_token_tag(str(token).replace('|', ' ')) for column in data for token in column if not pd.isna(token) and token]
+    else:
+        raise Exception('Unknown mode: ' + str(mode))
+
+
+
+@print_info(msg_before="Extracting tables from JSONL file...")
+def extract_tables_from_jsonl_to_mongodb(
+        input_tables_jsonl_file,
+        input_sloth_results_csv_file,
+        table_collection:pymongo.collection.Collection,
+        output_sloth_results_csv_file,
+        statistics_file,
+        thresholds:dict[str:int],
+        milestone=1000,
+        ntotal_tables=570171
+        ):
+
+    MIN_ROW_THRESHOLD =     0       if 'min_rows'       not in thresholds else thresholds['min_rows']
+    MAX_ROW_THRESHOLD =     np.inf  if 'max_rows'       not in thresholds else thresholds['max_rows']
+    MIN_COLUMN_THRESHOLD =  0       if 'min_columns'    not in thresholds else thresholds['min_columns']
+    MAX_COLUMN_THRESHOLD =  np.inf  if 'max_columns'    not in thresholds else thresholds['max_columns']
+    MIN_AREA_THRESHOLD =    0       if 'min_area'       not in thresholds else thresholds['min_area']
+    MAX_AREA_THRESHOLD =    np.inf  if 'max_area'       not in thresholds else thresholds['max_area']
+
+    all_sloth_results = pl.scan_csv(input_sloth_results_csv_file)
+
+    # I load all the table IDs of train_tables.jsonl used in the sloth tests, and read just them
+    print(f'Reading table IDs from {input_sloth_results_csv_file}...')
+    sloth_tables_ids = set( \
+        pl.concat( \
+            [all_sloth_results.select('r_id').collect().to_series(), 
+            all_sloth_results.select('s_id').collect().to_series()]
+            ) \
+                .to_list()
+        )
+
+    final_sample_ids = set()
+    tables = list()  # empty list to store the parsed tables
+    counter = 0
+
+    print(f'Reading jsonl file with wikitables from {input_tables_jsonl_file}...')
+    tabstatwriter = open(statistics_file, 'w') if statistics_file else None
+
+    with jsonlines.open(input_tables_jsonl_file) as reader:
+        for i, raw_table in tqdm(enumerate(reader), total=ntotal_tables):
+            if counter % milestone == 0:
+                # print(counter, end='\r')
+                pass
+            if raw_table['_id'] not in sloth_tables_ids:
+                continue
+
+            nrows, ncols = len(raw_table['tableData']), len(raw_table['tableHeaders'][0]) 
+            area = len(raw_table['tableData']) * len(raw_table['tableHeaders'][0])
+
+            if (MIN_ROW_THRESHOLD <= nrows <= MAX_ROW_THRESHOLD) \
+                and (MIN_COLUMN_THRESHOLD <= ncols <= MAX_COLUMN_THRESHOLD) \
+                and (MIN_AREA_THRESHOLD <= area <= MAX_AREA_THRESHOLD):
+
+                raw_table_content = raw_table["tableData"]  # load the table content in its raw form
+                table = dict()  # empty dictionary to store the parsed table
+                table["_id"] = raw_table["_id"]  # unique identifier of the table
+                table["headers"] = raw_table["tableHeaders"]
+                table["context"] = raw_table["pgTitle"] + " | " + raw_table["sectionTitle"] + " | " + raw_table["tableCaption"]  # table context            
+                table["content"] = [[cell["text"] for cell in row] for row in raw_table_content]  # table content (only cell text)                
+                tables.append(table)  # append the parsed table to the list
+                final_sample_ids.add(raw_table['_id'])
+                counter += 1  # increment the counter
+
+                # collect statistics
+                if tabstatwriter:
+                    n_na = len({t for column in table['content'] for t in column if pd.isna(t)})
+                    n_distincts = len({t for column in table['content'] for t in column})
+                    n_rows = len(table['content'][0])
+                    n_columns = len(table['content'])
+                    table_size = n_rows * n_columns
+
+                    tabstatwriter.write(f"{table['_id']},{n_rows},{n_columns},{table_size},{n_na},{n_distincts},{round(n_na / table_size, 3)}\n")
+
+        table_collection.insert_many(tables)
+
+    if tabstatwriter: tabstatwriter.close()    
+    print(f'Wrote {counter} tables into the database.')
+
+    # Selecting only the records whose tables appear in the selected ids
+    sub_res = all_sloth_results \
+        .filter( \
+            (pl.col('r_id').is_in(final_sample_ids)) & \
+                (pl.col('s_id').is_in(final_sample_ids)) \
+            ) \
+                .collect() \
+                    .sort(by='overlap_area')
+
+    sub_res.write_csv(output_sloth_results_csv_file)
+
 
 
 
@@ -285,7 +403,7 @@ def create_raw_tokens(
     sets = spark_context \
         .textFile(input_set_file) \
             .map(
-                lambda line: line.split(',')
+                lambda line: line.split('|')
             ) \
                 .map(
                     lambda line: (
@@ -324,14 +442,14 @@ def create_raw_tokens(
 
 
 @print_info(msg_before='Creating integer sets and inverted index...', msg_after='Completed.', time=True)
-def create_index(input_set_file, output_integer_set_file, output_inverted_list_file, spark_context=None):
-    if not spark_context:
-        conf = pyspark.SparkConf() \
-            .setAppName('CreateIndex')
-                # .set('spark.executor.memory', '100g') \
-                # .set('spark.driver.memory', '5g')
+def create_index(mode, id_file, output_integer_set_file, output_inverted_list_file):
+#def create_index(input_set_file, output_integer_set_file, output_inverted_list_file):
+    """
+    conf = pyspark.SparkConf() \
+        .setAppName('CreateInvertedIndexAndIntegerSets')
+                
 
-        spark_context = pyspark.SparkContext(conf=conf)
+    spark_context = pyspark.SparkContext(conf=conf)
 
     skip_tokens = set()
 
@@ -341,7 +459,7 @@ def create_index(input_set_file, output_integer_set_file, output_inverted_list_f
     sets = spark_context \
         .textFile(input_set_file) \
             .map(
-                lambda line: line.split(',')
+                lambda line: line.split('|')
             ) \
                 .map(
                     lambda line: (
@@ -349,29 +467,42 @@ def create_index(input_set_file, output_integer_set_file, output_inverted_list_f
                         [token for token in line[1:] if token not in skip_tokens]
                     )
                 )
+    """
+    def prepare_tuple(t, mode):
+        return [t[1], _create_token_set(t[0][1], mode)]    
 
-    token_sets = sets.flatMap(
+    spark = SparkSession \
+        .builder \
+        .appName("mongodbtest1") \
+        .master('local')\
+        .config("spark.mongodb.input.uri", "mongodb://127.0.0.1:27017/optitab.wikitables") \
+        .config("spark.mongodb.output.uri", "mongodb://127.0.0.1:27017/optitab.wikitables") \
+        .config('spark.jars.packages', 'org.mongodb.spark:mongo-spark-connector_2.12:3.0.1') \
+        .config("spark.executor.cores", 12) \
+        .getOrCreate()
+    
+    # spark.sparkContext.conf.set("spark.executor.cores", "10")
+
+    sets = spark.read\
+        .format('mongo')\
+        .option( "uri", "mongodb://127.0.0.1:27017/optitab.wikitables") \
+        .load() \
+        .select('_id', 'content') \
+        .rdd \
+        .map(list)
+
+    sets = sets.zipWithUniqueId()
+
+    sets.map(lambda t: f"{t[1]},{t[0][0]}").coalesce(numPartitions=1).saveAsTextFile(id_file)
+
+    token_sets = sets.map(lambda t: prepare_tuple(t, mode)) \
+        .flatMap(
             lambda sid_tokens: \
                 [
                     (token, sid_tokens[0]) 
                     for token in sid_tokens[1]
                 ]
         )
-
-    def compare(a:tuple[int,list[int]], b:tuple[int,list[int]]):
-        la, lb = len(a[1]), len(b[1])
-
-        if la != lb: 
-            return -1 if la < lb else 0 if la == lb else 1
-        elif not a or not b:
-            return 0
-        elif a[0] != b[0]:
-            return -1 if a[0] < b[0] else 0 if a[0] == b[0] else 1 
-        else:
-            for (x, y) in zip(a[1], b[1]):
-                if x != y:
-                    return -1 if x < y else 0 if x == y else 1
-            return 0
 
     posting_lists_sorted = token_sets \
         .groupByKey() \
@@ -390,11 +521,11 @@ def create_index(input_set_file, output_integer_set_file, output_inverted_list_f
                 ) \
                     .sortBy(
                         # t: (token, setIDs, hash)
-                        lambda t: (len(t[1]), t[1] == [], t[2], t[1])
+                        lambda t: (len(t[1]), t[2], t[1])
                     ) \
                         .zipWithIndex() \
                             .map(
-                                # t: (rawToken, sids, hash), tokenIndex
+                                # t: ((rawToken, sids, hash), tokenIndex)
                                 lambda t: (t[1], (t[0][0], t[0][1], t[0][2]))
                             ) \
                                 .persist(pyspark.StorageLevel.MEMORY_ONLY)
@@ -402,32 +533,41 @@ def create_index(input_set_file, output_integer_set_file, output_inverted_list_f
     def equal_arrays(a1, a2):
         return len(a1) == len(a2) and all(x1 == x2 for (x1, x2) in zip(a1, a2))
 
+    # create the duplicate groups
     duplicate_group_ids = posting_lists_sorted \
         .map(
-            # tokenIndex, (rawToken, sids, hash)
+            # t: (tokenIndex, (rawToken, sids, hash))
             lambda t: (t[0] + 1, (t[1][1], t[1][2]))
         ) \
             .join(posting_lists_sorted) \
                 .map(
+                    # if the lower and upper posting lists are different, then the upper posting list
+                    # belong to a new group, and the upper token index is the new group's
+                    # starting index
                     # (tokenIndexUpper, ((sidsLower, hashLower), (_, sidsUpper, hashUpper)))
                     lambda t: 
-                        -1 if equal_arrays(t[1][0][0], t[1][1][1]) and t[1][0][1] == t[1][1][2] else t[0]
+                        -1 if t[1][0][1] == t[1][1][2] and equal_arrays(t[1][0][0], t[1][1][1]) else t[0]
                 ) \
                     .filter(
+                        # add the first group's starting index, which is 0, and then
+                        # create the group IDs
                         lambda i: i > 0
                     ) \
                         .union(
-                            spark_context.parallelize([0])
+                            spark.sparkContext.parallelize([0])
                         ) \
                             .sortBy(
                                 lambda i: i
                             ) \
                                 .zipWithIndex() \
                                     .map(
+                                        # returns a mapping from group ID to the
+                                        # starting index of the group
                                         # (startingIndex, GroupID)
                                         lambda t: (t[1], t[0])
                                     )
 
+    # generating all token indexes of each group
     token_group_ids = duplicate_group_ids \
         .join(
             duplicate_group_ids \
@@ -439,11 +579,11 @@ def create_index(input_set_file, output_integer_set_file, output_inverted_list_f
                 .flatMap(
                     # GroupID, (startingIndexLower, startingIndexUpper)
                     lambda t: map( 
-                            lambda token_index: (token_index, t[0]),
-                            range(t[1][0], t[1][1])
+                            lambda token_index: (token_index, t[0]), range(t[1][0], t[1][1])
                         )
                 ).persist(pyspark.StorageLevel.MEMORY_ONLY)
 
+    # join posting lists with their duplicate group IDs
     posting_lists_with_group_ids = posting_lists_sorted \
         .join(
             token_group_ids
@@ -455,8 +595,6 @@ def create_index(input_set_file, output_integer_set_file, output_inverted_list_f
 
     # STAGE 2: CREATE INTEGER SETS
     # Create sets and replace text tokens with token index
-    # print('STAGE 2: CREATE INTEGER SETS')
-
     integer_sets = posting_lists_with_group_ids \
         .flatMap(
             # (tokenIndex, (_, _, sids))
@@ -471,9 +609,6 @@ def create_index(input_set_file, output_integer_set_file, output_inverted_list_f
                     )
                 )
 
-    # STAGE 3: CREATE THE FINAL POSTING LISTS
-    # Create new posting lists and join the previous inverted
-    # lists to obtain the final posting lists with all the information
     def sets_format_string(t):
         sid, indices = t
         return "{}|{}|{}|{{{}}}".format(sid, len(indices), len(indices), ','.join(map(str, indices)))
@@ -489,9 +624,10 @@ def create_index(input_set_file, output_integer_set_file, output_inverted_list_f
             .format(
                 token, freq, gid, 1, set_ids, set_sizes, set_pos, binascii.hexlify(bytes(str(raw_token), 'utf-8'))
             )
-
-    # print('STAGE 3: CREATE THE FINAL POSTING LISTS')
-
+    
+    # STAGE 3: CREATE THE FINAL POSTING LISTS
+    # Create new posting lists and join the previous inverted
+    # lists to obtain the final posting lists with all the information
     posting_lists = integer_sets \
         .flatMap(
             # (sid, tokens)
@@ -520,7 +656,6 @@ def create_index(input_set_file, output_integer_set_file, output_inverted_list_f
     # STAGE 4: SAVE INTEGER SETS AND FINAL POSTING LISTS
     # print('STAGE 4: SAVE INTEGER SETS AND FINAL POSTING LISTS')
     # to load directly into the database
-    """
     integer_sets.map(
         lambda t: sets_format_string(t)
     ).saveAsTextFile(output_integer_set_file)
@@ -539,30 +674,6 @@ def create_index(input_set_file, output_integer_set_file, output_inverted_list_f
         # (token, rawToken, gid, sets) -> "$token|$rawToken|$gid|${sets.mkString("|")}"
         lambda t: str(t[0]) + '|' + str(t[1]) + '|' + str(t[2]) + '|' + '|'.join([str(x) for x in t[3]])
     ).saveAsTextFile(output_inverted_list_file)
-
-
-    """
-    integer_sets = integer_sets.map(
-        # (sid, indices)
-        lambda t: sets_format_string(t) #f"{t[0]}, {','.join(map(str, t[1]))}\n"
-    ).collect() #.saveAsTextFile(output_integer_set_file)
-
-            
-    posting_lists = posting_lists.map(
-        # token, rawToken, gid, sets
-        # lambda t: f"{t[0]} {t[1]} {t[2]} {' '.join(map(str, t[3]))}\n"
-        lambda t: postlist_format_string(t)
-    ).collect() # .saveAsTextFile(output_inverted_list_file)
-
-
-    # since the data now is really small, a single file is ok (no Spark partitioning)
-
-    with open(output_integer_set_file, 'w') as f:
-        f.writelines(integer_sets) 
-
-    with open(output_inverted_list_file, 'w') as f:
-        f.writelines(posting_lists) 
-
     """
 
 
@@ -607,7 +718,7 @@ def sample_query_sets(
     bins:int=10,
     num_sample_per_interval:int=10
     ) -> tuple[dict, list[int]]:
-
+    
     sloth_results = pl.scan_csv(input_csv_results_file).select(['r_id', 'overlap_area']).collect()
 
     if not intervals:
@@ -619,7 +730,8 @@ def sample_query_sets(
     sampled_ids = set()
     for interval in list(zip(intervals, intervals[1:] + [np.inf])):
         subdf = sloth_results.filter((pl.col('overlap_area') >= interval[0]) & (pl.col('overlap_area') < interval[1]))
-        while True:
+        sample_done = False
+        for _ in range(3):
             cls_sample = subdf.sample(min(num_sample_per_interval, subdf.shape[0]))
             
             if cls_sample.select('r_id').n_unique() != min(num_sample_per_interval, subdf.shape[0]):
@@ -629,7 +741,12 @@ def sample_query_sets(
                 print(f"Interval [{interval[0]}, {interval[1]}) sampled {len(cls_sample)}")
                 sampled_ids = sampled_ids.union([s['r_id'] for s in cls_sample.rows(named=True)])
                 samples[interval] = [t for t in cls_sample.rows()]
+                sample_done = True
                 break
+        if not sample_done:
+            print(f"Interval [{interval[0]}, {interval[1]}) sampled {len(cls_sample)} (maybe not all unique in sample set)")
+            sampled_ids = sampled_ids.union([s['r_id'] for s in cls_sample.rows(named=True)])
+            samples[interval] = [t for t in cls_sample.rows()]
     
     id_conversion = pl.read_csv(sloth_to_josie_id_file)
     
@@ -637,10 +754,6 @@ def sample_query_sets(
         return id_conversion.row(by_predicate=pl.col('sloth_id') == sloth_str_id)[1]
 
     conv_sampled_ids = list(map(lookup_for_josie_int_id, sampled_ids))
-    # print('sampled_ids:')
-    # print(list(sampled_ids)[:30])
-    # print('converted sampled ids:')
-    # print(conv_sampled_ids[:30])
     return samples, conv_sampled_ids
 
 
