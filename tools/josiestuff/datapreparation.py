@@ -292,8 +292,8 @@ def create_index(
         .appName("mongodbtest1") \
         .master('local[*]')\
         .config('spark.jars.packages', 'org.mongodb.spark:mongo-spark-connector_2.12:3.0.1') \
-        .config('spark.executor.memory', '8g') \
-        .config('spark.driver.memory', '5g') \
+        .config('spark.executor.memory', '1g') \
+        .config('spark.driver.memory', '4g') \
         .getOrCreate()
 
     wikitables_df = spark.read.format("mongo") \
@@ -311,7 +311,7 @@ def create_index(
 
     sets = spark.read\
         .format('mongo')\
-        .option( "uri", "mongodb://127.0.0.1:27017/sloth.latest_snapshot_tables") \
+        .option( "uri", "mongodb://127.0.0.1:27017/sloth_small.latest_snapshot_tables") \
         .load() \
         .select('_id', 'content') \
         .rdd \

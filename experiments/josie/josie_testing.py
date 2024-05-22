@@ -31,16 +31,13 @@ parser.add_argument('-m', '--mode', choices=['set', 'bag'])
 parser.add_argument('-k', type=int, required=False, help='the K value for the top-K search of JOSIE')
 parser.add_argument('-t', '--tasks', nargs='*', choices=['all', 'createmongodb', 'createindex', 'createrawtokens', 'samplequeries', 'dbsetup', 'josietest'])
 parser.add_argument('-d', '--dbname', help='the PostgreSQL database where will be uploaded the data used by JOSIE. It must be already running on the machine')
-parser.add_argument('-Q', '--queryfile', required=False, help='path to the file containing the set IDs that will be used as queries for JOSIE')
-parser.add_argument('-s', '--statistics', action='store_true', help='collect statistics from data (number of NaNs per column/table,...) and runtime metrics')
 
 args = parser.parse_args()
 
 mode = args.mode
-tasks = args.tasks
 k = args.k
+tasks = args.tasks
 user_dbname = args.dbname
-query_file = args.queryfile
 
 ALL =               'all' in tasks
 EXTR_TO_MONGODB =   'createmongodb' in tasks
@@ -49,8 +46,6 @@ RAW_TOKENS =        'createrawtokens' in tasks
 SAMPLE_QUERIES =    'samplequeries' in tasks
 DBSETUP =           'dbsetup' in tasks
 JOSIE_TEST =        'josietest' in tasks
-
-COLLECT_STAT =      args.statistics
 
 use_scala_jar = False
 test_tag = f'm{mode}' if not args.test_name else args.test_name
@@ -83,8 +78,8 @@ tables_stat_file =          statistics_dir + '/tables.csv'
 runtime_stat_file =         statistics_dir + '/runtime.csv'     
 db_stat_file =              statistics_dir + '/db.csv'
 
-runtime_metrics = defaultdict(float)
-    
+runtime_metrics = []
+
 
 ############# SET UP #############
 if os.path.exists(ROOT_TEST_DIR):
@@ -105,10 +100,6 @@ mongoclient = pymongo.MongoClient()
 optitab_db = mongoclient.optitab
 wikitables_coll = optitab_db.wikitables
 
-# the DB and the collection that store the main wikitable snapshot, ~2.1M tables
-sloth_db = mongoclient.sloth
-latsnaptab_coll = sloth_db.latest_snapshot_tables
-
 
 ############# DATA PREPARATION #############
 
@@ -118,8 +109,7 @@ if ALL or EXTR_TO_MONGODB:
         original_turl_train_tables_jsonl_file,
         wikitables_coll     
     )
-    runtime_metrics['extract_jsonl_tables'] = round(time() - start, 5)
-
+    runtime_metrics.append(('extract-jsonl-tables', round(time() - start, 5)))
 
 if ALL or INVERTED_IDX:    
     start = time()
@@ -136,8 +126,7 @@ if ALL or INVERTED_IDX:
             'min_area': 50
         }
     )
-
-    runtime_metrics['create_index'] = round(time() - start, 5)
+    runtime_metrics.append(('create-invidx-intsets', round(time() - start, 5)))
 
     print('Creating a single mapping IDs file...')
     with open(sloth_josie_ids_file + '.csv','wb') as wfd:
@@ -153,14 +142,18 @@ sampled_ids = None
 if ALL or SAMPLE_QUERIES:
     if not os.path.exists(tables_stat_file):
         print('Get statistics from MongoDB wikitables...')
+        start = time()
         get_tables_statistics_from_mongodb(wikitables_coll, tables_stat_file)
+        runtime_metrics.append(('tables-stat-from-MongoDB', round(time() - start), 5))
 
+    start = time()
     sampled_ids = sample_queries(
         input_sloth_res_csv_file,
         sloth_josie_ids_file,
         tables_stat_file,
         query_file
     )
+    runtime_metrics.append(('sampling-queries', round(time() - start, 5)))
 
 ################### DATABASE OPERATIONS ####################
 if ALL or DBSETUP:
@@ -189,10 +182,9 @@ if ALL or DBSETUP:
     josiedb.create_inverted_list_index()
 
 ############# GETTING DATABASE STATISTICS #############
-    if COLLECT_STAT:
-        pd.DataFrame(josiedb.get_statistics()).to_csv(db_stat_file, index=False)
+    pd.DataFrame(josiedb.get_statistics()).to_csv(db_stat_file, index=False)
     josiedb.close()
-    runtime_metrics['db_operations'] = round(time() - start, 5)
+    runtime_metrics.append(('josie-db-operations', round(time() - start, 5)))
 
 
 ############# RUNNING JOSIE #############
@@ -213,7 +205,8 @@ if ALL or JOSIE_TEST:
                 --output={results_dir} \
                     --k={k}')
 
-    runtime_metrics['josie'] = round(time() - start, 5)
-    runtime_metrics['total_time'] = sum(runtime_metrics.values())
+    runtime_metrics.append(('josie', round(time() - start, 5)))
 
-pd.DataFrame([runtime_metrics]).to_csv(runtime_stat_file, index=False)
+with open(runtime_stat_file, 'a') as rfw:
+    for task in runtime_metrics:
+        rfw.write(f"{task[0]},{task[1]}\n")
