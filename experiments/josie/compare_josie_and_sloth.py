@@ -1,65 +1,76 @@
+import os
 import re
-import sys
 import argparse
 
-import polars as pl
 import pandas as pd
+import pymongo
 
-from tools.josiedataprep.preparation_functions import _create_set_with_bag_semantic, _create_set_with_set_semantic
+from tools.josiestuff.datapreparation import _create_token_set
 from tools.utils.settings import DefaultPath as defpath
 from tools.sloth.sloth import sloth
-from tools.utils.table import from_pandas
+
+import multiprocessing as mp
 
 
 parser = argparse.ArgumentParser()
-parser.add_argument('mode')
+parser.add_argument('--test-name', required=True, type=str, help='a user defined test name, used instead of the default one m<mode>')
+parser.add_argument('-m', '--mode', choices=['set', 'bag'])
+
 args = parser.parse_args()
 
 mode = args.mode
-print(mode)
-
-root_dir = defpath.data_path.base + f'/josie-tests/n45673_m{mode}'
-
-tables_csv_dir =        defpath.data_path.wikitables + '/tables-subset/csv'
-josie_sloth_ids_file =  root_dir + '/josie_sloth_ids.csv'
-tables_file =           root_dir + '/tables.set'
-
-josie_sloth_ids = pd.read_csv(josie_sloth_ids_file)
-
-josie_res = pd.read_csv(root_dir + '/result_k_5.csv')[['query_id', 'results']]
-
-from pprint import pprint
+test_tag = f'm{mode}' if not args.test_name else args.test_name
 
 
-print('idx', 'query_id', 'set_id ', 'josie_o', 'my_o', 'sloth')
-for idx, row in enumerate(josie_res.itertuples(index=False)):
-    qid = row[0]
-    if type(row[1]) != str:
-        continue
-    res = row[1]
-    sids, overlaps = re.findall(r'\d+', row[1])[::2], re.findall(r'\d+', row[1])[1::2]
-    s_id1 = josie_sloth_ids[josie_sloth_ids['josie_id'] == qid]['sloth_id'].values[0]
+ROOT_TEST_DIR = defpath.data_path.base + f'/josie-tests/{test_tag}'
+josie_results_file =        ROOT_TEST_DIR + '/result_k_5.csv'
+josie_sloth_ids_file =      ROOT_TEST_DIR + '/josie_sloth_ids.csv'
+tables_file =               ROOT_TEST_DIR + '/tables.set'
+extracted_results_file =    ROOT_TEST_DIR + '/extracted_josie_sloth_results.csv' 
+
+
+josie_res = pd.read_csv(josie_results_file)[['query_id', 'results']]
+josie_sloth_ids = pd.read_csv(josie_sloth_ids_file, header=None)
+josie_sloth_ids.rename({0: 'josie_id', 1: 'sloth_id'}, axis='columns', inplace=True)
+
+
+def _worker_compute_sloth(inp):
+    final_results = []
+    mongoclient = pymongo.MongoClient()
+    wikitables_coll = mongoclient.optitab.wikitables
     
-    for sid, o in zip(sids, overlaps):                
+    query_id, results = inp 
+    sids, overlaps = re.findall(r'\d+', results)[::2], re.findall(r'\d+', results)[1::2]
+    s_id1 = josie_sloth_ids[josie_sloth_ids['josie_id'] == query_id]['sloth_id'].values[0]
+
+    for sid, josie_overlap in zip(sids, overlaps):                
         s_id2 = josie_sloth_ids[josie_sloth_ids['josie_id'] == int(sid)]['sloth_id'].values[0]
+        tab1 = wikitables_coll.find({'_id': s_id1}).next()['content']
+        tab2 = wikitables_coll.find({'_id': s_id2}).next()['content']
 
-        df1 = pd.read_csv(tables_csv_dir + '/' + s_id1)
-        df2 = pd.read_csv(tables_csv_dir + '/' + s_id2)
+        set1 = set(_create_token_set(tab1, mode))
+        set2 = set(_create_token_set(tab2, mode))
+
+        tab1 = [[row[i] for row in tab1] for i in range(len(tab1[0]))]
+        tab2 = [[row[i] for row in tab2] for i in range(len(tab2[0]))]
+
+        metrics = []
+        _, metrics = sloth(tab1, tab2, verbose=False, metrics=metrics)
+
+        largest_ov_sloth = metrics[-2]
+        my_overlap = len(set1.intersection(set2))
+        error = abs(len(set1.intersection(set2)) - int(josie_overlap)) not in (0, 1)
         
-        if mode == 'set':
-            set1 = _create_set_with_set_semantic(df1)
-            set2 = _create_set_with_set_semantic(df2)
-        elif mode == 'bag':
-            set1 = _create_set_with_bag_semantic(df1)
-            set2 = _create_set_with_bag_semantic(df2)
+        final_results.append((query_id, s_id1, sid, s_id2, josie_overlap, my_overlap, largest_ov_sloth, error))
+    return final_results
 
-        tab1 = from_pandas(df1)
-        tab2 = from_pandas(df2)
 
-        mymetr = []
-        res = sloth(tab1.columns, tab2.columns, verbose=False, metrics=mymetr)
-        largest_ov_sloth = mymetr[-2]
-        print(idx, '\t', qid, '\t', sid, '\t', o, '\t', len(set1.intersection(set2)), '\t', largest_ov_sloth)
-        if abs(len(set1.intersection(set2)) - int(o)) not in (0, 1):
-            print('Errore ', s_id1, s_id2)
+
+pool = mp.Pool(processes=os.cpu_count())
+res = pool.map(_worker_compute_sloth, josie_res.values.tolist())
+
+res = [r for query_res in res for r in query_res]
+
+pd.DataFrame(res, columns=['josie_query_id', 'wiki_query_id', 'josie_set_id', 'wiki_set_id', 'josie_overlap', 'checked_overlap', 'sloth_overlap', 'error']) \
+    .to_csv(extracted_results_file, index=False)
 

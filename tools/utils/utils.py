@@ -4,19 +4,6 @@ from typing import Literal
 import numpy as np
 import pandas as pd
 import polars as pl
-import nltk
-
-# tr = str.maketrans('', '', string.punctuation.replace('-', '')) # to keep minus sign
-
-try:
-    # nltk.data.find('stopwords', f"{os.environ['HOME']}/nltk_data")
-    from nltk.corpus import stopwords
-except LookupError:
-    nltk.download('stopwords')
-    from nltk.corpus import stopwords
-    
-stopwords_set = set(stopwords.words('english'))
-
 
 
 def print_info(**dec_kwargs):
@@ -86,6 +73,9 @@ def rebuild_table(table, mode:Literal['pandas', 'polars', 'polars.lazy', 'text']
 
 
 def my_tokenizer(s: str, remove_numbers=False):
+    from nltk.corpus import stopwords
+    stopwords_set = set(stopwords.words('english'))
+
     s = str(s)
     if not remove_numbers:
         return [            
@@ -99,10 +89,12 @@ def my_tokenizer(s: str, remove_numbers=False):
         ]
 
 
-def cosine_similarity(a1:np.array, a2:np.array):
-    return np.dot(a1, a2) / (np.linalg.norm(a1) * np.linalg.norm(a2))
+def cosine_similarity(arr1:np.array, arr2:np.array):
+    return np.dot(arr1, arr2) / (np.linalg.norm(arr1) * np.linalg.norm(arr2))
 
 
 def get_int_from_(s: str):
     return [int(x) for x in re.findall(r'\d+', s)]
     
+
+

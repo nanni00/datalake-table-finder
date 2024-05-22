@@ -9,10 +9,10 @@ from pprint import pprint
 from collections import defaultdict
 
 import tools.utils.table as table
-from tools.datahandling.datapreparation import convert_jsonl_to_csv_folder, create_embeddings_for_tables
-from tools.datahandling.lut import load_json
+from tools.embeddingstuff.datapreparation import convert_jsonl_to_csv_folder, create_embeddings_for_tables
+from tools.embeddingstuff.lut import load_json
 from tools.utils.settings import DefaultPath as dp
-from tools.table_encoding.table_encoder import table_encoder_factory
+from tools.embeddingstuff.table_encoder import table_encoder_factory
 
 from sloth import sloth
 

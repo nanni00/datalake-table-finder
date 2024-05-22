@@ -14,7 +14,7 @@ class Table:
             for i in range(self.shape[0])
         ]
     
-    
+
 def from_pandas(df:pd.DataFrame) -> Table:
     tab = Table()
     tab.columns = []
