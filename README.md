@@ -1,5 +1,3 @@
-# Set up
-
 Scaricare la repository
 ```
 git clone https://github.com/nanni00/tesi-magistrale.git /path/to/tesi-magistrale

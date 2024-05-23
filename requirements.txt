@@ -5,13 +5,13 @@ numpy
 pandas
 polars
 psycopg
-jenkspy
+pymongo
+# jenkspy
 pyspark
-binascii
-chromadb
+# chromadb
 jsonlines
 faiss-cpu
-scipy<1.13
+# scipy<1.13
 compress-fasttext           # compress-fasttext[full] for advanced tasks
 # torch==2.2.*
 # sentence-transformers     # non necessario per i test con JOSIE

@@ -4,8 +4,6 @@ import re
 import sys
 import mmh3
 import pymongo.collection
-import spacy
-import random
 
 import pymongo
 import binascii
@@ -27,13 +25,15 @@ from tools.utils.settings import DefaultPath
 from tools.utils.utils import print_info, my_tokenizer
 
 import multiprocessing as mp
-import jenkspy
 
 _TOKEN_TAG_SEPARATOR = '@#'
 
 
 
 """
+import spacy
+import random
+
 def _infer_column_type(column: list, check_column_threshold:int=3, nlp=None|spacy.Language) -> str:
     NUMERICAL_NER_TAGS = {'DATE', 'TIME', 'PERCENT', 'MONEY', 'QUANTITY', 'CARDINAL'}
     # column = set(column)
@@ -259,6 +259,7 @@ def create_raw_tokens(
 def create_index(
     mode:str,
     original_sloth_results_file,
+    output_sampled_sloth_results_file,
     output_id_for_queries_file,
     output_tables_id_file,
     output_integer_set_file, 
@@ -281,11 +282,12 @@ def create_index(
             ) \
                 .to_list()
         )
-        
+    
+    
     @F.udf(returnType=BooleanType())
     def check_is_in_sloth_results(col1):
-        return col1 in sloth_tables_ids            
-
+        return col1 in sloth_tables_ids
+  
     # fine tune of executor/driver.memory?
     spark = SparkSession \
         .builder \
@@ -297,7 +299,7 @@ def create_index(
         .getOrCreate()
 
     wikitables_df = spark.read.format("mongo") \
-        .option ("uri", "mongodb://127.0.0.1:27017/optitab.wikitables") \
+        .option ("uri", "mongodb://127.0.0.1:27017/optitab.turl_training_set") \
         .load() \
         .select('_id', 'content') \
         .filter(f"""
@@ -307,11 +309,29 @@ def create_index(
         .filter(check_is_in_sloth_results('_id'))
 
     print('Saving the filtered original table IDs as CSV...')
-    wikitables_df.select('_id').toPandas().to_csv(output_id_for_queries_file, index=False)    
+    df = wikitables_df.select('_id').toPandas()
+    df.to_csv(output_id_for_queries_file, index=False)    
+
+    print('filtered_ids: ')
+    filtered_ids = set(df['_id'].tolist())
+    print(list(filtered_ids)[:10])
+    df = None
+    print('Saving the SLOTH results which have both r_id and s_id in the filtered table IDs...')
+    sub_res = all_sloth_results \
+        .filter( \
+            (pl.col('r_id').is_in(filtered_ids)) & \
+                (pl.col('s_id').is_in(filtered_ids)) \
+            ) \
+                .collect() \
+                    .sort(by='overlap_area')
+
+    sub_res.write_csv(output_sampled_sloth_results_file)
+
+
 
     sets = spark.read\
         .format('mongo')\
-        .option( "uri", "mongodb://127.0.0.1:27017/sloth_small.latest_snapshot_tables") \
+        .option( "uri", "mongodb://127.0.0.1:27017/small_sloth.latest_snapshot_tables") \
         .load() \
         .select('_id', 'content') \
         .rdd \

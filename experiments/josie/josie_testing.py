@@ -19,7 +19,8 @@ from tools.utils.settings import DefaultPath as defpath
 from tools.josiestuff.db import JosieDB
 from tools.josiestuff.datapreparation import (
     extract_tables_from_jsonl_to_mongodb,
-    create_index, 
+    create_index,
+    get_subset_sloth_results, 
     get_tables_statistics_from_mongodb,
     sample_queries
 )
@@ -55,12 +56,10 @@ original_turl_train_tables_jsonl_file  =    defpath.data_path.wikitables + '/ori
 original_sloth_results_csv_file =           defpath.data_path.wikitables + '/original_sloth_results.csv'
 
 # input files
-tables_subset_directory =   defpath.data_path.wikitables + '/tables-subset'
-intput_tables_csv_dir =     tables_subset_directory + '/csv'
-input_sloth_res_csv_file =  tables_subset_directory + '/sloth-results-r5-c2-a50.csv'
 
 # output files
 ROOT_TEST_DIR =             defpath.data_path.base + f'/josie-tests/{test_tag}'
+subset_sloth_results_file = ROOT_TEST_DIR + '/sub_sloth-results.csv'
 ids_for_queries_file =      ROOT_TEST_DIR + '/ids_for_queries.csv'
 sloth_josie_ids_file =      ROOT_TEST_DIR + '/josie_sloth_ids'
 raw_tokens_file =           ROOT_TEST_DIR + '/tables.raw-tokens' 
@@ -98,7 +97,7 @@ mongoclient = pymongo.MongoClient()
 # the DB and its collection where are stored the 570k wikitables 
 # (and where are the ~45000 used for basic SLOTH testing and for next JOSIE querying)
 optitab_db = mongoclient.optitab
-wikitables_coll = optitab_db.wikitables
+wikitables_coll = optitab_db.turl_training_set
 
 
 ############# DATA PREPARATION #############
@@ -116,6 +115,7 @@ if ALL or INVERTED_IDX:
     create_index(
         mode,
         original_sloth_results_csv_file,
+        subset_sloth_results_file,
         ids_for_queries_file,
         sloth_josie_ids_file,
         integer_set_file,
@@ -148,7 +148,7 @@ if ALL or SAMPLE_QUERIES:
 
     start = time()
     sampled_ids = sample_queries(
-        input_sloth_res_csv_file,
+        subset_sloth_results_file,
         sloth_josie_ids_file,
         tables_stat_file,
         query_file

@@ -1,0 +1,15 @@
+name: nanni-tesi-env
+
+dependencies:
+  - python=3.10.13
+  - pip
+  - numpy
+  - pandas
+  - polars
+  - pyspark
+  - mmh3
+  - tqdm
+  - nltk
+  - psycopg
+  - jsonlines
+  - pymongo
