@@ -18,16 +18,14 @@ parser.add_argument('-m', '--mode', choices=['set', 'bag'])
 
 args = parser.parse_args()
 
-mode = args.mode
-test_tag = f'm{mode}' if not args.test_name else args.test_name
+mode =      args.mode
+test_name =  f'm{mode}' if not args.test_name else args.test_name
 
 
-ROOT_TEST_DIR = defpath.data_path.base + f'/josie-tests/{test_tag}'
-josie_results_file =        ROOT_TEST_DIR + '/result_k_5.csv'
+ROOT_TEST_DIR =             defpath.data_path.base + f'/josie-tests/{test_name}'
+josie_results_file =        ROOT_TEST_DIR + '/results/result_k_5.csv'
 josie_sloth_ids_file =      ROOT_TEST_DIR + '/josie_sloth_ids.csv'
-tables_file =               ROOT_TEST_DIR + '/tables.set'
-extracted_results_file =    ROOT_TEST_DIR + '/extracted_josie_sloth_results.csv' 
-
+extracted_results_file =    ROOT_TEST_DIR + '/results/extracted_josie_sloth_results.csv' 
 
 josie_res = pd.read_csv(josie_results_file)[['query_id', 'results']]
 josie_sloth_ids = pd.read_csv(josie_sloth_ids_file, header=None)
@@ -37,7 +35,7 @@ josie_sloth_ids.rename({0: 'josie_id', 1: 'sloth_id'}, axis='columns', inplace=T
 def _worker_compute_sloth(inp):
     final_results = []
     mongoclient = pymongo.MongoClient()
-    wikitables_coll = mongoclient.optitab.wikitables
+    wikitables_coll = mongoclient.optitab.turl_training_set
     
     query_id, results = inp 
     sids, overlaps = re.findall(r'\d+', results)[::2], re.findall(r'\d+', results)[1::2]
@@ -69,7 +67,8 @@ def _worker_compute_sloth(inp):
 pool = mp.Pool(processes=os.cpu_count())
 res = pool.map(_worker_compute_sloth, josie_res.values.tolist())
 
-res = [r for query_res in res for r in query_res]
+# "query_res != None" because maybe there isn't enough work and a processor may return None instead of a list of tuples...
+res = [r for query_res in res if query_res != None for r in query_res]
 
 pd.DataFrame(res, columns=['josie_query_id', 'wiki_query_id', 'josie_set_id', 'wiki_set_id', 'josie_overlap', 'checked_overlap', 'sloth_overlap', 'error']) \
     .to_csv(extracted_results_file, index=False)

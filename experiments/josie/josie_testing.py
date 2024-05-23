@@ -1,17 +1,14 @@
-import json
 import os
+import sys
+import json
 import pprint
 import shutil
 import argparse
-import sys
 import warnings
-
-import pymongo
-
 warnings.filterwarnings('ignore')
 from time import time
-from collections import defaultdict
 
+import pymongo
 import pandas as pd
 
 from tools.utils.settings import DefaultPath as defpath
@@ -20,25 +17,27 @@ from tools.josiestuff.db import JosieDB
 from tools.josiestuff.datapreparation import (
     extract_tables_from_jsonl_to_mongodb,
     create_index,
-    get_subset_sloth_results, 
     get_tables_statistics_from_mongodb,
     sample_queries
 )
 
 
 parser = argparse.ArgumentParser()
-parser.add_argument('--test-name', required=False, type=str, help='a user defined test name, used instead of the default one m<mode>')
+parser.add_argument('--test-name', type=str, required=False, help='a user defined test name, used instead of the default one m<mode>')
 parser.add_argument('-m', '--mode', choices=['set', 'bag'])
 parser.add_argument('-k', type=int, required=False, help='the K value for the top-K search of JOSIE')
-parser.add_argument('-t', '--tasks', nargs='*', choices=['all', 'createmongodb', 'createindex', 'createrawtokens', 'samplequeries', 'dbsetup', 'josietest'])
-parser.add_argument('-d', '--dbname', help='the PostgreSQL database where will be uploaded the data used by JOSIE. It must be already running on the machine')
+parser.add_argument('-t', '--tasks', nargs='+', choices=['all', 'createmongodb', 'createindex', 'createrawtokens', 'samplequeries', 'dbsetup', 'josietest'])
+parser.add_argument('-d', '--dbname', required=False, help='the PostgreSQL database where will be uploaded the data used by JOSIE. It must be already running on the machine')
+parser.add_argument('--sample-threshold', required=False, type=float, help='[0,1] percentage of tables to sample from the sloth.latest_snapshot_tables collection for testing')
 
 args = parser.parse_args()
 
-mode = args.mode
-k = args.k
-tasks = args.tasks
-user_dbname = args.dbname
+mode =              args.mode
+tasks =             args.tasks
+k =                 args.k if args.k else 5
+user_dbname =       args.dbname if args.dbname else 'user'
+sample_threshold =  args.sample_threshold if args.sample_threshold else 0.01
+test_name =         args.test_name if args.test_name else f'm{mode}'
 
 ALL =               'all' in tasks
 EXTR_TO_MONGODB =   'createmongodb' in tasks
@@ -48,8 +47,6 @@ SAMPLE_QUERIES =    'samplequeries' in tasks
 DBSETUP =           'dbsetup' in tasks
 JOSIE_TEST =        'josietest' in tasks
 
-use_scala_jar = False
-test_tag = f'm{mode}' if not args.test_name else args.test_name
 
 # original JSONL and SLOTH results files
 original_turl_train_tables_jsonl_file  =    defpath.data_path.wikitables + '/original_turl_train_tables.jsonl'
@@ -58,7 +55,7 @@ original_sloth_results_csv_file =           defpath.data_path.wikitables + '/ori
 # input files
 
 # output files
-ROOT_TEST_DIR =             defpath.data_path.base + f'/josie-tests/{test_tag}'
+ROOT_TEST_DIR =             defpath.data_path.base + f'/josie-tests/{test_name}'
 subset_sloth_results_file = ROOT_TEST_DIR + '/sub_sloth-results.csv'
 ids_for_queries_file =      ROOT_TEST_DIR + '/ids_for_queries.csv'
 sloth_josie_ids_file =      ROOT_TEST_DIR + '/josie_sloth_ids'
@@ -124,7 +121,8 @@ if ALL or INVERTED_IDX:
             'min_rows': 5,
             'min_columns': 2,
             'min_area': 50
-        }
+        },
+        latsnaptab_sample_threshold=sample_threshold
     )
     runtime_metrics.append(('create-invidx-intsets', round(time() - start, 5)))
 
@@ -164,7 +162,7 @@ if ALL or DBSETUP:
         sampled_ids = [_id for interval in query_stuff for _id in interval['ids']]
     
     start = time()
-    josiedb = JosieDB(dbname=user_dbname, table_prefix=test_tag)
+    josiedb = JosieDB(dbname=user_dbname, table_prefix=test_name)
     josiedb.open()
     josiedb.drop_tables()
     josiedb.create_tables()
@@ -196,12 +194,12 @@ if ALL or JOSIE_TEST:
     start = time()
     os.system(f'go run {josie_cmd_dir}/sample_costs/main.go \
                 --pg-database={user_dbname} \
-                --test_tag={test_tag} \
-                --pg-table-queries={test_tag}_queries')
+                --test_tag={test_name} \
+                --pg-table-queries={test_name}_queries')
 
     os.system(f'go run {josie_cmd_dir}/topk/main.go \
                 --pg-database={user_dbname} \
-                --test_tag={test_tag} \
+                --test_tag={test_name} \
                 --output={results_dir} \
                     --k={k}')
 

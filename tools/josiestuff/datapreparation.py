@@ -265,6 +265,7 @@ def create_index(
     output_integer_set_file, 
     output_inverted_list_file,
     thresholds:dict[str:int],
+    latsnaptab_sample_threshold:float=0.1
     ):
 
     MIN_ROW =     0       if 'min_rows'       not in thresholds else thresholds['min_rows']
@@ -298,8 +299,9 @@ def create_index(
         .config('spark.driver.memory', '4g') \
         .getOrCreate()
 
+    # .option ("uri", "mongodb://127.0.0.1:27017/optitab.turl_training_set") \
     wikitables_df = spark.read.format("mongo") \
-        .option ("uri", "mongodb://127.0.0.1:27017/optitab.turl_training_set") \
+        .option ("uri", "mongodb://127.0.0.1:27017/optitab.wikitables") \
         .load() \
         .select('_id', 'content') \
         .filter(f"""
@@ -314,7 +316,6 @@ def create_index(
 
     print('filtered_ids: ')
     filtered_ids = set(df['_id'].tolist())
-    print(list(filtered_ids)[:10])
     df = None
     print('Saving the SLOTH results which have both r_id and s_id in the filtered table IDs...')
     sub_res = all_sloth_results \
@@ -327,12 +328,16 @@ def create_index(
 
     sub_res.write_csv(output_sampled_sloth_results_file)
 
-
-
     sets = spark.read\
         .format('mongo')\
-        .option( "uri", "mongodb://127.0.0.1:27017/small_sloth.latest_snapshot_tables") \
+        .option( "uri", "mongodb://127.0.0.1:27017/sloth.latest_snapshot_tables") \
         .load() \
+        .sample(False, latsnaptab_sample_threshold)
+    
+    print('#sampled rows from sloth tables:')
+    print(sets.count())
+
+    sets = sets \
         .select('_id', 'content') \
         .rdd \
         .map(list) \
