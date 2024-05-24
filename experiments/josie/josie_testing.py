@@ -23,12 +23,12 @@ from tools.josiestuff.datapreparation import (
 
 
 parser = argparse.ArgumentParser()
-parser.add_argument('--test-name', type=str, required=False, help='a user defined test name, used instead of the default one m<mode>')
-parser.add_argument('-m', '--mode', choices=['set', 'bag'])
-parser.add_argument('-k', type=int, required=False, help='the K value for the top-K search of JOSIE')
-parser.add_argument('-t', '--tasks', nargs='+', choices=['all', 'createmongodb', 'createindex', 'createrawtokens', 'samplequeries', 'dbsetup', 'josietest'])
-parser.add_argument('-d', '--dbname', required=False, help='the PostgreSQL database where will be uploaded the data used by JOSIE. It must be already running on the machine')
-parser.add_argument('--sample-threshold', required=False, type=float, help='[0,1] percentage of tables to sample from the sloth.latest_snapshot_tables collection for testing')
+parser.add_argument('--test-name',          required=False, type=str, help='a user defined test name, used instead of the default one m<mode>')
+parser.add_argument('-m', '--mode',         choices=['set', 'bag'])
+parser.add_argument('-k',                   required=False, type=int, help='the K value for the top-K search of JOSIE')
+parser.add_argument('-t', '--tasks',        nargs='+',      choices=['all', 'createmongodb', 'createindex', 'createrawtokens', 'samplequeries', 'dbsetup', 'josietest'])
+parser.add_argument('-d', '--dbname',       required=False, help='the PostgreSQL database where will be uploaded the data used by JOSIE. It must be already running on the machine')
+parser.add_argument('--sample-threshold',   required=False, type=float, help='[0,1] percentage of tables to sample from the sloth.latest_snapshot_tables collection for testing')
 
 args = parser.parse_args()
 

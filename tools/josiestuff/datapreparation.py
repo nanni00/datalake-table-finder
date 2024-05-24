@@ -294,14 +294,33 @@ def create_index(
         .builder \
         .appName("mongodbtest1") \
         .master('local[*]')\
-        .config('spark.jars.packages', 'org.mongodb.spark:mongo-spark-connector_2.12:3.0.1') \
+        .config('spark.jars.packages', 'org.mongodb.spark:mongo-spark-connector_2.12:10.3.0') \
         .config('spark.executor.memory', '1g') \
         .config('spark.driver.memory', '4g') \
         .getOrCreate()
 
-    # .option ("uri", "mongodb://127.0.0.1:27017/optitab.turl_training_set") \
-    wikitables_df = spark.read.format("mongo") \
-        .option ("uri", "mongodb://127.0.0.1:27017/optitab.wikitables") \
+    sets = spark \
+        .read \
+        .format('mongodb')\
+        .option("uri", "mongodb://127.0.0.1:27017/") \
+        .option("database", "sloth") \
+        .option("collection", "latest_snapshot_tables") \
+        .option("aggregation.pipeline", {"$sample": {"size": 47}}) \
+        .load() \
+        .select('_id', 'content') \
+        .rdd \
+        .map(list)
+        # .limit(100) \
+
+    print('#sampled rows from sloth.latest_snapshot_tables:')
+    print(sets.count())
+
+    wikitables_df = spark \
+        .read \
+        .format("mongodb") \
+        .option ("uri", "mongodb://127.0.0.1:27017/") \
+        .option("database", "optitab") \
+        .option("collection", "turl_training_set") \
         .load() \
         .select('_id', 'content') \
         .filter(f"""
@@ -311,40 +330,26 @@ def create_index(
         .filter(check_is_in_sloth_results('_id'))
 
     print('Saving the filtered original table IDs as CSV...')
-    df = wikitables_df.select('_id').toPandas()
-    df.to_csv(output_id_for_queries_file, index=False)    
+    wikitables_df.select('_id').toPandas().to_csv(output_id_for_queries_file, index=False)    
 
-    print('filtered_ids: ')
-    filtered_ids = set(df['_id'].tolist())
-    df = None
     print('Saving the SLOTH results which have both r_id and s_id in the filtered table IDs...')
-    sub_res = all_sloth_results \
-        .filter( \
-            (pl.col('r_id').is_in(filtered_ids)) & \
-                (pl.col('s_id').is_in(filtered_ids)) \
-            ) \
-                .collect() \
-                    .sort(by='overlap_area')
-
-    sub_res.write_csv(output_sampled_sloth_results_file)
-
-    sets = spark.read\
-        .format('mongo')\
-        .option( "uri", "mongodb://127.0.0.1:27017/sloth.latest_snapshot_tables") \
-        .load() \
-        .sample(False, latsnaptab_sample_threshold)
+    with open(output_id_for_queries_file) as fr:
+        filtered_ids = set(fr.readlines()[1:])
+        sub_res = all_sloth_results \
+            .filter( \
+                (pl.col('r_id').is_in(filtered_ids)) & \
+                    (pl.col('s_id').is_in(filtered_ids)) \
+                ) \
+                    .collect() \
+                        .sort(by='overlap_area')
+        sub_res.write_csv(output_sampled_sloth_results_file)
     
-    print('#sampled rows from sloth tables:')
-    print(sets.count())
-
     sets = sets \
-        .select('_id', 'content') \
-        .rdd \
-        .map(list) \
         .union(
             wikitables_df.rdd.map(list)    
         )
     
+
     wikitables_df.unpersist()   # free memory used by the dataframe (is this really useful?)
     print(f'Total RDD size: {sets.count()}')
     
@@ -352,7 +357,7 @@ def create_index(
 
     print('Saving mapping between JOSIE and wikitables (SLOTH) IDs...')
     sets.map(lambda t: f"{t[1]},{t[0][0]}").saveAsTextFile(output_tables_id_file)
-
+    return 
     def prepare_tuple(t, mode):
         return [t[1], _create_token_set(t[0][1], mode)]    
     
