@@ -1,5 +1,5 @@
 import re
-from time import time
+import time
 from typing import Literal 
 import numpy as np
 import pandas as pd
@@ -9,14 +9,23 @@ import polars as pl
 def print_info(**dec_kwargs):
     def decorator(func):
         def wrapper(*args, **kwargs):
-            if 'msg_before' in dec_kwargs: print(dec_kwargs['msg_before'])
-            start = time()
+            on_line = 'on_line' in dec_kwargs and dec_kwargs['on_line'] == True
+            end_line = '\r' if on_line else '\n'
+            
+            msg_before = dec_kwargs['msg_before'] if 'msg_before' in dec_kwargs else '' 
+            msg_after = dec_kwargs['msg_after'] if 'msg_after' in dec_kwargs else ''
+            msg_after = msg_after if not on_line else f'{msg_before} {msg_after}' if msg_before else msg_after 
+            
+            if msg_before: 
+                print(msg_before, end=end_line)
+            start = time.time()
             results = func(*args, **kwargs)            
-            end = time()
+            end = time.time()
 
             if 'time' in dec_kwargs: 
                 print(f'Elapsed time: {round(end - start, 3)}s')
-            if 'msg_after' in dec_kwargs: print(dec_kwargs['msg_after'])
+            if msg_after:
+                print(msg_after)
             return results
         return wrapper
     return decorator
@@ -97,4 +106,6 @@ def get_int_from_(s: str):
     return [int(x) for x in re.findall(r'\d+', s)]
     
 
+def get_current_time():
+    return time.strftime("%Y/%m/%d %H:%M:%S")
 

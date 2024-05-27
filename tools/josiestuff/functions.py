@@ -1,7 +1,5 @@
 import json
 import os
-import re
-import sys
 import mmh3
 import pymongo.collection
 
@@ -11,8 +9,6 @@ import jsonlines
 import numpy as np
 import pandas as pd
 import polars as pl
-from pandas.api.types import is_numeric_dtype
-from typing import Literal
 from tqdm import tqdm
 from collections import defaultdict
 
@@ -20,56 +16,12 @@ import pyspark
 from pyspark.sql import SparkSession
 from pyspark.sql import functions as F
 from pyspark.sql.types import BooleanType
-    
-from tools.utils.settings import DefaultPath
-from tools.utils.utils import print_info, my_tokenizer
 
-import multiprocessing as mp
+from tools.utils.utils import print_info
+    
 
 _TOKEN_TAG_SEPARATOR = '@#'
 
-
-
-"""
-import spacy
-import random
-
-def _infer_column_type(column: list, check_column_threshold:int=3, nlp=None|spacy.Language) -> str:
-    NUMERICAL_NER_TAGS = {'DATE', 'TIME', 'PERCENT', 'MONEY', 'QUANTITY', 'CARDINAL'}
-    # column = set(column)
-    # if '' in column: column.remove('') # this causes an exception whenever a NA is in the set, but is this passage really useful or correct?
-    idxs = range(0, len(column) - 1) if len(column) <= check_column_threshold else random.sample(range(0, len(column)), check_column_threshold)
-    
-    parsed_values = nlp.pipe([str(column[i]) for i in idxs])
-    ner_tags = {token.ent_type_ for cell in parsed_values for token in cell}
-    
-    rv = sum(1 if tag in NUMERICAL_NER_TAGS else -1 for tag in ner_tags)
-    return 'real' if rv > 0 else 'text'
-    
-
-def _create_set_with_inferring_column_dtype(df: pd.DataFrame, check_column_threshold:int=3, nlp=None|spacy.Language):
-    tokens_set = set()
-    for i in range(len(df.columns)):
-        unique_values = df.iloc[:, i].unique()
-        if is_numeric_dtype(unique_values) or _infer_column_type(unique_values.tolist(), check_column_threshold, nlp) == 'real':
-            continue
-        for token in unique_values:
-            if not pd.isna(token) and token: # discard NA values and empty strings/values
-                tokens_set.add(token)
-    return tokens_set
-
-
-def _create_set_with_my_tokenizer(df: pd.DataFrame):
-    tokens_set = set()
-    for i in range(len(df.columns)):
-        if is_numeric_dtype(df.iloc[:, i]):
-            continue
-        for token in df.iloc[:, i].unique():
-            for t in my_tokenizer(token, remove_numbers=True):
-                tokens_set.add(t.lower())
-
-    return tokens_set
-"""
 
 
 def _create_token_set(data, mode):
@@ -109,93 +61,6 @@ def extract_tables_from_jsonl_to_mongodb(
             tables.append(table)  # append the parsed table to the list
         table_collection.insert_many(tables)
 
-
-
-def parallel_extract_starting_sets_from_tables(input_tables_csv_dir, 
-                                      final_set_file,
-                                      id_table_file,
-                                      tables_stat_file,
-                                      columns_stat_file,
-                                      ntables_to_load_as_set=10, 
-                                      mode:Literal['mytok', 'infer', 'set', 'bag']='set'):
-    set_q, id_metadata_q, table_stat_q, column_stat_q = mp.Queue(), mp.Queue(), mp.Queue(), mp.Queue()
-
-    def _job(ids, offset):
-        for i, id_table in enumerate(ids, start=offset):
-            # read the csv
-            table = pd.read_csv(input_tables_csv_dir + f'/{id_table}')
-            
-            table_set = _create_token_set(table, mode)
-                        
-            # the table set
-            set_q.put(f"{i + offset}|{'|'.join(table_set)}\n")      #### !!! Here we use "|", not comma ","
-            
-            # original table id - integer id
-            id_metadata_q.put(f'{id_table},{i + offset}\n')
-
-            # table statistics            
-            table_size = table.shape[0] * table.shape[1]
-            num_na = table.isna().sum().sum()
-            table_stat_q.put(f"{','.join(map(str, [i + offset, table_size, len(table_set), num_na, round(num_na / table_size, 5)]))}\n")
-
-            # columns statistics
-            for id_col in range(len(table.columns)):
-                num_distinct = table.iloc[:, id_col].unique().shape[0]
-                num_na = table.iloc[:, id_col].isna().sum()
-                column_stat_q.put(f"{','.join(map(str, [i + offset, id_col, table.shape[1], num_distinct, num_na, round(num_na / table.shape[0], 5)]))}\n")
-        
-        # print(f'Worker {os.getpid()} completed')
-        set_q.put(f'Process {os.getpid()} completed')
-        id_metadata_q.put(f'Process {os.getpid()} completed')
-        table_stat_q.put(f'Process {os.getpid()} completed')
-        column_stat_q.put(f'Process {os.getpid()} completed')
-    
-    def _writer_job(fname, queue:mp.Queue):
-        with open(fname, 'w') as fhandle:
-            okstop = 0
-            while True:
-                try:
-                    rec = queue.get(block=False)
-                    if re.match(r'Process \d+ completed', rec):
-                        okstop += 1
-                        if okstop == os.cpu_count():
-                            break
-                    else:
-                        # no need to batch here, there's already a inner IO buffer           
-                        fhandle.write(rec)                    
-                except: pass
-
-    id_metadata_q.put('sloth_id,josie_id\n')
-    table_stat_q.put('id_table,size,set_size,num_nan,%nan\n')
-    column_stat_q.put('id_table,id_column,size,num_distincts,num_nan,%nan\n')
-
-    ids = os.listdir(input_tables_csv_dir)
-    chuncksize = ntables_to_load_as_set // os.cpu_count()
-    worker_pool = []
-    writer_pool = []
-    print(f'Table extraction: n={ntables_to_load_as_set}, nproc={os.cpu_count()}, chunksize={chuncksize}')
-    for i in range(os.cpu_count()):
-        worker_pool.append(mp.Process(name=str(i), target=_job, kwargs={'ids':ids[i * chuncksize:(i + 1) * chuncksize], 'offset':i * chuncksize}))
-
-    for f, q in zip( 
-        [final_set_file,    id_table_file, tables_stat_file,    columns_stat_file], 
-        [set_q,             id_metadata_q, table_stat_q,        column_stat_q]):
-        writer_pool.append(mp.Process(name=str(i), target=_writer_job, kwargs={'fname':f, 'queue':q}))
-
-    print('Starting workers...')
-    for p in worker_pool: p.start()
-    print('Starting writers...')
-    for p in writer_pool: p.start()
-    print('Joining workers...')
-    for p in worker_pool: p.join()
-    print('Joining writers...')
-    for p in writer_pool: p.join()
-
-    print('Emptying queues...')
-    for q in [set_q, table_stat_q, column_stat_q, id_metadata_q]: 
-        while not q.empty():
-            q.get()
-        q.close()
 
 
 @print_info(msg_before='Creating raw tokens...', msg_after='Completed.')
@@ -255,7 +120,7 @@ def create_raw_tokens(
 
 
 
-@print_info(msg_before='Creating integer sets and inverted index...', msg_after='Completed.', time=True)
+@print_info(msg_before='Creating integer sets and inverted index...', msg_after='Completed.')
 def create_index(
     mode:str,
     original_sloth_results_file,
@@ -265,7 +130,7 @@ def create_index(
     output_integer_set_file, 
     output_inverted_list_file,
     thresholds:dict[str:int],
-    latsnaptab_sample_threshold:float=0.1
+    tables_limit
     ):
 
     MIN_ROW =     0       if 'min_rows'       not in thresholds else thresholds['min_rows']
@@ -293,15 +158,22 @@ def create_index(
     spark = SparkSession \
         .builder \
         .appName("mongodbtest1") \
-        .master('local[*]')\
-        .config('spark.jars.packages', 'org.mongodb.spark:mongo-spark-connector_2.12:3.0.1') \
-        .config('spark.executor.memory', '1g') \
-        .config('spark.driver.memory', '4g') \
+        .config('spark.jars.packages', 'org.mongodb.spark:mongo-spark-connector_2.12:10.3.0') \
+        .config('spark.executor.memory', '100g') \
+        .config('spark.driver.memory', '12g') \
+        .config('spark.local.dir', '/data4/nanni/spark') \
         .getOrCreate()
 
-    # .option ("uri", "mongodb://127.0.0.1:27017/optitab.turl_training_set") \
-    wikitables_df = spark.read.format("mongo") \
-        .option ("uri", "mongodb://127.0.0.1:27017/optitab.wikitables") \
+    # print('#sampled rows from sloth.latest_snapshot_tables:')
+    # print(sets.count())
+
+    # carico le tabelle usate nei risultati di SLOTH e che sono la base per fare poi la query
+    wikitables_df = spark \
+        .read \
+        .format("mongodb") \
+        .option ("uri", "mongodb://127.0.0.1:27017/") \
+        .option("database", "optitab") \
+        .option("collection", "turl_training_set") \
         .load() \
         .select('_id', 'content') \
         .filter(f"""
@@ -310,45 +182,46 @@ def create_index(
                 AND size(content) * size(content[0]) BETWEEN {MIN_AREA} AND {MAX_AREA}""") \
         .filter(check_is_in_sloth_results('_id'))
 
+    # ua c'è un po' di roba salvata per fare le query in seguito
     print('Saving the filtered original table IDs as CSV...')
-    df = wikitables_df.select('_id').toPandas()
-    df.to_csv(output_id_for_queries_file, index=False)    
+    wikitables_df.select('_id').toPandas().to_csv(output_id_for_queries_file, index=False)    
 
-    print('filtered_ids: ')
-    filtered_ids = set(df['_id'].tolist())
-    df = None
     print('Saving the SLOTH results which have both r_id and s_id in the filtered table IDs...')
-    sub_res = all_sloth_results \
-        .filter( \
-            (pl.col('r_id').is_in(filtered_ids)) & \
-                (pl.col('s_id').is_in(filtered_ids)) \
-            ) \
-                .collect() \
-                    .sort(by='overlap_area')
+    with open(output_id_for_queries_file) as fr:
+        filtered_ids = set(map(str.strip, fr.readlines()[1:]))
+        sub_res = all_sloth_results \
+            .filter( \
+                (pl.col('r_id').is_in(filtered_ids)) & \
+                    (pl.col('s_id').is_in(filtered_ids)) \
+                ) \
+                    .collect() \
+                        .sort(by='overlap_area')
+        sub_res.write_csv(output_sampled_sloth_results_file)
+        filtered_ids = sub_res = None
 
-    sub_res.write_csv(output_sampled_sloth_results_file)
-
-    sets = spark.read\
-        .format('mongo')\
-        .option( "uri", "mongodb://127.0.0.1:27017/sloth.latest_snapshot_tables") \
+    # carico il database MongoDB dove c'è lo snapshot principale e inizio il processing effettivo
+    sets = spark \
+        .read \
+        .format('mongodb')\
+        .option("uri", "mongodb://127.0.0.1:27017/") \
+        .option("database", "sloth") \
+        .option("collection", "latest_snapshot_tables") \
         .load() \
-        .sample(False, latsnaptab_sample_threshold)
-    
-    print('#sampled rows from sloth tables:')
-    print(sets.count())
-
-    sets = sets \
+        .limit(tables_limit) \
         .select('_id', 'content') \
         .rdd \
-        .map(list) \
+        .map(list)
+
+
+    print('Merging RDDs...')
+    sets = sets \
         .union(
             wikitables_df.rdd.map(list)    
-        )
+        ).zipWithUniqueId()
+        #.zipWithIndex()
     
     wikitables_df.unpersist()   # free memory used by the dataframe (is this really useful?)
-    print(f'Total RDD size: {sets.count()}')
-    
-    sets = sets.zipWithUniqueId()
+    # print(f'Total RDD size: {sets.count()}')
 
     print('Saving mapping between JOSIE and wikitables (SLOTH) IDs...')
     sets.map(lambda t: f"{t[1]},{t[0][0]}").saveAsTextFile(output_tables_id_file)
@@ -357,23 +230,31 @@ def create_index(
         return [t[1], _create_token_set(t[0][1], mode)]    
     
     print('Start creating inverted index and integer sets...')
-    token_sets = sets.map(lambda t: prepare_tuple(t, mode)) \
-        .flatMap(
-            lambda sid_tokens: \
-                [
-                    (token, sid_tokens[0]) 
-                    for token in sid_tokens[1]
-                ]
-        )
-
+    token_sets = sets \
+        .map(
+            # from MongoDB directly
+            # (_id, content) -> (_id, [token1, token2, token3, ...])
+            lambda t: prepare_tuple(t, mode)
+            ) \
+            .flatMap(
+                # (set_id, [tok1, tok2, tok3, ...]) -> [(tok1, set_id), (tok2, set_id), ...]
+                lambda t: \
+                    [
+                        (token, t[0]) 
+                        for token in t[1]
+                    ]
+            )
+    
     posting_lists_sorted = token_sets \
-        .groupByKey() \
+        .groupByKey(
+            # where the key is supposed to be the token itself in pairs (token, set_id)
+        ) \
             .map(
-                # t: (token, setIDs)
+                # (token, [set_idK, set_idJ, set_idM, ...]) -> (token, [set_id1, set_id2, set_id3, ..., set_idZ]) 
                 lambda t: (t[0], sorted(list(t[1])))
             ) \
                 .map(
-                    # t: (token, setIDs)
+                    # (token, set_ids) -> (token, set_ids, set_ids_hash)
                     lambda t: \
                         (
                             t[0], 
@@ -387,7 +268,7 @@ def create_index(
                     ) \
                         .zipWithIndex() \
                             .map(
-                                # t: ((rawToken, sids, hash), tokenIndex)
+                                # t: ((rawToken, sids, hash), tokenIndex) -> (token_id, (raw_token, set_ids, set_ids_hash))
                                 lambda t: (t[1], (t[0][0], t[0][1], t[0][2]))
                             ) \
                                 .persist(pyspark.StorageLevel.MEMORY_ONLY)
@@ -527,39 +408,6 @@ def create_index(
     ).saveAsTextFile(output_inverted_list_file)
 
 
-def format_spark_set_file(input_file:str, output_formatted_file:str, on_inverted_index=True):
-    """ Used when using JAR with scala code instead of the python version of CreateIndex/CreateRawTokens """
-    def sets_format_string(t):
-        sid, indices = t[0], t[1:]
-        return "{}|{}|{}|{{{}}}\n".format(sid, len(indices), len(indices), ','.join(indices))
-
-    def postlist_format_string(t):
-        token, raw_token, gid, sets = t[0], t[1], t[2], t[3:]
-        sets = list(map(eval, sets))
-        freq = len(sets)
-        set_ids =   ','.join([str(s[0]) for s in sets])
-        set_sizes = ','.join([str(s[1]) for s in sets])
-        set_pos =   ','.join([str(s[2]) for s in sets])
-
-        return "{}|{}|{}|{}|{{{}}}|{{{}}}|{{{}}}|{}\n" \
-            .format(
-                token, freq, gid, 1, set_ids, set_sizes, set_pos, binascii.hexlify(bytes(str(raw_token), 'utf-8'))
-            )
-
-    with open(output_formatted_file, 'w') as writer:
-        for fpart in sorted(os.listdir(input_file)):
-            if not fpart.startswith('part-'):
-                continue
-
-            with open(input_file + '/' + fpart) as reader:
-                # print(f'opening file {input_file + "/" + fpart}...')
-                if on_inverted_index:
-                    writer.writelines(map(lambda line: postlist_format_string(line.strip().split('|')), reader.readlines()))
-                else:
-                    writer.writelines(map(lambda line: sets_format_string(line.strip().split('|')), reader.readlines()))
-
-
-
 def get_tables_statistics_from_mongodb(
         wikitables_coll:pymongo.collection.Collection, 
         table_stat_file):
@@ -596,7 +444,7 @@ def sample_queries(
 
     n_sample_per_interval = 10
     jsim_intervals = [0, 0.3, 0.7, 1]
-    overlap_intervals = [50, 100, 5000]
+    # overlap_intervals = [50, 100, 5000]
     nan_threshold = 0.1
 
     sloth_res_samples = defaultdict(list)
@@ -618,7 +466,8 @@ def sample_queries(
         sample = sample.filter((pl.col('%nan_r') < nan_threshold) & (pl.col('%nan_s') < nan_threshold))
         sample = sample.sort(by='overlap_area')
         sloth_res_samples[(jsim_min, jsim_max)] = sample.to_numpy().tolist()
-        ids[(jsim_min, jsim_max)] = list(map(lookup_for_josie_int_id, sample.select(['r_id', 's_id']).to_numpy().flatten().tolist()))
+        ids[(jsim_min, jsim_max)] = list(map(lambda sloth_id: (sloth_id, lookup_for_josie_int_id(sloth_id)), \
+                                             sample.select(['r_id', 's_id']).to_numpy().flatten().tolist()))
 
     with open(output_query_json, 'w') as writer:            
         json.dump(
@@ -631,7 +480,7 @@ def sample_queries(
                 for jsim_min, jsim_max in zip(jsim_intervals[:-1], jsim_intervals[1:])
             ],
             writer, 
-            indent=4
+            indent=3
             )
         
     totsamples = [i for _, v in ids.items() for i in v]
@@ -639,15 +488,42 @@ def sample_queries(
     return totsamples
 
 
+def get_query_ids_from_query_file(josie_sloth_id_file, query_file, convert_query_ids):
+    josloth_ids =   pl.read_csv(
+        josie_sloth_id_file, 
+        has_header=False,
+        dtypes={'column_1': pl.datatypes.Int64, 'column_2': pl.datatypes.String}
+        ) \
+        .rename({'column_1': 'josie_id', 'column_2': 'sloth_id'})
+    
+    def lookup_for_josie_int_id(sloth_str_id:str):
+        return josloth_ids.row(by_predicate=pl.col('sloth_id') == sloth_str_id)[0]
+    
+    with open(query_file) as fr:
+        query_stuff = json.load(fr)
 
-if __name__ == '__main__':
-    format_spark_set_file(
-        'data/josie-tests/n45673-mset/scala-tables.set-2',
-        'data/josie-tests/n45673-mset/scala-tables-formatted.set-2',
-        False
-    )
+    if not convert_query_ids:
+        sampled_ids = [_id[1] for interval in query_stuff for _id in interval['ids']]
+    else:
+        sampled_ids = [lookup_for_josie_int_id(_id[0]) for interval in query_stuff for _id in interval['ids']]
+    return sampled_ids
 
-    format_spark_set_file(
-        'data/josie-tests/n45673-mset/scala-tables.inverted-list',
-        'data/josie-tests/n45673-mset/scala-tables-formatted.inverted-list'
-    )
+
+
+
+@print_info(msg_before='Starting JOSIE tests...', msg_after='Completed.')
+def josie_test(josie_dbname, test_name, results_directory, k):
+    GOPATH = os.environ['GOPATH']
+    josie_cmd_dir = f'{GOPATH}/src/github.com/ekzhu/josie/cmd'
+    os.chdir(josie_cmd_dir)
+
+    os.system(f'go run {josie_cmd_dir}/sample_costs/main.go \
+                --pg-database={josie_dbname} \
+                --test_tag={test_name} \
+                --pg-table-queries={test_name}_queries')
+
+    os.system(f'go run {josie_cmd_dir}/topk/main.go \
+                --pg-database={josie_dbname} \
+                --test_tag={test_name} \
+                --output={results_directory} \
+                    --k={k}')

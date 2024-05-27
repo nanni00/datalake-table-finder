@@ -5,7 +5,6 @@ import argparse
 import pandas as pd
 import pymongo
 
-from tools.josiestuff.datapreparation import _create_token_set
 from tools.utils.settings import DefaultPath as defpath
 from tools.sloth.sloth import sloth
 
@@ -18,58 +17,62 @@ parser.add_argument('-m', '--mode', choices=['set', 'bag'])
 
 args = parser.parse_args()
 
-mode =      args.mode
-test_name =  f'm{mode}' if not args.test_name else args.test_name
-
+mode =                      args.mode
+test_name =                 f'm{mode}' if not args.test_name else args.test_name
 
 ROOT_TEST_DIR =             defpath.data_path.base + f'/josie-tests/{test_name}'
-josie_results_file =        ROOT_TEST_DIR + '/results/result_k_5.csv'
+results_directory =         ROOT_TEST_DIR + '/results'
 josie_sloth_ids_file =      ROOT_TEST_DIR + '/josie_sloth_ids.csv'
-extracted_results_file =    ROOT_TEST_DIR + '/results/extracted_josie_sloth_results.csv' 
+josie_results_file =        results_directory + '/result_k_5.csv'
+extracted_results_file =    results_directory + '/extracted_josie_sloth_results.csv' 
 
 josie_res = pd.read_csv(josie_results_file)[['query_id', 'results']]
-josie_sloth_ids = pd.read_csv(josie_sloth_ids_file, header=None)
-josie_sloth_ids.rename({0: 'josie_id', 1: 'sloth_id'}, axis='columns', inplace=True)
-
+josie_sloth_ids = pd.read_csv(josie_sloth_ids_file, header=None, names=['josie_id', 'sloth_id'], 
+                              dtype={'josie_id': int, 'sloth_id': str})
 
 def _worker_compute_sloth(inp):
-    final_results = []
     mongoclient = pymongo.MongoClient()
     wikitables_coll = mongoclient.optitab.turl_training_set
+    snapshot_coll = mongoclient.sloth.latest_snapshot_tables
+    query_id, sid, josie_overlap = inp 
     
-    query_id, results = inp 
-    sids, overlaps = re.findall(r'\d+', results)[::2], re.findall(r'\d+', results)[1::2]
     s_id1 = josie_sloth_ids[josie_sloth_ids['josie_id'] == query_id]['sloth_id'].values[0]
+    s_id2 = josie_sloth_ids[josie_sloth_ids['josie_id'] == int(sid)]['sloth_id'].values[0]
 
-    for sid, josie_overlap in zip(sids, overlaps):                
-        s_id2 = josie_sloth_ids[josie_sloth_ids['josie_id'] == int(sid)]['sloth_id'].values[0]
-        tab1 = wikitables_coll.find({'_id': s_id1}).next()['content']
-        tab2 = wikitables_coll.find({'_id': s_id2}).next()['content']
+    tab1 = wikitables_coll.find_one({'_id': s_id1})['content']        
+    tab2 = wikitables_coll.find_one({'_id': s_id2})
+    if not tab2:
+        tab2 = snapshot_coll.find_one({'_id': s_id2})
+    tab2 = tab2['content']
 
-        set1 = set(_create_token_set(tab1, mode))
-        set2 = set(_create_token_set(tab2, mode))
-
-        tab1 = [[row[i] for row in tab1] for i in range(len(tab1[0]))]
-        tab2 = [[row[i] for row in tab2] for i in range(len(tab2[0]))]
-
-        metrics = []
-        _, metrics = sloth(tab1, tab2, verbose=False, metrics=metrics)
-
-        largest_ov_sloth = metrics[-2]
-        my_overlap = len(set1.intersection(set2))
-        error = abs(len(set1.intersection(set2)) - int(josie_overlap)) not in (0, 1)
-        
-        final_results.append((query_id, s_id1, sid, s_id2, josie_overlap, my_overlap, largest_ov_sloth, error))
-    return final_results
+    tab1 = [[row[i] for row in tab1] for i in range(len(tab1[0]))]
+    tab2 = [[row[i] for row in tab2] for i in range(len(tab2[0]))]
+    
+    metrics = []
+    _, metrics = sloth(tab1, tab2, verbose=False, metrics=metrics)
+    largest_ov_sloth = metrics[-2]
+    return (query_id, s_id1, sid, s_id2, josie_overlap, largest_ov_sloth, int(josie_overlap) - largest_ov_sloth)
 
 
-
+print('Start processing results...')
 pool = mp.Pool(processes=os.cpu_count())
-res = pool.map(_worker_compute_sloth, josie_res.values.tolist())
+jr = josie_res.values.tolist()
 
-# "query_res != None" because maybe there isn't enough work and a processor may return None instead of a list of tuples...
-res = [r for query_res in res if query_res != None for r in query_res]
+work = [(r[0], s, o) for r in jr for s, o in zip(re.findall(r'\d+', r[1])[::2], re.findall(r'\d+', r[1])[1::2])]
+res = pool.map(_worker_compute_sloth, work)
 
-pd.DataFrame(res, columns=['josie_query_id', 'wiki_query_id', 'josie_set_id', 'wiki_set_id', 'josie_overlap', 'checked_overlap', 'sloth_overlap', 'error']) \
+# "query_res != None" because maybe there isn't enough work 
+# and a processor may return None instead of a list of tuples...
+res = [query_res for query_res in res if query_res != None]
+
+pd.DataFrame(res, columns=[
+    'josie_query_id', 
+    'wiki_query_id', 
+    'josie_set_id', 
+    'wiki_set_id', 
+    'josie_overlap', 
+    'sloth_overlap', 
+    'difference_josie_sloth_overlap']) \
     .to_csv(extracted_results_file, index=False)
 
+print(f'Extracted results saved to {extracted_results_file}.')

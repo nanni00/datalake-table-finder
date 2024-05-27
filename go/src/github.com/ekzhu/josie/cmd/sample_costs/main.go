@@ -139,7 +139,8 @@ func sampleReadListCost(db *sql.DB, pgTableLists, pgTableReadListCostSamples str
 		panic(err)
 	}
 	for i, token := range sampleListTokens {
-		log.Printf("Read list token = %d, #%d/%d", token, i+1, len(sampleListTokens))
+		i = i + 1 - 1
+		// log.Printf("Read list token = %d, #%d/%d", token, i+1, len(sampleListTokens))
 		start := time.Now()
 		_ = joise.InvertedList(db, pgTableLists, token)
 		dur := time.Since(start)
