@@ -168,6 +168,7 @@ def create_index(
     # print(sets.count())
 
     # carico le tabelle usate nei risultati di SLOTH e che sono la base per fare poi la query
+
     wikitables_df = spark \
         .read \
         .format("mongodb") \
@@ -189,6 +190,7 @@ def create_index(
     print('Saving the SLOTH results which have both r_id and s_id in the filtered table IDs...')
     with open(output_id_for_queries_file) as fr:
         filtered_ids = set(map(str.strip, fr.readlines()[1:]))
+
         sub_res = all_sloth_results \
             .filter( \
                 (pl.col('r_id').is_in(filtered_ids)) & \
@@ -220,12 +222,13 @@ def create_index(
         ).zipWithUniqueId()
         #.zipWithIndex()
     
+
     wikitables_df.unpersist()   # free memory used by the dataframe (is this really useful?)
     # print(f'Total RDD size: {sets.count()}')
 
     print('Saving mapping between JOSIE and wikitables (SLOTH) IDs...')
     sets.map(lambda t: f"{t[1]},{t[0][0]}").saveAsTextFile(output_tables_id_file)
-
+    return 
     def prepare_tuple(t, mode):
         return [t[1], _create_token_set(t[0][1], mode)]    
     
