@@ -3,12 +3,9 @@ Scaricare la repository
 git clone https://github.com/nanni00/tesi-magistrale.git /path/to/tesi-magistrale
 ```
 
-Creare un ambiente python dedicato (tutto è stato provato su python 3.10, con altre versioni ci potrebbero essere problemi) e scaricare i pacchetti necessari
-```
-pip install -r requirements.txt
-```
+Creare un ambiente python dedicato (tutto è stato provato su python 3.10, con altre versioni ci potrebbero essere problemi) e scaricare i pacchetti necessari (file requirements.txt o environment.yml)
 
-Aggiungere le variabili d'ambiente generiche:
+Aggiungere le variabili d'ambiente:
 ```
 export THESIS_PATH=/path/to/tesi-magistrale
 export PYTHONPATH=$PYTHONPATH:$THESIS_PATH
@@ -29,4 +26,7 @@ Per fare i test con JOSIE è anche necessario:
 - creare un database con lo stesso nome \<nome-test\> in cui verranno caricate le tabelle usate da JOSIE;
 - è possibile che vadano scaricati i pacchetti necessari per il codice Go, indicati nel .mod se non già presenti;
 
-Per eseguire il test c'è lo script python experiments/josie/josie_testing.py che si può configurare con i vari argomenti.
+Per eseguire il test c'è lo script python experiments/josie/josie_testing.py che si può configurare con i vari argomenti. Un esempio di run è in experiments/josie/run_test.sh
+
+Per confrontare i risultati di JOSIE con SLOTH c'è lo script experiments/josie/compare_josie_and_sloth.py.
+

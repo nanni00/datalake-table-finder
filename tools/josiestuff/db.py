@@ -20,17 +20,17 @@ class JosieDB:
         self._INVERTED_LISTS_INDEX_NAME =    f'{self.tprefix}_inverted_lists_token_idx'
         self._QUERY_TABLE_NAME =             f'{self.tprefix}_queries'
 
-    @print_info(msg_before='Opening connection to the PostgreSQL database...', msg_after='Completed.', on_line=True)
+    @print_info(msg_before='Opening connection to the PostgreSQL database...')
     def open(self):
         self._dbconn = psycopg.connect(f"port=5442 host=/tmp dbname={self.dbname}")
         self.dbcur = self._dbconn.cursor(row_factory=psycopg.rows.dict_row)
 
-    @print_info(msg_before='Committing to the database and closing connection...', msg_after='Completed.', on_line=True)
+    @print_info(msg_before='Committing to the database and closing connection...')
     def close(self):
         self.dbcur.close()
         self._dbconn.commit()
 
-    @print_info(msg_before='Dropping tables...', msg_after='Completed.', on_line=True)
+    @print_info(msg_before='Dropping tables...')
     def drop_tables(self):    
         self.dbcur.execute(
             f"""
@@ -50,8 +50,7 @@ class JosieDB:
             """        
         )
 
-
-    @print_info(msg_before='Creating database tables...', msg_after='Completed.', on_line=True)
+    @print_info(msg_before='Creating database tables...')
     def create_tables(self):
         
         self.dbcur.execute(
@@ -90,7 +89,7 @@ class JosieDB:
         )
 
 
-    @print_info(msg_before='Inserting sets...', msg_after='Completed.', on_line=True)
+    @print_info(msg_before='Inserting sets...')
     def insert_data_into_sets_table(self, sets_files_partitions:str):
         for file in [f'{sets_files_partitions}/{p}' for p in sorted(os.listdir(sets_files_partitions)) if p.startswith('part-')]:
             self.dbcur.execute(
@@ -98,14 +97,14 @@ class JosieDB:
             )
 
 
-    @print_info(msg_before='Inserting inverted list...', msg_after='Completed.', on_line=True)
+    @print_info(msg_before='Inserting inverted list...')
     def insert_data_into_inverted_list_table(self, inverted_list_partitions:list):
         for file in [f'{inverted_list_partitions}/{p}' for p in sorted(os.listdir(inverted_list_partitions)) if p.startswith('part-')]:
             self.dbcur.execute(
                 f"""COPY {self._INVERTED_LISTS_TABLE_NAME} FROM '{file}' (FORMAT CSV, DELIMITER('|'));"""
             )
 
-    @print_info(msg_before='Inserting queries...', msg_after='Completed.', on_line=True)
+    @print_info(msg_before='Inserting queries...')
     def insert_data_into_query_table(self, table_ids:list[int]):
         # maybe is better to translate all in postgresql...
         self.dbcur.execute(
@@ -114,24 +113,24 @@ class JosieDB:
             """
         )
 
-    @print_info(msg_before='Creating table sets index...', msg_after='Completed.', on_line=True)
+    @print_info(msg_before='Creating table sets index...')
     def create_sets_index(self):
         self.dbcur.execute(
             f""" DROP INDEX IF EXISTS {self._SET_INDEX_NAME}; """
         )
         self.dbcur.execute(
-            f"""CREATE INDEX {self._SET_INDEX_NAME} ON {self._SET_TABLE_NAME} USING btree (id);"""
+            f"""CREATE INDEX {self._SET_INDEX_NAME} ON {self._SET_TABLE_NAME}(id);"""
         )
 
 
-    @print_info(msg_before='Creating inverted list index...', msg_after='Completed.', on_line=True)
+    @print_info(msg_before='Creating inverted list index...')
     def create_inverted_list_index(self):
         self.dbcur.execute(
             f""" DROP INDEX IF EXISTS {self._INVERTED_LISTS_INDEX_NAME}; """
         )
 
         self.dbcur.execute(
-            f"""CREATE INDEX {self._INVERTED_LISTS_INDEX_NAME} ON {self._INVERTED_LISTS_TABLE_NAME} USING btree (token);"""
+            f"""CREATE INDEX {self._INVERTED_LISTS_INDEX_NAME} ON {self._INVERTED_LISTS_TABLE_NAME}(token);"""
         )
 
 

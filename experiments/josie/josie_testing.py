@@ -185,7 +185,6 @@ if ALL or DBSETUP:
     # database statistics
     dbstat = josiedb.get_statistics()
     dbstat[0]['test-name'] = test_name
-    print(type(dbstat), dbstat)
     pd.DataFrame(dbstat).to_csv(db_stat_file, index=False)
     
     josiedb.close()

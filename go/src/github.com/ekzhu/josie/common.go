@@ -32,8 +32,8 @@ func nextDistinctList(tokens, gids []int64, currListIndex int) (listIndex, numSk
 		listIndex = i
 		break
 	}
-	return 		// but in this way it doesn't return anything, right? is this ok?
-	// return listIndex, numSkipped
+	// return 		// but in this way it doesn't return anything, right? is this ok?
+	return listIndex, numSkipped
 }
 
 func overlap(setTokens, queryTokens []int64) int {

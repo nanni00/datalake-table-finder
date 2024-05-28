@@ -140,6 +140,7 @@ def create_index(
     MIN_AREA =    0       if 'min_area'       not in thresholds else thresholds['min_area']
     MAX_AREA =    999999  if 'max_area'       not in thresholds else thresholds['max_area']
     
+    # cose per fare query dopo a partire solo dalle tabelle presenti in optitab.turl_training_set
     all_sloth_results = pl.scan_csv(original_sloth_results_file)
     sloth_tables_ids = set( \
         pl.concat( \
@@ -164,11 +165,8 @@ def create_index(
         .config('spark.local.dir', '/data4/nanni/spark') \
         .getOrCreate()
 
-    # print('#sampled rows from sloth.latest_snapshot_tables:')
-    # print(sets.count())
-
-    # carico le tabelle usate nei risultati di SLOTH e che sono la base per fare poi la query
-
+    # carico le tabelle usate nei risultati di SLOTH 
+    # e che sono la base per fare poi le query
     wikitables_df = spark \
         .read \
         .format("mongodb") \
@@ -183,7 +181,7 @@ def create_index(
                 AND size(content) * size(content[0]) BETWEEN {MIN_AREA} AND {MAX_AREA}""") \
         .filter(check_is_in_sloth_results('_id'))
 
-    # ua c'è un po' di roba salvata per fare le query in seguito
+    # qua c'è un po' di roba salvata per fare le query in seguito
     print('Saving the filtered original table IDs as CSV...')
     wikitables_df.select('_id').toPandas().to_csv(output_id_for_queries_file, index=False)    
 
@@ -201,7 +199,6 @@ def create_index(
         sub_res.write_csv(output_sampled_sloth_results_file)
         filtered_ids = sub_res = None
 
-    # carico il database MongoDB dove c'è lo snapshot principale e inizio il processing effettivo
     sets = spark \
         .read \
         .format('mongodb')\
@@ -221,18 +218,14 @@ def create_index(
             wikitables_df.rdd.map(list)    
         ).zipWithUniqueId()
         #.zipWithIndex()
-    
-
-    wikitables_df.unpersist()   # free memory used by the dataframe (is this really useful?)
-    # print(f'Total RDD size: {sets.count()}')
-
+       
     print('Saving mapping between JOSIE and wikitables (SLOTH) IDs...')
     sets.map(lambda t: f"{t[1]},{t[0][0]}").saveAsTextFile(output_tables_id_file)
-    return 
+    
+    print('Start creating inverted index and integer sets...')
     def prepare_tuple(t, mode):
         return [t[1], _create_token_set(t[0][1], mode)]    
     
-    print('Start creating inverted index and integer sets...')
     token_sets = sets \
         .map(
             # from MongoDB directly
@@ -242,10 +235,7 @@ def create_index(
             .flatMap(
                 # (set_id, [tok1, tok2, tok3, ...]) -> [(tok1, set_id), (tok2, set_id), ...]
                 lambda t: \
-                    [
-                        (token, t[0]) 
-                        for token in t[1]
-                    ]
+                    [(token, t[0]) for token in t[1]]
             )
     
     posting_lists_sorted = token_sets \
@@ -262,7 +252,7 @@ def create_index(
                         (
                             t[0], 
                             t[1], 
-                            mmh3.hash_bytes(np.array(t[1]))
+                            mmh3.hash(np.array(t[1]), signed=False)
                         ) # is ok?
                 ) \
                     .sortBy(
@@ -282,7 +272,7 @@ def create_index(
     # create the duplicate groups
     duplicate_group_ids = posting_lists_sorted \
         .map(
-            # t: (tokenIndex, (rawToken, sids, hash))
+            # t: (tokenIndex, (rawToken, sids, hash)) -> (tokenIndex+1,, (sidsLower, hash))
             lambda t: (t[0] + 1, (t[1][1], t[1][2]))
         ) \
             .join(posting_lists_sorted) \
@@ -309,7 +299,7 @@ def create_index(
                                     .map(
                                         # returns a mapping from group ID to the
                                         # starting index of the group
-                                        # (startingIndex, GroupID)
+                                        # (startingIndex, GroupID) -> (GroupID, startingIndex)
                                         lambda t: (t[1], t[0])
                                     )
 
@@ -318,7 +308,7 @@ def create_index(
         .join(
             duplicate_group_ids \
                 .map(
-                    # (GroupID, startingIndexUpper)
+                    # (GroupID, startingIndexUpper) -> (GroupID - 1, startingIndexUpper)
                     lambda t: (t[0] - 1, t[1])
                 )
             ) \
@@ -335,7 +325,7 @@ def create_index(
             token_group_ids
         ) \
             .map(
-                # (tokenIndex, ((rawToken, sids, _), gid))
+                # (tokenIndex, ((rawToken, sids, _), gid)) -> (tokenIndex, (gid, rawToken, sids))
                 lambda t: (t[0], (t[1][1], t[1][0][0], t[1][0][1]))
             )
 
@@ -343,7 +333,7 @@ def create_index(
     # Create sets and replace text tokens with token index
     integer_sets = posting_lists_with_group_ids \
         .flatMap(
-            # (tokenIndex, (_, _, sids))
+            # (tokenIndex, (gid, rawToken, sids)) -> [(sidH, tokIdx), (sidJ, tokIdx), ...]
             lambda t: [(sid, t[0]) for sid in t[1][2]]        
         ) \
             .groupByKey() \
@@ -354,22 +344,6 @@ def create_index(
                         sorted(t[1])
                     )
                 )
-
-    def sets_format_string(t):
-        sid, indices = t
-        return "{}|{}|{}|{{{}}}".format(sid, len(indices), len(indices), ','.join(map(str, indices)))
-
-    def postlist_format_string(t):
-        token, raw_token, gid, sets = t
-        freq = len(sets)
-        set_ids = ','.join([str(s[0]) for s in sets])
-        set_sizes = ','.join([str(s[1]) for s in sets])
-        set_pos = ','.join([str(s[2]) for s in sets])
-
-        return "{}|{}|{}|{}|{{{}}}|{{{}}}|{{{}}}|{}" \
-            .format(
-                token, freq, gid, 1, set_ids, set_sizes, set_pos, binascii.hexlify(bytes(str(raw_token), 'utf-8'))
-            )
     
     # STAGE 3: CREATE THE FINAL POSTING LISTS
     # Create new posting lists and join the previous inverted
@@ -400,8 +374,23 @@ def create_index(
                         )
     
     # STAGE 4: SAVE INTEGER SETS AND FINAL POSTING LISTS
-    # print('STAGE 4: SAVE INTEGER SETS AND FINAL POSTING LISTS')
-    # to load directly into the database
+
+    def sets_format_string(t):
+        sid, indices = t
+        return "{}|{}|{}|{{{}}}".format(sid, len(indices), len(indices), ','.join(map(str, indices)))
+
+    def postlist_format_string(t):
+        token, raw_token, gid, sets = t
+        freq = len(sets)
+        set_ids = ','.join([str(s[0]) for s in sets])
+        set_sizes = ','.join([str(s[1]) for s in sets])
+        set_pos = ','.join([str(s[2]) for s in sets])
+
+        return "{}|{}|{}|{}|{{{}}}|{{{}}}|{{{}}}|{}" \
+            .format(
+                token, freq, gid, 1, set_ids, set_sizes, set_pos, binascii.hexlify(bytes(str(raw_token), 'utf-8'))
+            )
+    
     integer_sets.map(
         lambda t: sets_format_string(t)
     ).saveAsTextFile(output_integer_set_file)

@@ -1,16 +1,25 @@
 #!/bin/bash
 
-TEST_NAME=settest
+SET_TEST_NAME=diffhash_set_2m
+BAG_TEST_NAME=diffhash_bag_2m
 
-# create the inverted index and the integer sets files, ready to be uploaded to the PostgreSQL database (which may not be running yet)
-python $THESIS_PATH/experiments/josie/josie_testing.py --test-name $TEST_NAME --mode set -k 5 --tasks createindex --dbname nanni
 
-# sample the query IDs that will be used in the next steps
-python $THESIS_PATH/experiments/josie/josie_testing.py --test-name $TEST_NAME --mode set -k 5 --tasks samplequeries --dbname nanni
+python $THESIS_PATH/experiments/josie/josie_testing.py \
+    --dbname nanni \
+    --tables-limit 2000000 \
+    --mode set \
+    --tasks all \
+    -k 10 \
+    --test-name $SET_TEST_NAME
 
-# load into the PostgreSQL the inverted index, the integer sets and the queries
-python $THESIS_PATH/experiments/josie/josie_testing.py --test-name $TEST_NAME --mode set -k 5 --tasks dbsetup --dbname nanni
 
-# run the JOSIE tests
-python $THESIS_PATH/experiments/josie/josie_testing.py --test-name $TEST_NAME --mode set -k 5 --tasks josietest --dbname nanni
+python $THESIS_PATH/experiments/josie/josie_testing.py \
+    --test-name $BAG_TEST_NAME \
+    --mode bag \
+    --tasks createindex dbsetup josietest \
+    --dbname nanni \
+    --tables-limit 2000000 \
+    --queries-file $THESIS_PATH/data/josie-tests/$SET_TEST_NAME/queries.json \
+    --convert-query-ids \
+    -k 10  
 

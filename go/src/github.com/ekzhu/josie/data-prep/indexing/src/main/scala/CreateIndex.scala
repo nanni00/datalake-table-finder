@@ -10,9 +10,11 @@ import scala.util.hashing.MurmurHash3
 // Must run under ekzhu on cluster.
 object CreateIndex {
   def main(args: Array[String]): Unit = {
-    val conf = new SparkConf().setAppName("CreateIndex").setMaster("local[1]")
-      // .set("spark.executor.memory", "100g")
-      // .set("spark.driver.memory", "5g")
+    val conf = new SparkConf().setAppName("CreateIndex").setMaster("local[*]")
+      .set("spark.executor.memory", "100g")
+      .set("spark.driver.memory", "5g")
+
+      
     val sc = new SparkContext(conf)
     print(args.mkString(","))
 

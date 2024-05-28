@@ -13,18 +13,18 @@ import multiprocessing as mp
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--test-name', required=True, type=str, help='a user defined test name, used instead of the default one m<mode>')
-parser.add_argument('-m', '--mode', choices=['set', 'bag'])
+parser.add_argument('-k', required=True, type=int)
 
 args = parser.parse_args()
 
-mode =                      args.mode
-test_name =                 f'm{mode}' if not args.test_name else args.test_name
+test_name = args.test_name
+k =         args.k
 
 ROOT_TEST_DIR =             defpath.data_path.base + f'/josie-tests/{test_name}'
 results_directory =         ROOT_TEST_DIR + '/results'
 josie_sloth_ids_file =      ROOT_TEST_DIR + '/josie_sloth_ids.csv'
-josie_results_file =        results_directory + '/result_k_5.csv'
-extracted_results_file =    results_directory + '/extracted_josie_sloth_results.csv' 
+josie_results_file =        results_directory + f'/result_k_{k}.csv'
+extracted_results_file =    results_directory + f'/extracted_results_k_{k}.csv' 
 
 josie_res = pd.read_csv(josie_results_file)[['query_id', 'results']]
 josie_sloth_ids = pd.read_csv(josie_sloth_ids_file, header=None, names=['josie_id', 'sloth_id'], 
