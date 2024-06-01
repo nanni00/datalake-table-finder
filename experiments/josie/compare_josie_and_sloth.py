@@ -14,11 +14,13 @@ import multiprocessing as mp
 parser = argparse.ArgumentParser()
 parser.add_argument('--test-name', required=True, type=str, help='a user defined test name, used instead of the default one m<mode>')
 parser.add_argument('-k', required=True, type=int)
+parser.add_argument('--analyse-up-to', required=False, type=int)
 
 args = parser.parse_args()
 
 test_name = args.test_name
 k =         args.k
+ank =       args.analyse_up_to
 
 ROOT_TEST_DIR =             defpath.data_path.base + f'/josie-tests/{test_name}'
 results_directory =         ROOT_TEST_DIR + '/results'
@@ -58,7 +60,7 @@ print('Start processing results...')
 pool = mp.Pool(processes=os.cpu_count())
 jr = josie_res.values.tolist()
 
-work = [(r[0], s, o) for r in jr for s, o in zip(re.findall(r'\d+', r[1])[::2], re.findall(r'\d+', r[1])[1::2])]
+work = [(r[0], s, o) for r in jr for i, (s, o) in enumerate(zip(re.findall(r'\d+', r[1])[::2], re.findall(r'\d+', r[1])[1::2]), start=1) if i <= ank]
 res = pool.map(_worker_compute_sloth, work)
 
 # "query_res != None" because maybe there isn't enough work 

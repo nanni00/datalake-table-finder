@@ -62,69 +62,10 @@ def extract_tables_from_jsonl_to_mongodb(
         table_collection.insert_many(tables)
 
 
-
-@print_info(msg_before='Creating raw tokens...', msg_after='Completed.')
-def create_raw_tokens(
-    input_set_file, 
-    output_raw_tokens_file, 
-    single_txt=False, 
-    spark_context=None):
-
-    if not spark_context:
-        conf = pyspark.SparkConf() \
-            .setAppName('CreateIndex') \
-                # .set('spark.executor.memory', '100g') \
-                # .set('spark.driver.memory', '5g')
-        spark_context = pyspark.SparkContext(conf=conf)
-    
-    skip_tokens = set()
-
-    sets = spark_context \
-        .textFile(input_set_file) \
-            .map(
-                lambda line: line.split('|')
-            ) \
-                .map(
-                    lambda line: (
-                        int(line[0]),
-                        [token for token in line[1:] if token not in skip_tokens]
-                    )
-                )
-
-    if single_txt:
-        sets = sets \
-            .flatMap(
-                lambda sid_tokens: \
-                    [
-                        (token, sid_tokens[0]) 
-                        for token in sid_tokens[1]
-                    ]
-                ) \
-                    .map(
-                        lambda token_sid: f'{token_sid[0]} {token_sid[1]}\n'
-                    ).collect()
-        with open(output_raw_tokens_file, 'w') as f:
-            f.writelines(sets)
-    else:
-        sets \
-            .flatMap(
-                lambda sid_tokens: 
-                    [
-                        (token, sid_tokens[0]) 
-                        for token in sid_tokens[1]
-                    ]
-                ) \
-                    .map(
-                        lambda token_sid: f'{token_sid[0]} {token_sid[1]}'
-                    ).saveAsTextFile(output_raw_tokens_file)
-
-
-
 @print_info(msg_before='Creating integer sets and inverted index...', msg_after='Completed.')
 def create_index(
     mode:str,
     original_sloth_results_file,
-    output_sampled_sloth_results_file,
     output_id_for_queries_file,
     output_tables_id_file,
     output_integer_set_file, 
@@ -140,7 +81,6 @@ def create_index(
     MIN_AREA =    0       if 'min_area'       not in thresholds else thresholds['min_area']
     MAX_AREA =    999999  if 'max_area'       not in thresholds else thresholds['max_area']
     
-    # cose per fare query dopo a partire solo dalle tabelle presenti in optitab.turl_training_set
     all_sloth_results = pl.scan_csv(original_sloth_results_file)
     sloth_tables_ids = set( \
         pl.concat( \
@@ -150,7 +90,6 @@ def create_index(
                 .to_list()
         )
     
-    
     @F.udf(returnType=BooleanType())
     def check_is_in_sloth_results(col1):
         return col1 in sloth_tables_ids
@@ -158,15 +97,16 @@ def create_index(
     # fine tune of executor/driver.memory?
     spark = SparkSession \
         .builder \
-        .appName("mongodbtest1") \
+        .appName("Big Bang Testing with MongoDB") \
+        .master("local[64]") \
         .config('spark.jars.packages', 'org.mongodb.spark:mongo-spark-connector_2.12:10.3.0') \
         .config('spark.executor.memory', '100g') \
-        .config('spark.driver.memory', '12g') \
+        .config('spark.driver.memory', '10g') \
         .config('spark.local.dir', '/data4/nanni/spark') \
         .getOrCreate()
 
     # carico le tabelle usate nei risultati di SLOTH 
-    # e che sono la base per fare poi le query
+    # e che sono la base per fare poi la query
     wikitables_df = spark \
         .read \
         .format("mongodb") \
@@ -181,24 +121,7 @@ def create_index(
                 AND size(content) * size(content[0]) BETWEEN {MIN_AREA} AND {MAX_AREA}""") \
         .filter(check_is_in_sloth_results('_id'))
 
-    # qua c'è un po' di roba salvata per fare le query in seguito
-    print('Saving the filtered original table IDs as CSV...')
-    wikitables_df.select('_id').toPandas().to_csv(output_id_for_queries_file, index=False)    
-
-    print('Saving the SLOTH results which have both r_id and s_id in the filtered table IDs...')
-    with open(output_id_for_queries_file) as fr:
-        filtered_ids = set(map(str.strip, fr.readlines()[1:]))
-
-        sub_res = all_sloth_results \
-            .filter( \
-                (pl.col('r_id').is_in(filtered_ids)) & \
-                    (pl.col('s_id').is_in(filtered_ids)) \
-                ) \
-                    .collect() \
-                        .sort(by='overlap_area')
-        sub_res.write_csv(output_sampled_sloth_results_file)
-        filtered_ids = sub_res = None
-
+    # carico il database MongoDB dove c'è lo snapshot principale e inizio il processing effettivo
     sets = spark \
         .read \
         .format('mongodb')\
@@ -209,23 +132,20 @@ def create_index(
         .limit(tables_limit) \
         .select('_id', 'content') \
         .rdd \
-        .map(list)
-
-
-    print('Merging RDDs...')
-    sets = sets \
+        .map(list) \
         .union(
             wikitables_df.rdd.map(list)    
-        ).zipWithUniqueId()
-        #.zipWithIndex()
-       
+        ).zipWithIndex()
+    
+    wikitables_df.unpersist()   # free memory used by the dataframe (is this really useful?)
+
     print('Saving mapping between JOSIE and wikitables (SLOTH) IDs...')
     sets.map(lambda t: f"{t[1]},{t[0][0]}").saveAsTextFile(output_tables_id_file)
-    
-    print('Start creating inverted index and integer sets...')
+
     def prepare_tuple(t, mode):
         return [t[1], _create_token_set(t[0][1], mode)]    
     
+    print('Start creating inverted index and integer sets...')
     token_sets = sets \
         .map(
             # from MongoDB directly
@@ -235,7 +155,10 @@ def create_index(
             .flatMap(
                 # (set_id, [tok1, tok2, tok3, ...]) -> [(tok1, set_id), (tok2, set_id), ...]
                 lambda t: \
-                    [(token, t[0]) for token in t[1]]
+                    [
+                        (token, t[0]) 
+                        for token in t[1]
+                    ]
             )
     
     posting_lists_sorted = token_sets \
@@ -252,7 +175,7 @@ def create_index(
                         (
                             t[0], 
                             t[1], 
-                            mmh3.hash(np.array(t[1]), signed=False)
+                            mmh3.hash_bytes(np.array(t[1]))
                         ) # is ok?
                 ) \
                     .sortBy(
@@ -272,7 +195,7 @@ def create_index(
     # create the duplicate groups
     duplicate_group_ids = posting_lists_sorted \
         .map(
-            # t: (tokenIndex, (rawToken, sids, hash)) -> (tokenIndex+1,, (sidsLower, hash))
+            # t: (tokenIndex, (rawToken, sids, hash))
             lambda t: (t[0] + 1, (t[1][1], t[1][2]))
         ) \
             .join(posting_lists_sorted) \
@@ -299,7 +222,7 @@ def create_index(
                                     .map(
                                         # returns a mapping from group ID to the
                                         # starting index of the group
-                                        # (startingIndex, GroupID) -> (GroupID, startingIndex)
+                                        # (startingIndex, GroupID)
                                         lambda t: (t[1], t[0])
                                     )
 
@@ -308,7 +231,7 @@ def create_index(
         .join(
             duplicate_group_ids \
                 .map(
-                    # (GroupID, startingIndexUpper) -> (GroupID - 1, startingIndexUpper)
+                    # (GroupID, startingIndexUpper)
                     lambda t: (t[0] - 1, t[1])
                 )
             ) \
@@ -325,7 +248,7 @@ def create_index(
             token_group_ids
         ) \
             .map(
-                # (tokenIndex, ((rawToken, sids, _), gid)) -> (tokenIndex, (gid, rawToken, sids))
+                # (tokenIndex, ((rawToken, sids, _), gid))
                 lambda t: (t[0], (t[1][1], t[1][0][0], t[1][0][1]))
             )
 
@@ -333,7 +256,7 @@ def create_index(
     # Create sets and replace text tokens with token index
     integer_sets = posting_lists_with_group_ids \
         .flatMap(
-            # (tokenIndex, (gid, rawToken, sids)) -> [(sidH, tokIdx), (sidJ, tokIdx), ...]
+            # (tokenIndex, (_, _, sids))
             lambda t: [(sid, t[0]) for sid in t[1][2]]        
         ) \
             .groupByKey() \
@@ -374,6 +297,8 @@ def create_index(
                         )
     
     # STAGE 4: SAVE INTEGER SETS AND FINAL POSTING LISTS
+    # print('STAGE 4: SAVE INTEGER SETS AND FINAL POSTING LISTS')
+    # to load directly into the database
 
     def sets_format_string(t):
         sid, indices = t
@@ -419,14 +344,12 @@ def get_tables_statistics_from_mongodb(
 
 
 def sample_queries(
-    sloth_results_csv_file,
     josie_sloth_id_file,
     table_statistics_file,
-    output_query_json
+    output_query_json,
+    use_scala,
+    ids_for_queries_file
     ):
-
-    sloth_res =     pl.scan_csv(sloth_results_csv_file)
-    table_stat =    pl.read_csv(table_statistics_file)
     josloth_ids =   pl.read_csv(
         josie_sloth_id_file, 
         has_header=False,
@@ -434,6 +357,31 @@ def sample_queries(
         ) \
         .rename({'column_1': 'josie_id', 'column_2': 'sloth_id'})
 
+    if True:
+        ids_for_queries = pl.read_csv(
+            ids_for_queries_file, 
+            has_header=False
+            ).rename({'column_1': 'sloth_id'})
+        num_samples = 300
+        sample = ids_for_queries.join(josloth_ids, on='sloth_id').sample(num_samples)
+
+        with open(output_query_json, 'w') as wf:
+            json.dump(
+                [
+                    {
+                        "jsim": [(0, 1)],
+                        "sloth_res": [],
+                        "ids": sample.to_numpy().tolist()
+                    }
+                ],
+                wf,
+                indent=2
+            )
+        return num_samples
+
+    sloth_res =     pl.scan_csv(sloth_results_csv_file)
+    table_stat =    pl.read_csv(table_statistics_file)
+    
     n_sample_per_interval = 10
     jsim_intervals = [0, 0.3, 0.7, 1]
     # overlap_intervals = [50, 100, 5000]

@@ -20,6 +20,9 @@ class JosieDB:
         self._INVERTED_LISTS_INDEX_NAME =    f'{self.tprefix}_inverted_lists_token_idx'
         self._QUERY_TABLE_NAME =             f'{self.tprefix}_queries'
 
+        self._READ_LIST_COST_SAMPLES_TABLE_NAME = f'{self.tprefix}_read_list_cost_samples'
+        self._READ_SET_COST_SAMPLES_TABLE_NAME = f'{self.tprefix}_read_set_cost_samples'
+
     @print_info(msg_before='Opening connection to the PostgreSQL database...')
     def open(self):
         self._dbconn = psycopg.connect(f"port=5442 host=/tmp dbname={self.dbname}")
@@ -31,24 +34,22 @@ class JosieDB:
         self._dbconn.commit()
 
     @print_info(msg_before='Dropping tables...')
-    def drop_tables(self):    
+    def drop_tables(self, all=False):    
         self.dbcur.execute(
             f"""
             DROP TABLE IF EXISTS {self._INVERTED_LISTS_TABLE_NAME};
-            """        
-        )
-
-        self.dbcur.execute(
-            f"""
             DROP TABLE IF EXISTS {self._SET_TABLE_NAME};
-            """        
-        )
-
-        self.dbcur.execute(
-            f"""
             DROP TABLE IF EXISTS {self._QUERY_TABLE_NAME};
             """        
         )
+
+        if all:
+            self.dbcur.execute(
+                f"""
+                DROP TABLE IF EXISTS {self._READ_LIST_COST_SAMPLES_TABLE_NAME};
+                DROP TABLE IF EXISTS {self._READ_SET_COST_SAMPLES_TABLE_NAME};
+                """
+            )
 
     @print_info(msg_before='Creating database tables...')
     def create_tables(self):
