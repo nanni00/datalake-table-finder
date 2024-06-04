@@ -50,6 +50,8 @@ parser.add_argument('--queries-file', required=False, type=str, help='an absolut
 parser.add_argument('--convert-query-ids', required=False, action='store_true', help='when passing a queries file from a different test, the JOSIE IDs used in that test may be different from the current one, so convert them')
 
 parser.add_argument('--use-scala', required=False, action='store_true', help='instead of use pure Python implementation of the program, use a Scala version for creating inverted index and integer sets.')
+parser.add_argument('--keep-numbers', required=False, action='store_true')
+
 parser.add_argument('--clean', required=False, action='store_true', help='remove PostgreSQL database tables and other big files')
 
 args = parser.parse_args()
@@ -62,6 +64,7 @@ user_dbname =       args.dbname
 tables_limit =      args.tables_limit
 convert_query_ids = args.convert_query_ids
 use_scala =         args.use_scala
+keep_numbers =      args.keep_numbers
 
 
 ALL =               'all' in tasks
@@ -151,7 +154,8 @@ if ALL or INVERTED_IDX:
                 'min_columns': 2,
                 'min_area': 50
             },
-            tables_limit=tables_limit
+            tables_limit=tables_limit,
+            keep_numbers=keep_numbers
         )
         shutil.move(ids_for_queries_file, ids_for_queries_file + '.csv')
     else:

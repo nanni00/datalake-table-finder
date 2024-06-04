@@ -24,15 +24,17 @@ _TOKEN_TAG_SEPARATOR = '@#'
 
 
 
-def _create_token_set(data, mode):
+def _create_token_set(data, mode, keep_numbers=True):
     if mode == 'set':
-        return list({str(token).replace('|', ' ') for column in data for token in column if not pd.isna(token) and token})
+        return list({str(token).replace('|', ' ') for column in data for token in column 
+                     if not pd.isna(token) and token and (keep_numbers or (not keep_numbers and not str(token).isdigit()))})
     elif mode == 'bag':
         counter = defaultdict(int) # is that better? More space but no sort operation            
         def _create_token_tag(token):
             counter[token] += 1
             return f'{token}{_TOKEN_TAG_SEPARATOR}{counter[token]}'
-        return [_create_token_tag(str(token).replace('|', ' ')) for column in data for token in column if not pd.isna(token) and token]
+        return [_create_token_tag(str(token).replace('|', ' ')) for column in data for token in column 
+                if not pd.isna(token) and token and (keep_numbers or (not keep_numbers and not str(token).isdigit()))]
     else:
         raise Exception('Unknown mode: ' + str(mode))
 
@@ -66,12 +68,12 @@ def extract_tables_from_jsonl_to_mongodb(
 def create_index(
     mode:str,
     original_sloth_results_file,
-    output_id_for_queries_file,
     output_tables_id_file,
     output_integer_set_file, 
     output_inverted_list_file,
     thresholds:dict[str:int],
-    tables_limit
+    tables_limit,
+    keep_numbers
     ):
 
     MIN_ROW =     0       if 'min_rows'       not in thresholds else thresholds['min_rows']
@@ -142,8 +144,8 @@ def create_index(
     print('Saving mapping between JOSIE and wikitables (SLOTH) IDs...')
     sets.map(lambda t: f"{t[1]},{t[0][0]}").saveAsTextFile(output_tables_id_file)
 
-    def prepare_tuple(t, mode):
-        return [t[1], _create_token_set(t[0][1], mode)]    
+    def prepare_tuple(t):
+        return [t[1], _create_token_set(t[0][1], mode, keep_numbers)]    
     
     print('Start creating inverted index and integer sets...')
     token_sets = sets \
