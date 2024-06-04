@@ -345,11 +345,11 @@ def get_tables_statistics_from_mongodb(
 
 def sample_queries(
     josie_sloth_id_file,
-    table_statistics_file,
     output_query_json,
-    use_scala,
-    ids_for_queries_file
-    ):
+    num_samples=250):
+    """
+    Sample num_samples pairs <JOSIE_id, SLOTH_id> as query values
+    """
     josloth_ids =   pl.read_csv(
         josie_sloth_id_file, 
         has_header=False,
@@ -357,75 +357,70 @@ def sample_queries(
         ) \
         .rename({'column_1': 'josie_id', 'column_2': 'sloth_id'})
 
-    if True:
-        ids_for_queries = pl.read_csv(
-            ids_for_queries_file, 
-            has_header=False
-            ).rename({'column_1': 'sloth_id'})
-        num_samples = 300
-        sample = ids_for_queries.join(josloth_ids, on='sloth_id').sample(num_samples)
+    sample = josloth_ids.sample(num_samples)
 
-        with open(output_query_json, 'w') as wf:
-            json.dump(
-                [
-                    {
-                        "jsim": [(0, 1)],
-                        "sloth_res": [],
-                        "ids": sample.to_numpy().tolist()
-                    }
-                ],
-                wf,
-                indent=2
-            )
-        return num_samples
-
-    sloth_res =     pl.scan_csv(sloth_results_csv_file)
-    table_stat =    pl.read_csv(table_statistics_file)
-    
-    n_sample_per_interval = 10
-    jsim_intervals = [0, 0.3, 0.7, 1]
-    # overlap_intervals = [50, 100, 5000]
-    nan_threshold = 0.1
-
-    sloth_res_samples = defaultdict(list)
-    ids = {}
-
-    def lookup_for_josie_int_id(sloth_str_id:str):
-        return josloth_ids.row(by_predicate=pl.col('sloth_id') == sloth_str_id)[0]
-
-    table_stat = table_stat.rename({'tab_id': 'r_id'})
-    for jsim_min, jsim_max in zip(jsim_intervals[:-1], jsim_intervals[1:]):
-        sample = sloth_res.filter((jsim_min < pl.col('jsim')) & (pl.col('jsim') < jsim_max)).collect().sample(n_sample_per_interval)
-        sample = sample.join(table_stat, on='r_id', how='left', suffix='_r')
-        
-        table_stat = table_stat.rename({'r_id': 's_id'})
-        sample = sample.join(table_stat, on='s_id', how='left', suffix='_s')
-        table_stat = table_stat.rename({'s_id': 'r_id'})
-
-        sample = sample.rename({'rows': 'rows_r', 'cols': 'cols_r', 'size': 'tabsize_r', 'nan': 'nan_r', 'distincts': 'distincts_r', '%nan': '%nan_r'})
-        sample = sample.filter((pl.col('%nan_r') < nan_threshold) & (pl.col('%nan_s') < nan_threshold))
-        sample = sample.sort(by='overlap_area')
-        sloth_res_samples[(jsim_min, jsim_max)] = sample.to_numpy().tolist()
-        ids[(jsim_min, jsim_max)] = list(map(lambda sloth_id: (sloth_id, lookup_for_josie_int_id(sloth_id)), \
-                                             sample.select(['r_id', 's_id']).to_numpy().flatten().tolist()))
-
-    with open(output_query_json, 'w') as writer:            
+    with open(output_query_json, 'w') as wf:
         json.dump(
             [
                 {
-                    "jsim": (jsim_min, jsim_max),
-                    "sloth_res": sloth_res_samples[(jsim_min, jsim_max)],
-                    "ids": ids[(jsim_min, jsim_max)]
-                } 
-                for jsim_min, jsim_max in zip(jsim_intervals[:-1], jsim_intervals[1:])
+                    "jsim": [(0, 1)],
+                    "sloth_res": [],
+                    "ids": sample.to_numpy().tolist()
+                }
             ],
-            writer, 
-            indent=3
-            )
+            wf,
+            indent=2
+        )
+    return num_samples
+    """
+        sloth_res =     pl.scan_csv(sloth_results_csv_file)
+        table_stat =    pl.read_csv(table_statistics_file)
         
-    totsamples = [i for _, v in ids.items() for i in v]
-    print(f"Sampled {len(totsamples)} IDs from {len(jsim_intervals) - 1} intervals of Jaccard similarity.")
-    return totsamples
+        n_sample_per_interval = 10
+        jsim_intervals = [0, 0.3, 0.7, 1]
+        # overlap_intervals = [50, 100, 5000]
+        nan_threshold = 0.1
+
+        sloth_res_samples = defaultdict(list)
+        ids = {}
+
+        def lookup_for_josie_int_id(sloth_str_id:str):
+            return josloth_ids.row(by_predicate=pl.col('sloth_id') == sloth_str_id)[0]
+
+        table_stat = table_stat.rename({'tab_id': 'r_id'})
+        for jsim_min, jsim_max in zip(jsim_intervals[:-1], jsim_intervals[1:]):
+            sample = sloth_res.filter((jsim_min < pl.col('jsim')) & (pl.col('jsim') < jsim_max)).collect().sample(n_sample_per_interval)
+            sample = sample.join(table_stat, on='r_id', how='left', suffix='_r')
+            
+            table_stat = table_stat.rename({'r_id': 's_id'})
+            sample = sample.join(table_stat, on='s_id', how='left', suffix='_s')
+            table_stat = table_stat.rename({'s_id': 'r_id'})
+
+            sample = sample.rename({'rows': 'rows_r', 'cols': 'cols_r', 'size': 'tabsize_r', 'nan': 'nan_r', 'distincts': 'distincts_r', '%nan': '%nan_r'})
+            sample = sample.filter((pl.col('%nan_r') < nan_threshold) & (pl.col('%nan_s') < nan_threshold))
+            sample = sample.sort(by='overlap_area')
+            sloth_res_samples[(jsim_min, jsim_max)] = sample.to_numpy().tolist()
+            ids[(jsim_min, jsim_max)] = list(map(lambda sloth_id: (sloth_id, lookup_for_josie_int_id(sloth_id)), \
+                                                sample.select(['r_id', 's_id']).to_numpy().flatten().tolist()))
+
+        with open(output_query_json, 'w') as writer:            
+            json.dump(
+                [
+                    {
+                        "jsim": (jsim_min, jsim_max),
+                        "sloth_res": sloth_res_samples[(jsim_min, jsim_max)],
+                        "ids": ids[(jsim_min, jsim_max)]
+                    } 
+                    for jsim_min, jsim_max in zip(jsim_intervals[:-1], jsim_intervals[1:])
+                ],
+                writer, 
+                indent=3
+                )
+            
+        totsamples = [i for _, v in ids.items() for i in v]
+        print(f"Sampled {len(totsamples)} IDs from {len(jsim_intervals) - 1} intervals of Jaccard similarity.")
+        return totsamples
+    """
 
 
 def get_query_ids_from_query_file(josie_sloth_id_file, query_file, convert_query_ids):

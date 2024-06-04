@@ -3,6 +3,7 @@ import shutil
 import argparse
 import warnings
 warnings.filterwarnings('ignore')
+import subprocess
 from time import time
 
 import pymongo
@@ -63,7 +64,6 @@ tables_limit =      args.tables_limit
 convert_query_ids = args.convert_query_ids
 use_scala =         args.use_scala
 
-
 ALL =               'all' in tasks
 EXTR_TO_MONGODB =   'createmongodb' in tasks
 INVERTED_IDX =      'createindex' in tasks
@@ -84,7 +84,6 @@ java_path  =                                '/usr/lib/jvm/java-11-openjdk-amd64/
 
 # output files
 ROOT_TEST_DIR =             defpath.data_path.base + f'/josie-tests/{test_name}'
-ids_for_queries_file =      ROOT_TEST_DIR + '/ids_for_queries'
 josie_sloth_ids_file =      ROOT_TEST_DIR + '/josie_sloth_ids'
 raw_tokens_file =           ROOT_TEST_DIR + '/tables.raw-tokens' 
 set_file =                  ROOT_TEST_DIR + '/tables.set'
@@ -92,7 +91,6 @@ integer_set_file =          ROOT_TEST_DIR + '/tables.set-2'
 inverted_list_file =        ROOT_TEST_DIR + '/tables.inverted-list'
 query_file =                ROOT_TEST_DIR + '/queries.json'             if not args.queries_file else args.queries_file
 results_dir =               ROOT_TEST_DIR + '/results'
-    
 
 # statistics stuff
 statistics_dir =            ROOT_TEST_DIR  + '/statistics'
@@ -142,7 +140,6 @@ if ALL or INVERTED_IDX:
         create_index(
             mode,
             original_sloth_results_csv_file,
-            ids_for_queries_file,
             josie_sloth_ids_file,
             integer_set_file,
             inverted_list_file,
@@ -153,26 +150,16 @@ if ALL or INVERTED_IDX:
             },
             tables_limit=tables_limit
         )
-        shutil.move(ids_for_queries_file, ids_for_queries_file + '.csv')
     else:
         print("SCALA VERSION: creating inverted list and integer sets...")
-
-        os.system(f"{java_path} -jar {scala_jar_indexing_path} \
-                  {mode} \
-                  {original_sloth_results_csv_file} \
-                  {ids_for_queries_file} \
-                  {josie_sloth_ids_file} \
-                  {integer_set_file} \
-                  {inverted_list_file} \
-                  {tables_limit}")
+        subprocess.call(args=[java_path, "-jar", scala_jar_indexing_path, 
+                             mode, 
+                             original_sloth_results_csv_file, 
+                             josie_sloth_ids_file, 
+                             integer_set_file, 
+                             inverted_list_file, 
+                             tables_limit])
         print("Completed.")
-        # in this case, the filtered IDs that will be used for querying won't be in a 
-        # single CSV at this point, so adjust that
-        with open(ids_for_queries_file + '.csv', 'wb') as wfd:
-            for f in [file for file in sorted(os.listdir(ids_for_queries_file)) if file.startswith('part-')]:
-                with open(ids_for_queries_file + os.sep + f, 'rb') as fd:
-                    shutil.copyfileobj(fd, wfd)
-        shutil.rmtree(ids_for_queries_file)
 
     runtime_metrics.append(('create-invidx-intsets', round(time() - start, 5), get_current_time()))
 
@@ -183,7 +170,6 @@ if ALL or INVERTED_IDX:
                 shutil.copyfileobj(fd, wfd)
     shutil.rmtree(josie_sloth_ids_file)
 
-ids_for_queries_file += '.csv'
 josie_sloth_ids_file += '.csv'
 
 ############# SAMPLING TEST VALUES FOR JOSIE ##############
@@ -197,10 +183,8 @@ if ALL or SAMPLE_QUERIES:
     start = time()
     sample_queries(
         josie_sloth_ids_file,
-        tables_stat_file,
         query_file,
-        use_scala,
-        ids_for_queries_file
+        use_scala
     )
     runtime_metrics.append(('sampling-queries', round(time() - start, 5), get_current_time()))
 
@@ -214,7 +198,6 @@ if ALL or DBSETUP:
     start = time()
     josiedb = JosieDB(dbname=user_dbname, table_prefix=test_name)
     josiedb.open()
-
     josiedb.drop_tables()
     josiedb.create_tables()
     josiedb.insert_data_into_inverted_list_table(inverted_list_file)
@@ -222,12 +205,10 @@ if ALL or DBSETUP:
     josiedb.insert_data_into_query_table(sampled_ids)
     josiedb.create_sets_index()
     josiedb.create_inverted_list_index()
-
     # database statistics
     dbstat = josiedb.get_statistics()
     dbstat[0]['test-name'] = test_name
     pd.DataFrame(dbstat).to_csv(db_stat_file, index=False)
-    
     josiedb.close()
     runtime_metrics.append(('josie-db-operations', round(time() - start, 5), get_current_time()))
 
@@ -241,7 +222,6 @@ with open(runtime_stat_file, 'a') as rfw:
     for task in runtime_metrics:
         rfw.write(f"{task[0]},{task[1]},{task[2]}\n")
 
-
 if CLEAN:
     if os.path.exists(integer_set_file):
         shutil.rmtree(integer_set_file)
@@ -252,7 +232,6 @@ if CLEAN:
     josiedb.open()
     josiedb.drop_tables(all=True)
     josiedb.close()
-
 
 print('All tasks have been completed.')
 
