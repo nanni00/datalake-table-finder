@@ -347,7 +347,6 @@ def get_tables_statistics_from_mongodb(
 
 def sample_queries(
     josie_sloth_id_file,
-    ids_for_queries_file,
     output_query_json
     ):
     josloth_ids =   pl.read_csv(
@@ -357,12 +356,8 @@ def sample_queries(
         ) \
         .rename({'column_1': 'josie_id', 'column_2': 'sloth_id'})
 
-    ids_for_queries = pl.read_csv(
-        ids_for_queries_file, 
-        has_header=False
-        ).rename({'column_1': 'sloth_id'})
-    num_samples = 300
-    sample = ids_for_queries.join(josloth_ids, on='sloth_id').sample(num_samples)
+    num_samples = 100
+    sample = josloth_ids.sample(num_samples)
 
     with open(output_query_json, 'w') as wf:
         json.dump(

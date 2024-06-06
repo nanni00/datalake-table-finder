@@ -121,15 +121,10 @@ if not os.path.exists(ROOT_TEST_DIR):
 
 print('Init MongoDB client...')
 mongoclient = pymongo.MongoClient()
-
-# the DB and its collection where are stored the 570k wikitables 
-# (and where are the ~45000 used for basic SLOTH testing and for next JOSIE querying)
 optitab_db = mongoclient.optitab
 wikitables_coll = optitab_db.turl_training_set
 
-
 ############# DATA PREPARATION #############
-
 if EXTR_TO_MONGODB:
     start = time()    
     extract_tables_from_jsonl_to_mongodb(
@@ -188,7 +183,6 @@ if ALL or SAMPLE_QUERIES:
     start = time()
     sample_queries(
         josie_sloth_ids_file,
-        ids_for_queries_file,
         query_file
     )
     runtime_metrics.append(('sampling-queries', round(time() - start, 5), get_current_time()))
