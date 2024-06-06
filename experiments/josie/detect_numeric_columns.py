@@ -128,10 +128,12 @@ if __name__ == '__main__':
         snapcoll = mongoclient.sloth.latest_snapshot_tables_small
 
     if task == 'set':
-        import spacy
-
-        print('Loading spacy models...')
-        nlp = [spacy.load('en_core_web_sm') for _ in range(ncpu)]
+        if mode == 'spacy':
+            import spacy
+            print('Loading spacy models...')
+            nlp = [spacy.load('en_core_web_sm') for _ in range(ncpu)]
+        else:
+            nlp = []
 
         turlcoll_size = 570000 if not small else 10000
         snapshot_size = 2100000 if not small else 10000

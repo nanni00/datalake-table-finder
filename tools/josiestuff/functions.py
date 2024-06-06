@@ -20,26 +20,6 @@ from pyspark.sql.types import BooleanType
 from tools.utils.utils import print_info
     
 
-_TOKEN_TAG_SEPARATOR = '@#'
-
-
-
-def _create_token_set(data, mode, numeric_columns):
-    if mode == 'set':
-        return list({str(token).replace('|', ' ') for icol, column in enumerate(data) for token in column 
-                     if not pd.isna(token) and token and numeric_columns[icol] == 0})
-    elif mode == 'bag':
-        counter = defaultdict(int) # is that better? More space but no sort operation            
-        def _create_token_tag(token):
-            counter[token] += 1
-            return f'{token}{_TOKEN_TAG_SEPARATOR}{counter[token]}'
-        return [_create_token_tag(str(token).replace('|', ' ')) for icol, column in enumerate(data) for token in column 
-                if not pd.isna(token) and token and numeric_columns[icol] == 0]
-    else:
-        raise Exception('Unknown mode: ' + str(mode))
-
-
-
 @print_info(msg_before="Extracting tables from JSONL file...")
 def extract_tables_from_jsonl_to_mongodb(
         input_tables_jsonl_file,
@@ -64,23 +44,49 @@ def extract_tables_from_jsonl_to_mongodb(
         table_collection.insert_many(tables)
 
 
+_TOKEN_TAG_SEPARATOR = '@#'
+
+
+def _create_token_set(table, mode, numeric_columns):
+    """ Create the token set for the given table 
+    :param table: a list of list (row-view) of the table content 
+    :param mode: how to create the token set, with "set" or "bag" semantic
+    :param numeric_columns: a flag vector, where if the ith element is 1, this means that the 
+                            ith column is numeric and its elements are skipped while creating the token set
+    """
+    if mode == 'set':
+        return list({str(token).replace('|', ' ') for row in table for icol, token in enumerate(row) 
+                     if not pd.isna(token) and token and numeric_columns[icol] == 0})
+    elif mode == 'bag':
+        counter = defaultdict(int) # is that better? More space but no sort operation            
+        def _create_token_tag(token):
+            counter[token] += 1
+            return f'{token}{_TOKEN_TAG_SEPARATOR}{counter[token]}'
+        return [_create_token_tag(str(token).replace('|', ' ')) for row in table for icol, token in enumerate(row)
+                if not pd.isna(token) and token and numeric_columns[icol] == 0]
+    else:
+        raise Exception('Unknown mode: ' + str(mode))
+
+
+
+# filtering on the IDs from the SLOTH results file should be deprecated, since now we'll work
+# on a silver standard per test
 @print_info(msg_before='Creating integer sets and inverted index...', msg_after='Completed.')
 def create_index(
     mode:str,
     original_sloth_results_file,
-    output_tables_id_file,
     output_integer_set_file, 
     output_inverted_list_file,
     thresholds:dict[str:int],
     tables_limit,
     small):
 
-    MIN_ROW =     0       if 'min_rows'       not in thresholds else thresholds['min_rows']
-    MAX_ROW =     999999  if 'max_rows'       not in thresholds else thresholds['max_rows']
-    MIN_COLUMN =  0       if 'min_columns'    not in thresholds else thresholds['min_columns']
-    MAX_COLUMN =  999999  if 'max_columns'    not in thresholds else thresholds['max_columns']
-    MIN_AREA =    0       if 'min_area'       not in thresholds else thresholds['min_area']
-    MAX_AREA =    999999  if 'max_area'       not in thresholds else thresholds['max_area']
+    MIN_ROW =     thresholds['min_rows']
+    MAX_ROW =     thresholds['max_rows']
+    MIN_COLUMN =  thresholds['min_columns']
+    MAX_COLUMN =  thresholds['max_columns']
+    MIN_AREA =    thresholds['min_area']
+    MAX_AREA =    thresholds['max_area']
     
     all_sloth_results = pl.scan_csv(original_sloth_results_file)
     sloth_tables_ids = set( \
@@ -105,6 +111,9 @@ def create_index(
         .config('spark.driver.memory', '10g') \
         .config('spark.local.dir', '/data4/nanni/spark') \
         .getOrCreate()
+    
+    # adjusting logging level to error, avoiding warnings
+    spark.sparkContext.setLogLevel("ERROR")
 
     # carico le tabelle usate nei risultati di SLOTH 
     # e che sono la base per fare poi la query
@@ -115,12 +124,11 @@ def create_index(
         .option("database", "optitab") \
         .option("collection", "turl_training_set" if not small else "turl_training_set_small") \
         .load() \
-        .select('_id', 'content', 'numeric_columns') \
+        .select('_id', '_id_numeric', 'content', 'numeric_columns') \
         .filter(f"""
                 size(content) BETWEEN {MIN_ROW} AND {MAX_ROW} 
                 AND size(content[0]) BETWEEN {MIN_COLUMN} AND {MAX_COLUMN} 
                 AND size(content) * size(content[0]) BETWEEN {MIN_AREA} AND {MAX_AREA}""") \
-        .filter(check_is_in_sloth_results('_id'))
 
     # carico il database MongoDB dove c'è lo snapshot principale e inizio il processing effettivo
     sloth__latest_snapshot_tables_df = spark \
@@ -131,28 +139,30 @@ def create_index(
         .option("collection", "latest_snapshot_tables" if not small else "latest_snapshot_tables_small") \
         .load() \
         .limit(tables_limit) \
-        .select('_id', 'content', 'numeric_columns') \
+        .select('_id', '_id_numeric', 'content', 'numeric_columns') \
+        .filter(f"""
+                size(content) BETWEEN {MIN_ROW} AND {MAX_ROW} 
+                AND size(content[0]) BETWEEN {MIN_COLUMN} AND {MAX_COLUMN} 
+                AND size(content) * size(content[0]) BETWEEN {MIN_AREA} AND {MAX_AREA}""") \
         .rdd \
         .map(list) \
         .union(
             optitab__turl_training_set_df.rdd.map(list)    
-        ).zipWithIndex()
+        )
     
     optitab__turl_training_set_df.unpersist()   # free memory used by the dataframe (is this really useful?)
 
-    print('Saving mapping between JOSIE and wikitables (SLOTH) IDs...')
-    sloth__latest_snapshot_tables_df.map(lambda t: f"{t[1]},{t[0][0]}").saveAsTextFile(output_tables_id_file)
-
     def prepare_tuple(t):
-        # ((_id, content, numeric_columns), sparkIndex)
-        return [t[1], _create_token_set(t[0][1], mode, t[0][2])]    
+        nonlocal mode
+        # t = (_id, _id_numeric, content, numeric_columns)
+        return [t[1], _create_token_set(t[2], mode, t[3])]    
     
     print('Start creating inverted index and integer sets...')
     token_sets = sloth__latest_snapshot_tables_df \
         .map(
             # from MongoDB directly
-            # (_id, content) -> (_id, [token1, token2, token3, ...])
-            lambda t: prepare_tuple(t, mode)
+            # (_id, _id_numeric, content, numeric_columns) -> (_id_numeric, [token1, token2, token3, ...])
+            lambda t: prepare_tuple(t)
             ) \
             .flatMap(
                 # (set_id, [tok1, tok2, tok3, ...]) -> [(tok1, set_id), (tok2, set_id), ...]
@@ -346,55 +356,57 @@ def get_tables_statistics_from_mongodb(
 
 
 def sample_queries(
-    josie_sloth_id_file,
-    output_query_json
+    output_query_json,
+    nsamples,
+    small:bool,
+    tables_thresholds:dict[str, int]
     ):
-    josloth_ids =   pl.read_csv(
-        josie_sloth_id_file, 
-        has_header=False,
-        dtypes={'column_1': pl.datatypes.Int64, 'column_2': pl.datatypes.String}
-        ) \
-        .rename({'column_1': 'josie_id', 'column_2': 'sloth_id'})
 
-    num_samples = 100
-    sample = josloth_ids.sample(num_samples)
+    MIN_ROW =     tables_thresholds['min_rows']
+    MAX_ROW =     tables_thresholds['max_rows']
+    MIN_COLUMN =  tables_thresholds['min_columns']
+    MAX_COLUMN =  tables_thresholds['max_columns']
+    MIN_AREA =    tables_thresholds['min_area']
+    MAX_AREA =    tables_thresholds['max_area']
+    
+    mongoclient = pymongo.MongoClient()
+    if not small:
+        turlcoll = mongoclient.optitab.turl_training_set
+        snapcoll = mongoclient.sloth.latest_snapshot_tables
+    else:
+        turlcoll = mongoclient.optitab.turl_training_set_small
+        snapcoll = mongoclient.sloth.latest_snapshot_tables_small
 
+    turl_samples = turlcoll.aggregate(
+        [ {"$sample": {"size": nsamples // 2} } ]
+    )
+
+    snap_samples = snapcoll.aggregate(
+        [ {"$sample": {"size": nsamples // 2} } ]
+    )
+
+    samples = [
+        {'_id': t['_id'], '_id_numeric': t['_id_numeric'], 'content': t['content'], 'numeric_columns': t['numeric_columns']} 
+        for t in list(turl_samples) + list(snap_samples)
+        if MIN_ROW <= len(t['content']) <= MAX_ROW \
+        and MIN_COLUMN <= len(t['content'][0]) <= MAX_COLUMN \
+        and MIN_AREA <= len(t['content']) * len(t['content'][0]) <= MAX_AREA
+    ]
+
+    print(f'Sampled {len(samples)} tables')
     with open(output_query_json, 'w') as wf:
         json.dump(
-            [
-                {
-                    "ids": sample.to_numpy().tolist()
-                }
-            ],
+            samples,
             wf,
-            indent=2
+            indent=1
         )
-    return num_samples
+    return len(samples)
 
 
-
-def get_query_ids_from_query_file(josie_sloth_id_file, query_file, convert_query_ids):
-    josloth_ids =   pl.read_csv(
-        josie_sloth_id_file, 
-        has_header=False,
-        dtypes={'column_1': pl.datatypes.Int64, 'column_2': pl.datatypes.String}
-        ) \
-        .rename({'column_1': 'josie_id', 'column_2': 'sloth_id'})
-    
-    def lookup_for_josie_int_id(sloth_str_id:str):
-        return josloth_ids.row(by_predicate=pl.col('sloth_id') == sloth_str_id)[0]
-    
+def get_query_ids_from_query_file(query_file):
     with open(query_file) as fr:
-        query_stuff = json.load(fr)
-
-    if not convert_query_ids:
-        sampled_ids = [_id[1] for interval in query_stuff for _id in interval['ids']]
-    else:
-        sampled_ids = [lookup_for_josie_int_id(_id[0]) for interval in query_stuff for _id in interval['ids']]
-    return sampled_ids
-
-
-
+        return [t['_id_numeric'] for t in json.load(fr)]
+    
 
 @print_info(msg_before='Starting JOSIE tests...', msg_after='Completed.')
 def josie_test(josie_dbname, test_name, results_directory, k):

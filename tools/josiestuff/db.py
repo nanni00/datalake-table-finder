@@ -89,6 +89,14 @@ class JosieDB:
             """
         )
 
+    @print_info(msg_before='Clearing query table...')
+    def clear_query_table(self):
+        self.dbcur.execute(
+            f"""
+                TRUNCATE {self._QUERY_TABLE_NAME}
+            """
+        )
+
 
     @print_info(msg_before='Inserting sets...')
     def insert_data_into_sets_table(self, sets_files_partitions:str):
