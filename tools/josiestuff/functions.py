@@ -24,17 +24,17 @@ _TOKEN_TAG_SEPARATOR = '@#'
 
 
 
-def _create_token_set(data, mode, keep_numbers=True):
+def _create_token_set(data, mode, numeric_columns):
     if mode == 'set':
-        return list({str(token).replace('|', ' ') for column in data for token in column 
-                     if not pd.isna(token) and token and (keep_numbers or (not keep_numbers and not str(token).isdigit()))})
+        return list({str(token).replace('|', ' ') for icol, column in enumerate(data) for token in column 
+                     if not pd.isna(token) and token and numeric_columns[icol] == 0})
     elif mode == 'bag':
         counter = defaultdict(int) # is that better? More space but no sort operation            
         def _create_token_tag(token):
             counter[token] += 1
             return f'{token}{_TOKEN_TAG_SEPARATOR}{counter[token]}'
-        return [_create_token_tag(str(token).replace('|', ' ')) for column in data for token in column 
-                if not pd.isna(token) and token and (keep_numbers or (not keep_numbers and not str(token).isdigit()))]
+        return [_create_token_tag(str(token).replace('|', ' ')) for icol, column in enumerate(data) for token in column 
+                if not pd.isna(token) and token and numeric_columns[icol] == 0]
     else:
         raise Exception('Unknown mode: ' + str(mode))
 
@@ -73,8 +73,7 @@ def create_index(
     output_inverted_list_file,
     thresholds:dict[str:int],
     tables_limit,
-    keep_numbers
-    ):
+    small):
 
     MIN_ROW =     0       if 'min_rows'       not in thresholds else thresholds['min_rows']
     MAX_ROW =     999999  if 'max_rows'       not in thresholds else thresholds['max_rows']
@@ -109,14 +108,14 @@ def create_index(
 
     # carico le tabelle usate nei risultati di SLOTH 
     # e che sono la base per fare poi la query
-    wikitables_df = spark \
+    optitab__turl_training_set_df = spark \
         .read \
         .format("mongodb") \
         .option ("uri", "mongodb://127.0.0.1:27017/") \
         .option("database", "optitab") \
-        .option("collection", "turl_training_set") \
+        .option("collection", "turl_training_set" if not small else "turl_training_set_small") \
         .load() \
-        .select('_id', 'content') \
+        .select('_id', 'content', 'numeric_columns') \
         .filter(f"""
                 size(content) BETWEEN {MIN_ROW} AND {MAX_ROW} 
                 AND size(content[0]) BETWEEN {MIN_COLUMN} AND {MAX_COLUMN} 
@@ -124,31 +123,32 @@ def create_index(
         .filter(check_is_in_sloth_results('_id'))
 
     # carico il database MongoDB dove c'è lo snapshot principale e inizio il processing effettivo
-    sets = spark \
+    sloth__latest_snapshot_tables_df = spark \
         .read \
         .format('mongodb')\
         .option("uri", "mongodb://127.0.0.1:27017/") \
         .option("database", "sloth") \
-        .option("collection", "latest_snapshot_tables") \
+        .option("collection", "latest_snapshot_tables" if not small else "latest_snapshot_tables_small") \
         .load() \
         .limit(tables_limit) \
-        .select('_id', 'content') \
+        .select('_id', 'content', 'numeric_columns') \
         .rdd \
         .map(list) \
         .union(
-            wikitables_df.rdd.map(list)    
+            optitab__turl_training_set_df.rdd.map(list)    
         ).zipWithIndex()
     
-    wikitables_df.unpersist()   # free memory used by the dataframe (is this really useful?)
+    optitab__turl_training_set_df.unpersist()   # free memory used by the dataframe (is this really useful?)
 
     print('Saving mapping between JOSIE and wikitables (SLOTH) IDs...')
-    sets.map(lambda t: f"{t[1]},{t[0][0]}").saveAsTextFile(output_tables_id_file)
+    sloth__latest_snapshot_tables_df.map(lambda t: f"{t[1]},{t[0][0]}").saveAsTextFile(output_tables_id_file)
 
     def prepare_tuple(t):
-        return [t[1], _create_token_set(t[0][1], mode, keep_numbers)]    
+        # ((_id, content, numeric_columns), sparkIndex)
+        return [t[1], _create_token_set(t[0][1], mode, t[0][2])]    
     
     print('Start creating inverted index and integer sets...')
-    token_sets = sets \
+    token_sets = sloth__latest_snapshot_tables_df \
         .map(
             # from MongoDB directly
             # (_id, content) -> (_id, [token1, token2, token3, ...])
@@ -347,10 +347,8 @@ def get_tables_statistics_from_mongodb(
 
 def sample_queries(
     josie_sloth_id_file,
-    table_statistics_file,
-    output_query_json,
-    use_scala,
-    ids_for_queries_file
+    ids_for_queries_file,
+    output_query_json
     ):
     josloth_ids =   pl.read_csv(
         josie_sloth_id_file, 
@@ -359,75 +357,25 @@ def sample_queries(
         ) \
         .rename({'column_1': 'josie_id', 'column_2': 'sloth_id'})
 
-    if True:
-        ids_for_queries = pl.read_csv(
-            ids_for_queries_file, 
-            has_header=False
-            ).rename({'column_1': 'sloth_id'})
-        num_samples = 300
-        sample = ids_for_queries.join(josloth_ids, on='sloth_id').sample(num_samples)
+    ids_for_queries = pl.read_csv(
+        ids_for_queries_file, 
+        has_header=False
+        ).rename({'column_1': 'sloth_id'})
+    num_samples = 300
+    sample = ids_for_queries.join(josloth_ids, on='sloth_id').sample(num_samples)
 
-        with open(output_query_json, 'w') as wf:
-            json.dump(
-                [
-                    {
-                        "jsim": [(0, 1)],
-                        "sloth_res": [],
-                        "ids": sample.to_numpy().tolist()
-                    }
-                ],
-                wf,
-                indent=2
-            )
-        return num_samples
-
-    sloth_res =     pl.scan_csv(sloth_results_csv_file)
-    table_stat =    pl.read_csv(table_statistics_file)
-    
-    n_sample_per_interval = 10
-    jsim_intervals = [0, 0.3, 0.7, 1]
-    # overlap_intervals = [50, 100, 5000]
-    nan_threshold = 0.1
-
-    sloth_res_samples = defaultdict(list)
-    ids = {}
-
-    def lookup_for_josie_int_id(sloth_str_id:str):
-        return josloth_ids.row(by_predicate=pl.col('sloth_id') == sloth_str_id)[0]
-
-    table_stat = table_stat.rename({'tab_id': 'r_id'})
-    for jsim_min, jsim_max in zip(jsim_intervals[:-1], jsim_intervals[1:]):
-        sample = sloth_res.filter((jsim_min < pl.col('jsim')) & (pl.col('jsim') < jsim_max)).collect().sample(n_sample_per_interval)
-        sample = sample.join(table_stat, on='r_id', how='left', suffix='_r')
-        
-        table_stat = table_stat.rename({'r_id': 's_id'})
-        sample = sample.join(table_stat, on='s_id', how='left', suffix='_s')
-        table_stat = table_stat.rename({'s_id': 'r_id'})
-
-        sample = sample.rename({'rows': 'rows_r', 'cols': 'cols_r', 'size': 'tabsize_r', 'nan': 'nan_r', 'distincts': 'distincts_r', '%nan': '%nan_r'})
-        sample = sample.filter((pl.col('%nan_r') < nan_threshold) & (pl.col('%nan_s') < nan_threshold))
-        sample = sample.sort(by='overlap_area')
-        sloth_res_samples[(jsim_min, jsim_max)] = sample.to_numpy().tolist()
-        ids[(jsim_min, jsim_max)] = list(map(lambda sloth_id: (sloth_id, lookup_for_josie_int_id(sloth_id)), \
-                                             sample.select(['r_id', 's_id']).to_numpy().flatten().tolist()))
-
-    with open(output_query_json, 'w') as writer:            
+    with open(output_query_json, 'w') as wf:
         json.dump(
             [
                 {
-                    "jsim": (jsim_min, jsim_max),
-                    "sloth_res": sloth_res_samples[(jsim_min, jsim_max)],
-                    "ids": ids[(jsim_min, jsim_max)]
-                } 
-                for jsim_min, jsim_max in zip(jsim_intervals[:-1], jsim_intervals[1:])
+                    "ids": sample.to_numpy().tolist()
+                }
             ],
-            writer, 
-            indent=3
-            )
-        
-    totsamples = [i for _, v in ids.items() for i in v]
-    print(f"Sampled {len(totsamples)} IDs from {len(jsim_intervals) - 1} intervals of Jaccard similarity.")
-    return totsamples
+            wf,
+            indent=2
+        )
+    return num_samples
+
 
 
 def get_query_ids_from_query_file(josie_sloth_id_file, query_file, convert_query_ids):
