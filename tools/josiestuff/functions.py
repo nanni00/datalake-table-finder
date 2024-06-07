@@ -54,15 +54,18 @@ def _create_token_set(table, mode, numeric_columns):
     :param numeric_columns: a flag vector, where if the ith element is 1, this means that the 
                             ith column is numeric and its elements are skipped while creating the token set
     """
+    def prepare_token(token):
+        return str(token).replace('|', ' ').replace('\n', ' ')
+
     if mode == 'set':
-        return list({str(token).replace('|', ' ') for row in table for icol, token in enumerate(row) 
+        return list({prepare_token(token) for row in table for icol, token in enumerate(row) 
                      if not pd.isna(token) and token and numeric_columns[icol] == 0})
     elif mode == 'bag':
         counter = defaultdict(int) # is that better? More space but no sort operation            
         def _create_token_tag(token):
             counter[token] += 1
             return f'{token}{_TOKEN_TAG_SEPARATOR}{counter[token]}'
-        return [_create_token_tag(str(token).replace('|', ' ')) for row in table for icol, token in enumerate(row)
+        return [_create_token_tag(prepare_token(token)) for row in table for icol, token in enumerate(row)
                 if not pd.isna(token) and token and numeric_columns[icol] == 0]
     else:
         raise Exception('Unknown mode: ' + str(mode))
@@ -172,7 +175,13 @@ def create_index(
                         for token in t[1]
                     ]
             )
-    
+
+    # contains = token_sets.filter(lambda t: t[0] == 'Notes')
+    # if contains.count() > 0:
+    #     print('1 - Qua Notes sembra esserci ancora')
+    # else:
+    #     print('1 - Non c\'è più')
+ 
     posting_lists_sorted = token_sets \
         .groupByKey(
             # where the key is supposed to be the token itself in pairs (token, set_id)
@@ -197,9 +206,17 @@ def create_index(
                         .zipWithIndex() \
                             .map(
                                 # t: ((rawToken, sids, hash), tokenIndex) -> (token_id, (raw_token, set_ids, set_ids_hash))
-                                lambda t: (t[1], (t[0][0], t[0][1], t[0][2]))
+                                lambda t: (t[1], t[0])
                             ) \
                                 .persist(pyspark.StorageLevel.MEMORY_ONLY)
+
+    # contains = posting_lists_sorted.filter(lambda t: t[1][0] == 'Notes')
+    # if contains.count() > 0:
+    #     c = contains.collect()
+    #     print('2 - Qua Notes sembra esserci ancora', contains.count(), c[0][0])
+    #     cid = c[0][0]
+    # else:
+    #     print('2 - Non c\'è più')
 
     def equal_arrays(a1, a2):
         return len(a1) == len(a2) and all(x1 == x2 for (x1, x2) in zip(a1, a2))
@@ -207,7 +224,7 @@ def create_index(
     # create the duplicate groups
     duplicate_group_ids = posting_lists_sorted \
         .map(
-            # t: (tokenIndex, (rawToken, sids, hash))
+            # t: (tokenIndex, (rawToken, sids, hash)) -> (token_index, (sids, hash))
             lambda t: (t[0] + 1, (t[1][1], t[1][2]))
         ) \
             .join(posting_lists_sorted) \
@@ -217,52 +234,65 @@ def create_index(
                     # starting index
                     # (tokenIndexUpper, ((sidsLower, hashLower), (_, sidsUpper, hashUpper)))
                     lambda t: 
-                        -1 if t[1][0][1] == t[1][1][2] and equal_arrays(t[1][0][0], t[1][1][1]) else t[0]
+                        -1 if t[1][0][1] == t[1][1][2] and t[1][0][0] == t[1][1][1] else t[0]
                 ) \
                     .filter(
                         # add the first group's starting index, which is 0, and then
                         # create the group IDs
                         lambda i: i > 0
                     ) \
-                        .union(
-                            spark.sparkContext.parallelize([0])
-                        ) \
-                            .sortBy(
-                                lambda i: i
-                            ) \
+                        .union(spark.sparkContext.parallelize([0, posting_lists_sorted.count()])) \
+                            .sortBy(lambda i: i) \
                                 .zipWithIndex() \
                                     .map(
                                         # returns a mapping from group ID to the
                                         # starting index of the group
-                                        # (startingIndex, GroupID)
+                                        # (startingIndex, GroupID) -> (GroupID, startingIndex)
                                         lambda t: (t[1], t[0])
-                                    )
+                                    )    
+    
+    # def check(t):
+    #     if cid <= t[1][0]:
+    #         print('Qua ', t[1][0], t[1][1])
+    #     if cid in range(t[1][0], t[1][1]):
+    #         print(f'In questo range({t[1][0], t[1][1]})')
+    #     return [(i, t[0]) for i in range(t[1][0], t[1][1])]
 
     # generating all token indexes of each group
     token_group_ids = duplicate_group_ids \
-        .join(
+        .join( # (GroupIDLower, startingIndexLower) JOIN (GroupIDUpper, startingIndexUpper) 
             duplicate_group_ids \
                 .map(
-                    # (GroupID, startingIndexUpper)
+                    # (GroupID, startingIndexUpper) -> (GroupID, startingIndexUpper)
                     lambda t: (t[0] - 1, t[1])
                 )
-            ) \
+            )
+    
+    # contains = token_group_ids.filter(lambda t: t[1][0] == 695863 or t[0] == 695863)
+    # if contains.count() > 0:
+    #     print('2.3 - qualcosa di buono in token group ids', contains.collect())
+    # else:
+    #     print('2.3 - Dov\'è il suo starting index?')
+
+    token_group_ids = token_group_ids \
                 .flatMap(
-                    # GroupID, (startingIndexLower, startingIndexUpper)
-                    lambda t: map( 
-                            lambda token_index: (token_index, t[0]), range(t[1][0], t[1][1])
-                        )
+                    # GroupID, (startingIndexLower, startingIndexUpper) -> (tokenIndex, groupID)
+                    lambda t: [(i, t[0]) for i in range(t[1][0], t[1][1])]
                 ).persist(pyspark.StorageLevel.MEMORY_ONLY)
 
     # join posting lists with their duplicate group IDs
     posting_lists_with_group_ids = posting_lists_sorted \
-        .join(
-            token_group_ids
-        ) \
+        .join(token_group_ids) \
             .map(
-                # (tokenIndex, ((rawToken, sids, _), gid))
+                # (tokenIndex, ((rawToken, sids, _), gid)) -> (token_index, (group_id, raw_token, sids))
                 lambda t: (t[0], (t[1][1], t[1][0][0], t[1][0][1]))
             )
+    
+    # contains = posting_lists_with_group_ids.filter(lambda t: t[1][1] == 'Notes').count() > 0
+    # if contains:
+    #     print('3 - Qua Notes sembra esserci ancora')
+    # else:
+    #     print('3 - Non c\'è più')
 
     # STAGE 2: CREATE INTEGER SETS
     # Create sets and replace text tokens with token index
@@ -308,6 +338,13 @@ def create_index(
                             lambda t: (t[0], t[1][1][1], t[1][1][0], t[1][0])
                         )
     
+    # contains = posting_lists.filter(lambda t: t[1] == 'Notes').count() > 0
+    # if contains:
+    #     print('4 - Qua Notes sembra esserci ancora')
+    # else:
+    #     print('4 - Non c\'è più')
+
+    
     # STAGE 4: SAVE INTEGER SETS AND FINAL POSTING LISTS
     # print('STAGE 4: SAVE INTEGER SETS AND FINAL POSTING LISTS')
     # to load directly into the database
@@ -319,13 +356,14 @@ def create_index(
     def postlist_format_string(t):
         token, raw_token, gid, sets = t
         freq = len(sets)
+        byteatoken = binascii.hexlify(bytes(str(raw_token), 'utf-8'))
         set_ids = ','.join([str(s[0]) for s in sets])
         set_sizes = ','.join([str(s[1]) for s in sets])
         set_pos = ','.join([str(s[2]) for s in sets])
 
-        return "{}|{}|{}|{}|{{{}}}|{{{}}}|{{{}}}|{}" \
+        return "{}|{}|{}|{}|{}|{}|{{{}}}|{{{}}}|{{{}}}" \
             .format(
-                token, freq, gid, 1, set_ids, set_sizes, set_pos, binascii.hexlify(bytes(str(raw_token), 'utf-8'))
+                token, freq, gid, 1, raw_token, byteatoken, set_ids, set_sizes, set_pos
             )
     
     integer_sets.map(

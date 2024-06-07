@@ -6,6 +6,7 @@ import argparse
 import pandas as pd
 import pymongo
 
+from tools.josiestuff.functions import _create_token_set
 from tools.utils.settings import DefaultPath as defpath
 from tools.sloth.sloth import sloth
 
@@ -45,6 +46,11 @@ def _worker_compute_sloth(inp):
 
     numeric_columns1 = doc_table1['numeric_columns']
     numeric_columns2 = doc_table2['numeric_columns']
+    
+    set1 = _create_token_set(table1, 'set', numeric_columns1)
+    set2 = _create_token_set(table2, 'set', numeric_columns2)
+    actual_set_overlap = len(set(set1).intersection(set(set2)))
+    error = josie_overlap - actual_set_overlap
 
     num_null = 0
 
@@ -57,11 +63,11 @@ def _worker_compute_sloth(inp):
     
     table1 = [[format_value_for_excluding_nan(row[i]) for row in table1] for i in range(len(table1[0])) if numeric_columns1[i] == 0]
     table2 = [[format_value_for_excluding_nan(row[i]) for row in table2] for i in range(len(table2[0])) if numeric_columns2[i] == 0]
-    
+
     metrics = []
     _, metrics = sloth(table1, table2, verbose=False, metrics=metrics)
     largest_ov_sloth = metrics[-2]
-    return (query_id, str_id1, sid, str_id2, josie_overlap, largest_ov_sloth, int(josie_overlap) - largest_ov_sloth)
+    return (query_id, str_id1, sid, str_id2, josie_overlap, largest_ov_sloth, int(josie_overlap) - largest_ov_sloth, actual_set_overlap, error)
 
 
 parser = argparse.ArgumentParser()
@@ -109,7 +115,10 @@ pd.DataFrame(res, columns=[
     'str_set_id', 
     'josie_overlap', 
     'sloth_overlap', 
-    'difference_josie_sloth_overlap']) \
+    'difference_josie_sloth_overlap',
+    'actual_set_overlap',
+    'error'
+    ]) \
     .convert_dtypes() \
     .to_csv(extracted_results_file, index=False)
 

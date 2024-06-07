@@ -26,16 +26,16 @@ class JosieDB:
     @print_info(msg_before='Opening connection to the PostgreSQL database...')
     def open(self):
         self._dbconn = psycopg.connect(f"port=5442 host=/tmp dbname={self.dbname}")
-        self.dbcur = self._dbconn.cursor(row_factory=psycopg.rows.dict_row)
+        self._dbcur = self._dbconn.cursor(row_factory=psycopg.rows.dict_row)
 
     @print_info(msg_before='Committing to the database and closing connection...')
     def close(self):
-        self.dbcur.close()
+        self._dbcur.close()
         self._dbconn.commit()
 
     @print_info(msg_before='Dropping tables...')
     def drop_tables(self, all=False):    
-        self.dbcur.execute(
+        self._dbcur.execute(
             f"""
             DROP TABLE IF EXISTS {self._INVERTED_LISTS_TABLE_NAME};
             DROP TABLE IF EXISTS {self._SET_TABLE_NAME};
@@ -44,7 +44,7 @@ class JosieDB:
         )
 
         if all:
-            self.dbcur.execute(
+            self._dbcur.execute(
                 f"""
                 DROP TABLE IF EXISTS {self._READ_LIST_COST_SAMPLES_TABLE_NAME};
                 DROP TABLE IF EXISTS {self._READ_SET_COST_SAMPLES_TABLE_NAME};
@@ -54,22 +54,23 @@ class JosieDB:
     @print_info(msg_before='Creating database tables...')
     def create_tables(self):
         
-        self.dbcur.execute(
+        self._dbcur.execute(
             f"""              
             CREATE TABLE {self._INVERTED_LISTS_TABLE_NAME} (
                 token integer NOT NULL,
                 frequency integer NOT NULL,
                 duplicate_group_id integer NOT NULL,
                 duplicate_group_count integer NOT NULL,
+                str_token TEXT NOT NULL,
+                raw_token bytea NOT NULL,
                 set_ids integer[] NOT NULL,
                 set_sizes integer[] NOT NULL,
-                match_positions integer[] NOT NULL,
-                raw_token bytea NOT NULL
+                match_positions integer[] NOT NULL
             );        
             """
         )
 
-        self.dbcur.execute(
+        self._dbcur.execute(
             f"""          
                 CREATE TABLE {self._SET_TABLE_NAME} (
                     id integer NOT NULL,
@@ -80,7 +81,7 @@ class JosieDB:
             """
         )
 
-        self.dbcur.execute(
+        self._dbcur.execute(
             f"""
                 CREATE TABLE {self._QUERY_TABLE_NAME} (
                     id integer NOT NULL,
@@ -91,7 +92,7 @@ class JosieDB:
 
     @print_info(msg_before='Clearing query table...')
     def clear_query_table(self):
-        self.dbcur.execute(
+        self._dbcur.execute(
             f"""
                 TRUNCATE {self._QUERY_TABLE_NAME}
             """
@@ -101,7 +102,7 @@ class JosieDB:
     @print_info(msg_before='Inserting sets...')
     def insert_data_into_sets_table(self, sets_files_partitions:str):
         for file in [f'{sets_files_partitions}/{p}' for p in sorted(os.listdir(sets_files_partitions)) if p.startswith('part-')]:
-            self.dbcur.execute(
+            self._dbcur.execute(
                 f"""COPY {self._SET_TABLE_NAME} FROM '{file}' (FORMAT CSV, DELIMITER('|'));"""
             )
 
@@ -109,14 +110,15 @@ class JosieDB:
     @print_info(msg_before='Inserting inverted list...')
     def insert_data_into_inverted_list_table(self, inverted_list_partitions:list):
         for file in [f'{inverted_list_partitions}/{p}' for p in sorted(os.listdir(inverted_list_partitions)) if p.startswith('part-')]:
-            self.dbcur.execute(
-                f"""COPY {self._INVERTED_LISTS_TABLE_NAME} FROM '{file}' (FORMAT CSV, DELIMITER('|'));"""
+            self._dbcur.execute(
+                f"""COPY {self._INVERTED_LISTS_TABLE_NAME} FROM '{file}' (FORMAT CSV, DELIMITER('|'), QUOTE E'\\b');"""
             )
+            
 
     @print_info(msg_before='Inserting queries...')
     def insert_data_into_query_table(self, table_ids:list[int]):
         # maybe is better to translate all in postgresql...
-        self.dbcur.execute(
+        self._dbcur.execute(
             f"""
             INSERT INTO {self._QUERY_TABLE_NAME} SELECT id, tokens FROM {self._SET_TABLE_NAME} WHERE id in {tuple(table_ids)};
             """
@@ -124,21 +126,21 @@ class JosieDB:
 
     @print_info(msg_before='Creating table sets index...')
     def create_sets_index(self):
-        self.dbcur.execute(
+        self._dbcur.execute(
             f""" DROP INDEX IF EXISTS {self._SET_INDEX_NAME}; """
         )
-        self.dbcur.execute(
+        self._dbcur.execute(
             f"""CREATE INDEX {self._SET_INDEX_NAME} ON {self._SET_TABLE_NAME}(id);"""
         )
 
 
     @print_info(msg_before='Creating inverted list index...')
     def create_inverted_list_index(self):
-        self.dbcur.execute(
+        self._dbcur.execute(
             f""" DROP INDEX IF EXISTS {self._INVERTED_LISTS_INDEX_NAME}; """
         )
 
-        self.dbcur.execute(
+        self._dbcur.execute(
             f"""CREATE INDEX {self._INVERTED_LISTS_INDEX_NAME} ON {self._INVERTED_LISTS_TABLE_NAME}(token);"""
         )
 
@@ -157,4 +159,4 @@ class JosieDB:
             WHERE i.relname LIKE '{self.tprefix}%'
             """
         
-        return self.dbcur.execute(q).fetchall()
+        return self._dbcur.execute(q).fetchall()

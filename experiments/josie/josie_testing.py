@@ -15,7 +15,6 @@ from tools.josiestuff.db import JosieDB
 from tools.josiestuff.functions import (
     create_index,
     get_query_ids_from_query_file,
-    get_tables_statistics_from_mongodb,
     josie_test,
     sample_queries
 )
@@ -153,12 +152,6 @@ if ALL or INVERTED_IDX:
 
 ############# SAMPLING TEST VALUES FOR JOSIE ##############
 if ALL or SAMPLE_QUERIES:
-    # if not use_scala and not os.path.exists(tables_stat_file):
-    #     print('Get statistics from MongoDB wikitables...')
-    #     start = time()
-    #     get_tables_statistics_from_mongodb(wikitables_coll, tables_stat_file)
-    #     runtime_metrics.append(('tables-stat-from-MongoDB', round(time() - start, 5), get_current_time()))
-
     start = time()
     sample_queries(
         query_file,
@@ -178,6 +171,7 @@ if ALL or DBSETUP or UPDATE_QUERY_TABLE:
     start = time()
     josiedb = JosieDB(dbname=user_dbname, table_prefix=test_name)
     josiedb.open()
+
     if ALL or DBSETUP:
         josiedb.drop_tables()
         josiedb.create_tables()
@@ -187,7 +181,9 @@ if ALL or DBSETUP or UPDATE_QUERY_TABLE:
         josiedb.create_sets_index()
         josiedb.create_inverted_list_index()
     elif UPDATE_QUERY_TABLE:
+        josiedb.clear_query_table()
         josiedb.insert_data_into_query_table(sampled_ids)
+
     # database statistics
     dbstat = josiedb.get_statistics()
     dbstat[0]['test-name'] = test_name
