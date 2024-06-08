@@ -10,14 +10,11 @@ import numpy as np
 import pandas as pd
 import polars as pl
 from tqdm import tqdm
-from collections import defaultdict
 
 import pyspark
 from pyspark.sql import SparkSession
-from pyspark.sql import functions as F
-from pyspark.sql.types import BooleanType
 
-from tools.utils.utils import print_info
+from tools.utils.utils import _create_token_set, print_info
     
 
 @print_info(msg_before="Extracting tables from JSONL file...")
@@ -44,49 +41,15 @@ def extract_tables_from_jsonl_to_mongodb(
         table_collection.insert_many(tables)
 
 
-_TOKEN_TAG_SEPARATOR = '@#'
-
-
-def _create_token_set(table, mode, numeric_columns, encode=None):
-    """ Create the token set for the given table 
-    :param table: a list of list (row-view) of the table content 
-    :param mode: how to create the token set, with "set" or "bag" semantic
-    :param numeric_columns: a flag vector, where if the ith element is 1, this means that the 
-                            ith column is numeric and its elements are skipped while creating the token set
-    :param encode: if set, tokens will be encoded as specified (e.g. 'utf-8')
-    """
-    def prepare_token(token):
-        return str(token).replace('|', ' ').replace('\n', ' ')
-
-    if mode == 'set':
-        tokens = list({prepare_token(token) for row in table for icol, token in enumerate(row) 
-                     if not pd.isna(token) and token and numeric_columns[icol] == 0})
-    elif mode == 'bag':
-        counter = defaultdict(int) # is that better? More space but no sort operation            
-        
-        def _create_token_tag(token):
-            counter[token] += 1
-            return f'{token}{_TOKEN_TAG_SEPARATOR}{counter[token]}'
-        
-        tokens = [_create_token_tag(prepare_token(token)) for row in table for icol, token in enumerate(row)
-                if not pd.isna(token) and token and numeric_columns[icol] == 0]
-    else:
-        raise Exception('Unknown mode: ' + str(mode))
-    return tokens if not encode else [token.encode('utf-8') for token in tokens]
-
-
 
 # filtering on the IDs from the SLOTH results file should be deprecated, since now we'll work
 # on a silver standard per test
 @print_info(msg_before='Creating integer sets and inverted index...', msg_after='Completed.')
 def create_index(
     mode:str,
-    original_sloth_results_file,
-    output_integer_set_file, 
-    output_inverted_list_file,
     thresholds:dict[str:int],
-    tables_limit,
-    small):
+    small,
+    test_name):
 
     MIN_ROW =     thresholds['min_rows']
     MAX_ROW =     thresholds['max_rows']
@@ -94,26 +57,27 @@ def create_index(
     MAX_COLUMN =  thresholds['max_columns']
     MIN_AREA =    thresholds['min_area']
     MAX_AREA =    thresholds['max_area']
+
+    # PostgreSQL write parameters
+    url = "jdbc:postgresql://localhost:5442/nanni"
+
+    properties = {
+        "user": "nanni",
+        "password": "",
+        "driver": "org.postgresql.Driver"
+    }
     
-    all_sloth_results = pl.scan_csv(original_sloth_results_file)
-    sloth_tables_ids = set( \
-        pl.concat( \
-            [all_sloth_results.select('r_id').collect().to_series(), 
-            all_sloth_results.select('s_id').collect().to_series()]
-            ) \
-                .to_list()
-        )
-    
-    @F.udf(returnType=BooleanType())
-    def check_is_in_sloth_results(col1):
-        return col1 in sloth_tables_ids
-  
+    spark_jars_packages = [
+        'org.postgresql:postgresql:42.7.3',
+        'org.mongodb.spark:mongo-spark-connector_2.12:10.3.0'
+    ]
+
     # fine tune of executor/driver.memory?
-    spark = SparkSession \
-        .builder \
+    builder = SparkSession.Builder()
+    spark = builder \
         .appName("Big Bang Testing with MongoDB") \
         .master("local[64]") \
-        .config('spark.jars.packages', 'org.mongodb.spark:mongo-spark-connector_2.12:10.3.0') \
+        .config('spark.jars.packages', ','.join(spark_jars_packages)) \
         .config('spark.executor.memory', '100g') \
         .config('spark.driver.memory', '10g') \
         .config('spark.local.dir', '/data4/nanni/spark') \
@@ -122,8 +86,7 @@ def create_index(
     # adjusting logging level to error, avoiding warnings
     spark.sparkContext.setLogLevel("ERROR")
 
-    # carico le tabelle usate nei risultati di SLOTH 
-    # e che sono la base per fare poi la query
+
     optitab__turl_training_set_df = spark \
         .read \
         .format("mongodb") \
@@ -137,7 +100,6 @@ def create_index(
                 AND size(content[0]) BETWEEN {MIN_COLUMN} AND {MAX_COLUMN} 
                 AND size(content) * size(content[0]) BETWEEN {MIN_AREA} AND {MAX_AREA}""") \
 
-    # carico il database MongoDB dove c'è lo snapshot principale e inizio il processing effettivo
     sloth__latest_snapshot_tables_df = spark \
         .read \
         .format('mongodb')\
@@ -145,7 +107,6 @@ def create_index(
         .option("database", "sloth") \
         .option("collection", "latest_snapshot_tables" if not small else "latest_snapshot_tables_small") \
         .load() \
-        .limit(tables_limit) \
         .select('_id', '_id_numeric', 'content', 'numeric_columns') \
         .filter(f"""
                 size(content) BETWEEN {MIN_ROW} AND {MAX_ROW} 
@@ -180,12 +141,6 @@ def create_index(
                     ]
             )
 
-    # contains = token_sets.filter(lambda t: t[0] == 'Notes')
-    # if contains.count() > 0:
-    #     print('1 - Qua Notes sembra esserci ancora')
-    # else:
-    #     print('1 - Non c\'è più')
- 
     posting_lists_sorted = token_sets \
         .groupByKey(
             # where the key is supposed to be the token itself in pairs (token, set_id)
@@ -213,17 +168,6 @@ def create_index(
                                 lambda t: (t[1], t[0])
                             ) \
                                 .persist(pyspark.StorageLevel.MEMORY_ONLY)
-
-    # contains = posting_lists_sorted.filter(lambda t: t[1][0] == 'Notes')
-    # if contains.count() > 0:
-    #     c = contains.collect()
-    #     print('2 - Qua Notes sembra esserci ancora', contains.count(), c[0][0])
-    #     cid = c[0][0]
-    # else:
-    #     print('2 - Non c\'è più')
-
-    def equal_arrays(a1, a2):
-        return len(a1) == len(a2) and all(x1 == x2 for (x1, x2) in zip(a1, a2))
 
     # create the duplicate groups
     duplicate_group_ids = posting_lists_sorted \
@@ -255,13 +199,6 @@ def create_index(
                                         lambda t: (t[1], t[0])
                                     )    
     
-    # def check(t):
-    #     if cid <= t[1][0]:
-    #         print('Qua ', t[1][0], t[1][1])
-    #     if cid in range(t[1][0], t[1][1]):
-    #         print(f'In questo range({t[1][0], t[1][1]})')
-    #     return [(i, t[0]) for i in range(t[1][0], t[1][1])]
-
     # generating all token indexes of each group
     token_group_ids = duplicate_group_ids \
         .join( # (GroupIDLower, startingIndexLower) JOIN (GroupIDUpper, startingIndexUpper) 
@@ -272,12 +209,6 @@ def create_index(
                 )
             )
     
-    # contains = token_group_ids.filter(lambda t: t[1][0] == 695863 or t[0] == 695863)
-    # if contains.count() > 0:
-    #     print('2.3 - qualcosa di buono in token group ids', contains.collect())
-    # else:
-    #     print('2.3 - Dov\'è il suo starting index?')
-
     token_group_ids = token_group_ids \
                 .flatMap(
                     # GroupID, (startingIndexLower, startingIndexUpper) -> (tokenIndex, groupID)
@@ -292,12 +223,6 @@ def create_index(
                 lambda t: (t[0], (t[1][1], t[1][0][0], t[1][0][1]))
             )
     
-    # contains = posting_lists_with_group_ids.filter(lambda t: t[1][1] == 'Notes').count() > 0
-    # if contains:
-    #     print('3 - Qua Notes sembra esserci ancora')
-    # else:
-    #     print('3 - Non c\'è più')
-
     # STAGE 2: CREATE INTEGER SETS
     # Create sets and replace text tokens with token index
     integer_sets = posting_lists_with_group_ids \
@@ -342,41 +267,34 @@ def create_index(
                             lambda t: (t[0], t[1][1][1], t[1][1][0], t[1][0])
                         )
     
-    # contains = posting_lists.filter(lambda t: t[1] == 'Notes').count() > 0
-    # if contains:
-    #     print('4 - Qua Notes sembra esserci ancora')
-    # else:
-    #     print('4 - Non c\'è più')
-
-    
     # STAGE 4: SAVE INTEGER SETS AND FINAL POSTING LISTS
-    # print('STAGE 4: SAVE INTEGER SETS AND FINAL POSTING LISTS')
     # to load directly into the database
 
-    def sets_format_string(t):
+    def _set_format_psql(t):
         sid, indices = t
-        return "{}|{}|{}|{{{}}}".format(sid, len(indices), len(indices), ','.join(map(str, indices)))
-
-    def postlist_format_string(t):
-        token, raw_token, gid, sets = t
-        freq = len(sets)
-        byteatoken = binascii.hexlify(bytes(str(raw_token), 'utf-8'))
-        set_ids = ','.join([str(s[0]) for s in sets])
-        set_sizes = ','.join([str(s[1]) for s in sets])
-        set_pos = ','.join([str(s[2]) for s in sets])
-
-        return "{}|{}|{}|{}|{}|{}|{{{}}}|{{{}}}|{{{}}}" \
-            .format(
-                token, freq, gid, 1, raw_token, byteatoken, set_ids, set_sizes, set_pos
-            )
+        return (sid, len(indices), len(indices), indices)
     
+    def _postinglist_format_psql(t):
+        token, raw_token, gid, sets = t
+        byteatoken = binascii.hexlify(bytes(str(raw_token), 'utf-8'))
+        set_ids =  [s[0] for s in sets]
+        set_sizes = [s[1] for s in sets]
+        set_pos = [s[2] for s in sets]
+
+        return (token, len(sets), gid, 1, raw_token, byteatoken, set_ids, set_sizes, set_pos)
+
     integer_sets.map(
-        lambda t: sets_format_string(t)
-    ).saveAsTextFile(output_integer_set_file)
+        lambda t: _set_format_psql(t)
+    ).toDF(schema=['id', 'size', 'num_non_singular_token', 'tokens']).write.jdbc(url, test_name + '_sets', 'overwrite', properties)
 
     posting_lists.map(
-        lambda t: postlist_format_string(t)
-    ).saveAsTextFile(output_inverted_list_file)
+        lambda t: _postinglist_format_psql(t)
+    ).toDF(schema=[
+        'token', 'frequency', 'duplicate_group_id', 'duplicate_group_count', 
+        'str_token', 'raw_token', 'set_ids', 'set_sizes', 'match_positions'
+        ]
+    ).write.jdbc(url, test_name + '_inverted_lists', 'overwrite', properties)
+
 
 
 def get_tables_statistics_from_mongodb(

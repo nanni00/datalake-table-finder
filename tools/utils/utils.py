@@ -1,9 +1,10 @@
+from collections import defaultdict
 import re
 import time
-from typing import Literal 
 import numpy as np
 import pandas as pd
-import polars as pl
+
+from tools.sloth.sloth import sloth
 
 
 def print_info(**dec_kwargs):
@@ -43,44 +44,6 @@ def round_to_05(n):
     return float(format(round_to(n, 0.05), ".2f"))
 
 
-def rebuild_table(table, mode:Literal['pandas', 'polars', 'polars.lazy', 'text']='pandas'):
-    if mode == 'pandas': 
-        return pd.DataFrame(
-            data=[
-                [entry_data['text'] 
-                 for entry_data in entry]
-                for entry in table['tableData']
-            ],
-            columns=table['tableHeaders'][0]
-            )
-    elif mode == 'polars':
-        return pl.DataFrame(
-            data=[
-                [entry_data['text'] 
-                 for entry_data in entry]
-                for entry in table['tableData']
-            ],
-            schema=table['tableHeaders'][0]
-            )
-    elif mode == 'polars.lazy':
-        s = table['tableHeaders'][0]
-        s = [c if s.count(c) == 1 else f'{c}#{i}' for i, c in enumerate(s)]
-        return pl.LazyFrame(
-            data=[
-                [entry_data['text'] 
-                 for entry_data in entry]
-                for entry in table['tableData']
-            ],
-            schema=s #table['tableHeaders'][0]
-            )
-    elif mode == 'text':
-        header = '\t'.join([str(h) for h in table['tableHeaders'][0]])
-        data = '\n'.join(['\t'.join(str(entry_data['text']) for entry_data in entry) for entry in table['tableData']])
-        return f'{header}\n{data}'
-    else:
-        raise ValueError(f'Unknown mode: {mode}')
-
-
 def my_tokenizer(s: str, remove_numbers=False):
     from nltk.corpus import stopwords
     stopwords_set = set(stopwords.words('english'))
@@ -108,4 +71,72 @@ def get_int_from_(s: str):
 
 def get_current_time():
     return time.strftime("%Y/%m/%d %H:%M:%S")
+
+
+def get_one_document_from_mongodb_by_key(key, value, *collections):
+    for collection in collections:
+        document = collection.find_one({key: value})
+        if document:
+            return document
+
+
+
+
+_TOKEN_TAG_SEPARATOR = '@#'
+
+
+def _create_token_set(table, mode, numeric_columns, encode=None):
+    """ Create the token set for the given table 
+    :param table: a list of list (row-view) of the table content 
+    :param mode: how to create the token set, with "set" or "bag" semantic
+    :param numeric_columns: a flag vector, where if the ith element is 1, this means that the 
+                            ith column is numeric and its elements are skipped while creating the token set
+    :param encode: if set, tokens will be encoded as specified (e.g. 'utf-8')
+    """
+    def prepare_token(token):
+        return str(token).replace('|', ' ').replace('\n', ' ')
+
+    if mode == 'set':
+        tokens = list({prepare_token(token) for row in table for icol, token in enumerate(row) 
+                     if not pd.isna(token) and token and numeric_columns[icol] == 0})
+    elif mode == 'bag':
+        counter = defaultdict(int) # is that better? More space but no sort operation            
+        
+        def _create_token_tag(token):
+            counter[token] += 1
+            return f'{token}{_TOKEN_TAG_SEPARATOR}{counter[token]}'
+        
+        tokens = [_create_token_tag(prepare_token(token)) for row in table for icol, token in enumerate(row)
+                if not pd.isna(token) and token and numeric_columns[icol] == 0]
+    else:
+        raise Exception('Unknown mode: ' + str(mode))
+    return tokens if not encode else [token.encode('utf-8') for token in tokens]
+
+
+
+
+def apply_sloth(table1, table2, numeric_columns1, numeric_columns2):
+    num_null = 0
+
+    def format_value_for_excluding_nan(t):
+        nonlocal num_null 
+        if not t or pd.isna(t):
+            num_null += 1
+            return f'{t}@{num_null}'
+        return t
+    
+    table1 = [[format_value_for_excluding_nan(row[i]) for row in table1] for i in range(len(table1[0])) if numeric_columns1[i] == 0]
+    table2 = [[format_value_for_excluding_nan(row[i]) for row in table2] for i in range(len(table2[0])) if numeric_columns2[i] == 0]
+
+    metrics = []
+    _, metrics = sloth(table1, table2, verbose=False, metrics=metrics)
+    largest_ov_sloth = metrics[-2]
+    return largest_ov_sloth
+
+
+
+
+
+
+
 

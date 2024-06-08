@@ -6,8 +6,7 @@ root_project_path = os.environ['THESIS_PATH']
 
 class _DataPath:
     base =                  root_project_path + '/data'
-    mywikitables =          root_project_path + '/data/my_wikitables'
-    wikitables =            root_project_path + '/data/turl_sloth_wikitables'
+    josie_tests =           root_project_path + '/data/josie-tests'
 
 
 class _ModelPath:
@@ -22,15 +21,9 @@ class _DBPath:
     faiss =                 root_project_path + '/db/faiss'
 
 
-class _JosieStuffPath:
-    base =                  root_project_path + '/doc-stuff/josie'
-    data =                  root_project_path + '/doc-stuff/josie/data'
-
-
 class DefaultPath:
     root_project_path = root_project_path
     model_path = _ModelPath
     data_path = _DataPath
     db_path = _DBPath
-    josie_stuff_path = _JosieStuffPath
 

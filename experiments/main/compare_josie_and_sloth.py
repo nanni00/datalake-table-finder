@@ -1,35 +1,15 @@
 import os
-from pprint import pprint
 import re
 import argparse
 
 import pandas as pd
 import pymongo
 
-from tools.josiestuff.functions import _create_token_set
-from tools.utils.settings import DefaultPath as defpath
-from tools.sloth.sloth import sloth
-
 import multiprocessing as mp
 
+from tools.utils.settings import DefaultPath as defpath
+from tools.utils.utils import apply_sloth, get_one_document_from_mongodb_by_key, _create_token_set
 
-def apply_sloth(table1, table2, numeric_columns1, numeric_columns2):
-    num_null = 0
-
-    def format_value_for_excluding_nan(t):
-        nonlocal num_null 
-        if not t or pd.isna(t):
-            num_null += 1
-            return f'{t}@{num_null}'
-        return t
-    
-    table1 = [[format_value_for_excluding_nan(row[i]) for row in table1] for i in range(len(table1[0])) if numeric_columns1[i] == 0]
-    table2 = [[format_value_for_excluding_nan(row[i]) for row in table2] for i in range(len(table2[0])) if numeric_columns2[i] == 0]
-
-    metrics = []
-    _, metrics = sloth(table1, table2, verbose=False, metrics=metrics)
-    largest_ov_sloth = metrics[-2]
-    return largest_ov_sloth
 
 
 
@@ -50,13 +30,8 @@ def _worker_compute_sloth(inp):
     
     sid, josie_overlap = int(sid), int(josie_overlap)
     
-    doc_table1 = wikitables_coll.find_one({'_id_numeric': query_id})
-    if not doc_table1:
-        doc_table1 = snapshot_coll.find_one({'_id_numeric': query_id})
-
-    doc_table2 = wikitables_coll.find_one({'_id_numeric': sid})
-    if not doc_table2:
-        doc_table2 = snapshot_coll.find_one({'_id_numeric': sid})
+    doc_table1 = get_one_document_from_mongodb_by_key('_id_numeric', query_id, wikitables_coll, snapshot_coll)
+    doc_table2 = get_one_document_from_mongodb_by_key('_id_numeric', sid, wikitables_coll, snapshot_coll)
     
     str_id1 = doc_table1['_id']
     str_id2 = doc_table2['_id']
