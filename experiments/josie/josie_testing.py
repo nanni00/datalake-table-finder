@@ -31,8 +31,8 @@ parser.add_argument('-k',
                     help='the K value for the top-K search of JOSIE')
 parser.add_argument('-t', '--tasks', 
                     required=False, nargs='+',
-                    choices=['all', 'createindex', 'samplequeries', 'dbsetup', 'updatequeries', 'josietest'], 
-                    help='the tasks to do. The tables extraction from the JSONL file to MongoDB must be specified, since it isn\'t included in "all" tasks')
+                    choices=['all', 'createindex', 'samplequeries', 'dbsetup', 'updatequeries', 'query'], 
+                    help='the tasks to do')
 parser.add_argument('-d', '--dbname', 
                     required=False, default='userdb',
                     help='the PostgreSQL database where will be uploaded the data used by JOSIE. It must be already running on the machine')
@@ -45,7 +45,7 @@ parser.add_argument('--num-table-sampled',
                     help='the number of tables that will be sampled from the collections and that will be used as query id for JOSIE (the actual number) \
                         may be less than the specified one due to thresholds tables parameter')
 parser.add_argument('--table-statistics-file', required = False, type=str, help='an absoluth path to an exisisting file containing table statistics used for querying')
-parser.add_argument('--queries-file', required=False, type=str, help='an absolute path to an existing file containing the queries which will be used for JOSIE tests')
+parser.add_argument('--query-file', required=False, type=str, help='an absolute path to an existing file containing the queries which will be used for JOSIE tests')
 
 parser.add_argument('--use-scala', required=False, action='store_true', help='instead of use pure Python implementation of the program, use a Scala version for creating inverted index and integer sets.')
 parser.add_argument('--small', 
@@ -99,7 +99,7 @@ ROOT_TEST_DIR =             defpath.data_path.base + f'/josie-tests/{test_name}'
 set_file =                  ROOT_TEST_DIR + '/tables.set'
 integer_set_file =          ROOT_TEST_DIR + '/tables.set-2'
 inverted_list_file =        ROOT_TEST_DIR + '/tables.inverted-list'
-query_file =                ROOT_TEST_DIR + '/queries.json'             if not args.queries_file else args.queries_file
+query_file =                ROOT_TEST_DIR + '/query.json'             if not args.query_file else args.query_file
 results_dir =               ROOT_TEST_DIR + '/results'
 
 # statistics stuff

@@ -13,6 +13,26 @@ from tools.sloth.sloth import sloth
 import multiprocessing as mp
 
 
+def apply_sloth(table1, table2, numeric_columns1, numeric_columns2):
+    num_null = 0
+
+    def format_value_for_excluding_nan(t):
+        nonlocal num_null 
+        if not t or pd.isna(t):
+            num_null += 1
+            return f'{t}@{num_null}'
+        return t
+    
+    table1 = [[format_value_for_excluding_nan(row[i]) for row in table1] for i in range(len(table1[0])) if numeric_columns1[i] == 0]
+    table2 = [[format_value_for_excluding_nan(row[i]) for row in table2] for i in range(len(table2[0])) if numeric_columns2[i] == 0]
+
+    metrics = []
+    _, metrics = sloth(table1, table2, verbose=False, metrics=metrics)
+    largest_ov_sloth = metrics[-2]
+    return largest_ov_sloth
+
+
+
 def _worker_compute_sloth(inp):
     global small
     mongoclient = pymongo.MongoClient()
@@ -52,74 +72,62 @@ def _worker_compute_sloth(inp):
     actual_set_overlap = len(set(set1).intersection(set(set2)))
     error = josie_overlap - actual_set_overlap
 
-    num_null = 0
+    largest_ov_sloth = apply_sloth(table1, table2, numeric_columns1, numeric_columns2)
 
-    def format_value_for_excluding_nan(t):
-        nonlocal num_null 
-        if not t or pd.isna(t):
-            num_null += 1
-            return f'{t}@{num_null}'
-        return t
-    
-    table1 = [[format_value_for_excluding_nan(row[i]) for row in table1] for i in range(len(table1[0])) if numeric_columns1[i] == 0]
-    table2 = [[format_value_for_excluding_nan(row[i]) for row in table2] for i in range(len(table2[0])) if numeric_columns2[i] == 0]
-
-    metrics = []
-    _, metrics = sloth(table1, table2, verbose=False, metrics=metrics)
-    largest_ov_sloth = metrics[-2]
     return (query_id, str_id1, sid, str_id2, josie_overlap, largest_ov_sloth, int(josie_overlap) - largest_ov_sloth, actual_set_overlap, error)
 
 
-parser = argparse.ArgumentParser()
-parser.add_argument('--test-name', required=True, type=str, help='a user defined test name, used instead of the default one m<mode>')
-parser.add_argument('-k', required=True, type=int)
-parser.add_argument('--analyse-up-to', required=False, type=int)
-parser.add_argument('--small', required=False, action='store_true',
-                    help='works on small collection versions (only for testing)')
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--test-name', required=True, type=str, help='a user defined test name, used instead of the default one m<mode>')
+    parser.add_argument('-k', required=True, type=int)
+    parser.add_argument('--analyse-up-to', required=False, type=int)
+    parser.add_argument('--small', required=False, action='store_true',
+                        help='works on small collection versions (only for testing)')
 
-args = parser.parse_args()
-test_name = args.test_name
-k =         args.k
-ank =       args.analyse_up_to
-small =     args.small
+    args = parser.parse_args()
+    test_name = args.test_name
+    k =         args.k
+    ank =       args.analyse_up_to
+    small =     args.small
 
-ROOT_TEST_DIR =             defpath.data_path.base + f'/josie-tests/{test_name}'
-results_directory =         ROOT_TEST_DIR + '/results'
-josie_results_file =        results_directory + f'/result_k_{k}.csv'
-extracted_results_file =    results_directory + f'/extracted_results_k_{k}.csv' 
+    ROOT_TEST_DIR =             defpath.data_path.base + f'/josie-tests/{test_name}'
+    results_directory =         ROOT_TEST_DIR + '/results'
+    josie_results_file =        results_directory + f'/result_k_{k}.csv'
+    extracted_results_file =    results_directory + f'/extracted_results_k_{k}.csv' 
 
-josie_res = pd.read_csv(josie_results_file)[['query_id', 'results']]
+    josie_res = pd.read_csv(josie_results_file)[['query_id', 'results']]
 
-jr = josie_res.values.tolist()
-work = [
-    (r[0], s, o) 
-    for r in jr 
-    for i, (s, o) in enumerate(zip(
-        re.findall(r'\d+', r[1])[::2] if type(r[1]) == str else [None], 
-        re.findall(r'\d+', r[1])[1::2] if type(r[1]) == str else [None],
-        ), start=1) if i <= ank and r[1]
-    ]
+    jr = josie_res.values.tolist()
+    work = [
+        (r[0], s, o) 
+        for r in jr 
+        for i, (s, o) in enumerate(zip(
+            re.findall(r'\d+', r[1])[::2] if type(r[1]) == str else [None], 
+            re.findall(r'\d+', r[1])[1::2] if type(r[1]) == str else [None],
+            ), start=1) if i <= ank and r[1]
+        ]
 
-print('Start processing results...')
-with mp.Pool(processes=os.cpu_count()) as pool:
-    res = pool.map(_worker_compute_sloth, work)
+    print('Start processing results...')
+    with mp.Pool(processes=os.cpu_count()) as pool:
+        res = pool.map(_worker_compute_sloth, work)
 
-# "query_res != None" because maybe there isn't enough work 
-# and a processor may return None instead of a list of tuples...
-res = [query_res for query_res in res if query_res != None]
+    # "query_res != None" because maybe there isn't enough work 
+    # and a processor may return None instead of a list of tuples...
+    res = [query_res for query_res in res if query_res != None]
 
-pd.DataFrame(res, columns=[
-    'int_query_id', 
-    'str_query_id', 
-    'int_set_id', 
-    'str_set_id', 
-    'josie_overlap', 
-    'sloth_overlap', 
-    'difference_josie_sloth_overlap',
-    'actual_set_overlap',
-    'error'
-    ]) \
-    .convert_dtypes() \
-    .to_csv(extracted_results_file, index=False)
+    pd.DataFrame(res, columns=[
+        'int_query_id', 
+        'str_query_id', 
+        'int_set_id', 
+        'str_set_id', 
+        'josie_overlap', 
+        'sloth_overlap', 
+        'difference_josie_sloth_overlap',
+        'actual_set_overlap',
+        'error'
+        ]) \
+        .convert_dtypes() \
+        .to_csv(extracted_results_file, index=False)
 
-print(f'Extracted results saved to {extracted_results_file}.')
+    print(f'Extracted results saved to {extracted_results_file}.')

@@ -47,28 +47,32 @@ def extract_tables_from_jsonl_to_mongodb(
 _TOKEN_TAG_SEPARATOR = '@#'
 
 
-def _create_token_set(table, mode, numeric_columns):
+def _create_token_set(table, mode, numeric_columns, encode=None):
     """ Create the token set for the given table 
     :param table: a list of list (row-view) of the table content 
     :param mode: how to create the token set, with "set" or "bag" semantic
     :param numeric_columns: a flag vector, where if the ith element is 1, this means that the 
                             ith column is numeric and its elements are skipped while creating the token set
+    :param encode: if set, tokens will be encoded as specified (e.g. 'utf-8')
     """
     def prepare_token(token):
         return str(token).replace('|', ' ').replace('\n', ' ')
 
     if mode == 'set':
-        return list({prepare_token(token) for row in table for icol, token in enumerate(row) 
+        tokens = list({prepare_token(token) for row in table for icol, token in enumerate(row) 
                      if not pd.isna(token) and token and numeric_columns[icol] == 0})
     elif mode == 'bag':
         counter = defaultdict(int) # is that better? More space but no sort operation            
+        
         def _create_token_tag(token):
             counter[token] += 1
             return f'{token}{_TOKEN_TAG_SEPARATOR}{counter[token]}'
-        return [_create_token_tag(prepare_token(token)) for row in table for icol, token in enumerate(row)
+        
+        tokens = [_create_token_tag(prepare_token(token)) for row in table for icol, token in enumerate(row)
                 if not pd.isna(token) and token and numeric_columns[icol] == 0]
     else:
         raise Exception('Unknown mode: ' + str(mode))
+    return tokens if not encode else [token.encode('utf-8') for token in tokens]
 
 
 
