@@ -210,7 +210,7 @@ func RunWebTableExperiments(db *sql.DB, outputDir string, cpuProfile bool, useMe
 	}
 }
 
-func NanniExperiments(db *sql.DB, k_value int, test_tag string, outputDir string, cpuProfile bool, useMemTokenTable bool) {
+func NanniExperiments(db *sql.DB, k_value int, test_tag string, outputDir string, resultsFile string, cpuProfile bool, useMemTokenTable bool) {
 	listTable := 				test_tag + "_" + "inverted_lists"
 	setTable := 				test_tag + "_" + "sets"
 	queryTable := 				test_tag + "_" + "queries"
@@ -219,10 +219,10 @@ func NanniExperiments(db *sql.DB, k_value int, test_tag string, outputDir string
 	k := []int {k_value}
 
 	resetCostFunctionParameters(db, readListCostSampleTable, readSetCostSampleTable)
-	NanniRunExperiments(db, listTable, setTable, queryTable, k, outputDir, cpuProfile, true, true)
+	NanniRunExperiments(db, listTable, setTable, queryTable, k, outputDir, resultsFile, cpuProfile, true, true)
 }
 
-func NanniRunExperiments(db *sql.DB, listTable string, setTable string, queryTable string, ks []int, outputDir string, cpuProfile bool, useMemTokenTable bool, queryIgnoreSelf bool) {
+func NanniRunExperiments(db *sql.DB, listTable string, setTable string, queryTable string, ks []int, outputDir string, resultsFile string, cpuProfile bool, useMemTokenTable bool, queryIgnoreSelf bool) {
 	var tb tokenTable
 	log.Println("Counting total number of sets")
 	totalNumberOfSets = float64(countTotalNumberOfSets(db, setTable))
@@ -254,10 +254,9 @@ func NanniRunExperiments(db *sql.DB, listTable string, setTable string, queryTab
 			}
 			
 			// outputFilename := filepath.Join(outputDir, name,
-			outputFilename := filepath.Join(outputDir,
-				fmt.Sprintf("result_k_%d.csv", k))
+			outputFilename :=  resultsFile // filepath.Join(outputDir,fmt.Sprintf("result_k_%d.csv", k))
 			
-				// In case we need profiling
+			// In case we need profiling
 			var cpuProfileFilename string
 			if cpuProfile {
 				cpuProfileFilename = filepath.Join(outputDir, name,

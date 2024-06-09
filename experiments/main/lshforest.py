@@ -57,7 +57,7 @@ def get_or_create_forest(forest_file, num_perm, mode, hashfunc, *collections) ->
         print('Creating forest...')
         forest = MinHashLSHForest(num_perm=num_perm)
         for collection in collections:
-            for doc in tqdm(collection.find({}), total=collection.count_documents()):
+            for doc in tqdm(collection.find({}), total=collection.count_documents({})):
                 minhash = MinHash(num_perm=num_perm, hashfunc=hashfunc)
                 _id_numeric, numeric_columns, content = doc['_id_numeric'], doc['numeric_columns'], doc['content']
                 token_set = _create_token_set(content, mode, numeric_columns, encode='utf-8')
@@ -70,23 +70,31 @@ def get_or_create_forest(forest_file, num_perm, mode, hashfunc, *collections) ->
     return forest
 
 
-def query_lsh_forest(results_file, forest, query_ids, k, hashfunc, *collections):
-    results_df = pd.DataFrame(columns=['query_id', 'res_id', 'rank', 'lshf_overlap', 'sloth_overlap', 'difference_lshf_sloth_overlap'])
+def query_lsh_forest(results_file, forest:MinHashLSHForest, query_ids, mode, num_perm, k, hashfunc, *collections):
+    # results_df = pd.DataFrame(columns=['query_id', 'res_id', 'rank', 'lshf_overlap', 'sloth_overlap', 'difference_lshf_sloth_overlap'])
+    results = []
 
     for query_id in query_ids:
-        docq = get_one_document_from_mongodb_by_key('_id_numeric', query_id, collections)
-        
-        numeric_columns_q, content_q = docq['numeric_columns'], docq['content']
-        token_set_q = _create_token_set(content_q, mode, numeric_columns_q, encode='utf-8')
+        try:
+            minhash_q = forest.get_minhash_hashvalues(query_id)
+        except KeyError:    
+            docq = get_one_document_from_mongodb_by_key('_id_numeric', query_id, *collections)
+            
+            numeric_columns_q, content_q = docq['numeric_columns'], docq['content']
+            token_set_q = _create_token_set(content_q, mode, numeric_columns_q, encode='utf-8')
 
-        minhash_q = MinHash(num_perm=num_perm, hashfunc=hashfunc)
-        minhash_q.update_batch(token_set_q)
+            minhash_q = MinHash(num_perm=num_perm, hashfunc=hashfunc)
+            minhash_q.update_batch(token_set_q)
 
         topk_res = forest.query(minhash_q, k)
-        print(f'Query ID: {query_id}, top-K: {topk_res}')
+        if query_id in topk_res:
+            topk_res.remove(query_id)
+        results.append([query_id, topk_res])
 
+        """
+        print(f'Query ID: {query_id}, top-K: {topk_res}')
         for rank, res_id in enumerate(topk_res, start=1):
-            doc_res = get_one_document_from_mongodb_by_key('_id_numeric', res_id, collections)
+            doc_res = get_one_document_from_mongodb_by_key('_id_numeric', res_id, *collections)
             numeric_columns_res, content_res = doc_res['numeric_columns'], doc_res['content']
 
             token_set_res = _create_token_set(content_res, mode, numeric_columns_res)
@@ -95,9 +103,10 @@ def query_lsh_forest(results_file, forest, query_ids, k, hashfunc, *collections)
             largest_ov_sloth = apply_sloth(content_q, content_res, numeric_columns_q, numeric_columns_res)
 
             results_df.loc[len(results_df) - 1] = [query_id, res_id, rank, actual_set_overlap, largest_ov_sloth, actual_set_overlap - largest_ov_sloth]
+        """
 
     print(f'Saving results to {results_file}...')
-    results_df.to_csv(results_file, index=False)
+    pd.DataFrame(results, columns=['query_id', 'results']).to_csv(results_file, index=False)
 
 
 def LSHForest_testing(results_file, forest_file, query_ids, k, num_perm, mode, small, hashfunc=None):

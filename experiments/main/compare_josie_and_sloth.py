@@ -55,6 +55,9 @@ def _worker_compute_sloth(inp):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--test-name', required=True, type=str, help='a user defined test name, used instead of the default one m<mode>')
+    parser.add_argument('-m', '--mode', 
+                        required=False, default='set',
+                        choices=['set', 'bag'])
     parser.add_argument('-k', required=True, type=int)
     parser.add_argument('--analyse-up-to', required=False, type=int)
     parser.add_argument('--small', required=False, action='store_true',
@@ -62,14 +65,16 @@ if __name__ == '__main__':
 
     args = parser.parse_args()
     test_name = args.test_name
+    mode =      args.mode
     k =         args.k
     ank =       args.analyse_up_to
     small =     args.small
 
+    # TODO as in main tester, should be handled multiple copies such as results.csv, results(1).csv, results(2).csv...?
     ROOT_TEST_DIR =             defpath.data_path.base + f'/josie-tests/{test_name}'
     results_directory =         ROOT_TEST_DIR + '/results'
-    josie_results_file =        results_directory + f'/result_k_{k}.csv'
-    extracted_results_file =    results_directory + f'/extracted_results_k_{k}.csv' 
+    josie_results_file =        results_directory + f'/ajosie_m{mode}_k{k}.csv'
+    extracted_results_file =    results_directory + f'/ajosie_m{mode}_k{k}_extracted.csv' 
 
     josie_res = pd.read_csv(josie_results_file)[['query_id', 'results']]
 

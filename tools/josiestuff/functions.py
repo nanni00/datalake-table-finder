@@ -49,7 +49,7 @@ def create_index(
     mode:str,
     thresholds:dict[str:int],
     small,
-    test_name):
+    josiedb_table_prefix):
 
     MIN_ROW =     thresholds['min_rows']
     MAX_ROW =     thresholds['max_rows']
@@ -285,7 +285,7 @@ def create_index(
 
     integer_sets.map(
         lambda t: _set_format_psql(t)
-    ).toDF(schema=['id', 'size', 'num_non_singular_token', 'tokens']).write.jdbc(url, test_name + '_sets', 'overwrite', properties)
+    ).toDF(schema=['id', 'size', 'num_non_singular_token', 'tokens']).write.jdbc(url, josiedb_table_prefix + '_sets', 'overwrite', properties)
 
     posting_lists.map(
         lambda t: _postinglist_format_psql(t)
@@ -293,7 +293,7 @@ def create_index(
         'token', 'frequency', 'duplicate_group_id', 'duplicate_group_count', 
         'str_token', 'raw_token', 'set_ids', 'set_sizes', 'match_positions'
         ]
-    ).write.jdbc(url, test_name + '_inverted_lists', 'overwrite', properties)
+    ).write.jdbc(url, josiedb_table_prefix + '_inverted_lists', 'overwrite', properties)
 
 
 
@@ -369,18 +369,19 @@ def get_query_ids_from_query_file(query_file):
     
 
 @print_info(msg_before='Starting JOSIE tests...', msg_after='Completed.')
-def josie_test(josie_dbname, test_name, results_directory, k):
+def josie_test(josie_dbname, tables_prefix, results_directory, results_file, k):
     GOPATH = os.environ['GOPATH']
     josie_cmd_dir = f'{GOPATH}/src/github.com/ekzhu/josie/cmd'
     os.chdir(josie_cmd_dir)
 
     os.system(f'go run {josie_cmd_dir}/sample_costs/main.go \
                 --pg-database={josie_dbname} \
-                --test_tag={test_name} \
-                --pg-table-queries={test_name}_queries')
+                --test_tag={tables_prefix} \
+                --pg-table-queries={tables_prefix}_queries')
 
     os.system(f'go run {josie_cmd_dir}/topk/main.go \
                 --pg-database={josie_dbname} \
-                --test_tag={test_name} \
-                --output={results_directory} \
-                    --k={k}')
+                --test_tag={tables_prefix} \
+                --outputDir={results_directory} \
+                --resultsFile={results_file} \
+                --k={k}')
