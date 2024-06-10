@@ -3,31 +3,55 @@
 TEST_NAME=full
 
 PY_TESTER=$THESIS_PATH/experiments/main/main_tester.py
-PY_RESULTS_ANALYSIS=$THESIS_PATH/experiments/main/compare_josie_and_sloth.py
-ALGORITHM=lshforest
-MODE=bag
+PY_RESULTS_ANALYSIS=$THESIS_PATH/experiments/main/results_basic_extraction.py
+ALGORITHM=josie
+MODE=set
 K=10
+NUM_QUERY_SAMPLES=10
 
-python $PY_TESTER \
-    --test-name $TEST_NAME \
-    --algorithm $ALGORITHM \
-    --mode $MODE \
-    --tasks query \
-    --dbname nanni \
-    -k $K \
-    --small
+# LSHForest parameters
+L=16
+NUM_PERM=256
 
-
-# python $PY_RESULTS_ANALYSIS \
-#     --test-name $TEST_NAME \
-#     --mode $MODE \
-#     -k $K \
-#     --analyse-up-to 10 \
-#     --small \
+TEST=1
+ANALYSE=1
+CLEAN=0
 
 
-# python $PY_TESTER \
-#     --test-name $TEST_NAME \
-#     --dbname nanni \
-#     --small \
-#     --clean
+
+if [[ $TEST -eq 1 ]]; then
+    echo "######################### TESTING ##################################"
+    python $PY_TESTER \
+        --test-name $TEST_NAME \
+        --algorithm $ALGORITHM \
+        --mode $MODE \
+        --tasks data-preparation query \
+        --dbname nanni \
+        --num-query-samples $NUM_QUERY_SAMPLES \
+        -k $K \
+        -l $L \
+        --num-perm $NUM_PERM \
+        --smal
+fi
+
+
+if [[ $ANALYSE -eq 1 ]]; then
+    echo "######################### ANALYSIS ##################################"
+    python $PY_RESULTS_ANALYSIS \
+        --test-name $TEST_NAME \
+        --algorithm $ALGORITHM \
+        --mode $MODE \
+        -k $K \
+        --analyse-up-to 10 \
+        --small 
+fi
+
+
+if [[ $CLEAN -eq 1 ]]; then
+    echo "######################### CLEANING ##################################"
+    python $PY_TESTER \
+        --test-name $TEST_NAME \
+        --dbname nanni \
+        --small \
+        --clean
+fi

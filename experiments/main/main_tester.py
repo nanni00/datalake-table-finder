@@ -1,5 +1,4 @@
 import os
-import re
 import shutil
 import argparse
 from time import time
@@ -7,17 +6,23 @@ from time import time
 import pandas as pd
 import pymongo
 
-from experiments.main.lshforest import _mmh3_hashfunc, get_or_create_forest, query_lsh_forest
 from tools.utils.settings import DefaultPath as defpath
-from tools.utils.utils import get_current_time
+
+from tools.utils.utils import (
+    get_current_time,
+    get_mongodb_collections, 
+    get_query_ids_from_query_file, 
+    sample_queries
+)
+
+from tools.lshforest import (
+    _mmh3_hashfunc, 
+    get_or_create_forest, 
+    query_lsh_forest
+)
 
 from tools.josiestuff.db import JosieDB
-from tools.josiestuff.functions import (
-    create_index,
-    get_query_ids_from_query_file,
-    sample_queries,
-    josie_test
-)
+from tools.josiestuff.functions import *
 
 
 
@@ -62,6 +67,9 @@ if __name__ == '__main__':
     parser.add_argument('--num-perm', 
                         required=False, type=int, default=256,
                         help='number of permutations to use for minhashing')
+    parser.add_argument('-l', 
+                        required=False, type=int, default=8,
+                        help='number of prefix trees (see datasketch.LSHForest documentation)')
     
     # other general arguments
     parser.add_argument('--query-file', 
@@ -83,14 +91,15 @@ if __name__ == '__main__':
     k =                 args.k
     user_dbname =       args.dbname
     num_perm =          args.num_perm
+    l =                 args.l
     small =             args.small
     nsamples =          args.num_query_samples
 
     # TODO set thresholds as a CLI parameter or somethig else?
     tables_thresholds = {
-        'min_rows':     0,
-        'min_columns':  0,
-        'min_area':     0,
+        'min_rows':     5,
+        'min_columns':  2,
+        'min_area':     20,
         'max_rows':     999999,
         'max_columns':  999999,
         'max_area':     999999,
@@ -109,16 +118,9 @@ if __name__ == '__main__':
     # output files
     ROOT_TEST_DIR =             defpath.data_path.base + f'/josie-tests/{test_name}'
     query_file =                ROOT_TEST_DIR + '/query.json' if not args.query_file else args.query_file
-    forest_file =               ROOT_TEST_DIR + '/forest.json' if not args.forest_file else args.forest_file
+    forest_file =               ROOT_TEST_DIR + f'/forest_m{mode}.json' if not args.forest_file else args.forest_file
     results_dir =               ROOT_TEST_DIR + '/results'
     topk_results_file =         results_dir + f'/a{algorithm}_m{mode}_k{k}.csv'
-
-    if os.path.exists(topk_results_file):
-        fname = str(os.path.basename(topk_results_file))
-        m = re.search(r'(\d+)$', fname)
-        if m:
-            code = int(fname[m.start()+1:m.end()-1])
-            topk_results_file = f'/{results_dir}/a{algorithm}_m{mode}_k{k}({code+1}).csv'
 
     # statistics stuff
     statistics_dir =            ROOT_TEST_DIR  + '/statistics'
@@ -128,14 +130,7 @@ if __name__ == '__main__':
     runtime_metrics = []
 
     # the MongoDB collections where data are stored
-    mongoclient = pymongo.MongoClient()
-    collections = []
-    if small:
-        collections.append(mongoclient.optitab.turl_training_set_small)
-        collections.append(mongoclient.sloth.latest_snapshot_tables_small) 
-    else:
-        collections.append(mongoclient.optitab.turl_training_set)
-        collections.append(mongoclient.sloth.latest_snapshot_tables)
+    mongoclient, collections = get_mongodb_collections(small)
 
     forest = None
     josiedb = None
@@ -163,32 +158,31 @@ if __name__ == '__main__':
 
 
     ############# DATA PREPARATION #############
-    if ALL or DATA_PREPARATION:
-        if algorithm == 'josie':
-            josiedb.drop_tables()
-            josiedb.create_tables()
+    if algorithm == 'josie' and (ALL or DATA_PREPARATION):
+        josiedb.drop_tables()
+        josiedb.create_tables()
 
-            start = time()
-            create_index(mode, tables_thresholds, small, table_prefix)
-            runtime_metrics.append(('data_preparation', round(time() - start, 5), get_current_time()))
-            
-            josiedb.create_inverted_list_index()
-            josiedb.create_sets_index()
-            
-            # database statistics
-            append = os.path.exists(db_stat_file)
-            pd.DataFrame(josiedb.get_statistics()).to_csv(db_stat_file, index=False, 
-                                                          mode='a' if append else 'w', header=False if append else True)
+        start = time()
+        create_index(mode, tables_thresholds, small, table_prefix)
+        runtime_metrics.append(('data_preparation', round(time() - start, 5), get_current_time()))
+        
+        josiedb.create_inverted_list_index()
+        josiedb.create_sets_index()
+        
+        # database statistics
+        append = os.path.exists(db_stat_file)
+        pd.DataFrame(josiedb.get_statistics()).to_csv(db_stat_file, index=False, 
+                                                        mode='a' if append else 'w', header=False if append else True)
 
-        elif algorithm == 'lshforest':
-            start = time()
-            forest = get_or_create_forest(forest_file, num_perm, mode, _mmh3_hashfunc, *collections)
-            runtime_metrics.append(('data_preparation', round(time() - start, 5), get_current_time()))    
+    elif algorithm == 'lshforest' and (ALL or DATA_PREPARATION or QUERY):
+        start = time()
+        forest = get_or_create_forest(forest_file, num_perm, l, mode, _mmh3_hashfunc, tables_thresholds, *collections)
+        runtime_metrics.append(('data_preparation', round(time() - start, 5), get_current_time()))    
 
 
     ############# SAMPLING TEST VALUES FOR JOSIE ##############
     if ALL or SAMPLE_QUERIES:
-        sample_queries(query_file, nsamples, small, tables_thresholds)
+        sample_queries(query_file, nsamples, tables_thresholds, *collections)
 
 
     ################## RUNNING JOSIE ##################
@@ -201,9 +195,6 @@ if __name__ == '__main__':
 
             josie_test(user_dbname, table_prefix, results_dir, topk_results_file, k)
         elif algorithm == 'lshforest':
-            if not forest:
-                # here is assumed that the forest should only be loaded... 
-                forest = get_or_create_forest(forest_file, num_perm, mode, _mmh3_hashfunc, *collections)
             query_lsh_forest(topk_results_file, forest, sampled_ids, mode, num_perm, k, _mmh3_hashfunc, *collections)
         runtime_metrics.append(('query', round(time() - start, 5), get_current_time()))
 

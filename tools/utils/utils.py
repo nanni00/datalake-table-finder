@@ -1,8 +1,10 @@
 from collections import defaultdict
+import json
 import re
 import time
 import numpy as np
 import pandas as pd
+import pymongo
 
 from tools.sloth.sloth import sloth
 
@@ -73,6 +75,22 @@ def get_current_time():
     return time.strftime("%Y/%m/%d %H:%M:%S")
 
 
+
+
+def get_mongodb_collections(small=True):
+    mongoclient = pymongo.MongoClient()
+
+    if not small:
+        wikitables_coll = mongoclient.optitab.turl_training_set
+        snapshot_coll = mongoclient.sloth.latest_snapshot_tables
+    else:
+        wikitables_coll = mongoclient.optitab.turl_training_set_small
+        snapshot_coll = mongoclient.sloth.latest_snapshot_tables_small
+
+    return mongoclient, [wikitables_coll, snapshot_coll]
+
+
+
 def get_one_document_from_mongodb_by_key(key, value, *collections):
     for collection in collections:
         document = collection.find_one({key: value})
@@ -136,6 +154,43 @@ def apply_sloth(table1, table2, numeric_columns1, numeric_columns2):
 
 
 
+def sample_queries(
+    output_query_json,
+    nsamples,
+    tables_thresholds:dict[str, int],
+    *collections
+    ):
+
+    MIN_ROW =     tables_thresholds['min_rows']
+    MAX_ROW =     tables_thresholds['max_rows']
+    MIN_COLUMN =  tables_thresholds['min_columns']
+    MAX_COLUMN =  tables_thresholds['max_columns']
+    MIN_AREA =    tables_thresholds['min_area']
+    MAX_AREA =    tables_thresholds['max_area']
+    
+    samples = [collection.aggregate([{"$sample": {"size": nsamples // 2}}]) for collection in collections]
+
+    samples = [
+        {'_id': t['_id'], '_id_numeric': t['_id_numeric'], 'content': t['content'], 'numeric_columns': t['numeric_columns']} 
+        for s in samples for t in list(s)
+        if MIN_ROW <= len(t['content']) <= MAX_ROW \
+        and MIN_COLUMN <= len(t['content'][0]) <= MAX_COLUMN \
+        and MIN_AREA <= len(t['content']) * len(t['content'][0]) <= MAX_AREA
+    ]
+
+    print(f'Sampled {len(samples)} tables')
+    with open(output_query_json, 'w') as wf:
+        json.dump(
+            samples,
+            wf,
+            indent=1
+        )
+    return len(samples)
+
+
+def get_query_ids_from_query_file(query_file):
+    with open(query_file) as fr:
+        return [t['_id_numeric'] for t in json.load(fr)]
 
 
 

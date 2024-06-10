@@ -5,9 +5,10 @@ import pandas as pd
 import pymongo
 import os
 from datasketch import MinHashLSHForest, MinHash
+import pymongo.collection
 from tqdm import tqdm
 
-from tools.utils.utils import _create_token_set, apply_sloth
+from tools.utils.utils import _create_token_set
 from tools.utils.utils import get_one_document_from_mongodb_by_key
 
  
@@ -46,23 +47,38 @@ def load_forest(forest_file) -> MinHashLSHForest:
 
 
 def _mmh3_hashfunc(d):
-    return mmh3.hash(d)
+    return mmh3.hash(d, signed=False)
 
 
-def get_or_create_forest(forest_file, num_perm, mode, hashfunc, *collections) -> MinHashLSHForest:
+def get_or_create_forest(forest_file, num_perm, l, mode, hashfunc, tables_thresholds, *collections) -> MinHashLSHForest:
     if os.path.exists(forest_file):
         print('Loading forest...')
         forest = load_forest(forest_file)
     else:
         print('Creating forest...')
-        forest = MinHashLSHForest(num_perm=num_perm)
+        forest = MinHashLSHForest(num_perm=num_perm, l=l)
         for collection in collections:
+            print(f'Scanning documents from {collection.database.name}.{collection.name}...')
             for doc in tqdm(collection.find({}), total=collection.count_documents({})):
                 minhash = MinHash(num_perm=num_perm, hashfunc=hashfunc)
                 _id_numeric, numeric_columns, content = doc['_id_numeric'], doc['numeric_columns'], doc['content']
-                token_set = _create_token_set(content, mode, numeric_columns, encode='utf-8')
-                minhash.update_batch(token_set)
-                forest.add(_id_numeric, minhash)
+                            
+                MIN_ROW =     tables_thresholds['min_rows']
+                MAX_ROW =     tables_thresholds['max_rows']
+                MIN_COLUMN =  tables_thresholds['min_columns']
+                MAX_COLUMN =  tables_thresholds['max_columns']
+                MIN_AREA =    tables_thresholds['min_area']
+                MAX_AREA =    tables_thresholds['max_area']
+
+                if MIN_ROW <= len(content) <= MAX_ROW and \
+                    MIN_COLUMN <= len(content[0]) <= MAX_COLUMN and \
+                    MIN_AREA <= len(content) * len(content[0]) <= MAX_AREA: 
+
+                    token_set = _create_token_set(content, mode, numeric_columns)
+                    # minhash.update_batch(token_set)
+                    for token in token_set:
+                        minhash.update(token)
+                    forest.add(_id_numeric, minhash)
         
         forest.index()
         print('Saving forest...')
@@ -76,15 +92,18 @@ def query_lsh_forest(results_file, forest:MinHashLSHForest, query_ids, mode, num
 
     for query_id in query_ids:
         try:
-            minhash_q = forest.get_minhash_hashvalues(query_id)
+            hashvaluesq = forest.get_minhash_hashvalues(query_id)
+            minhash_q = MinHash(num_perm, hashfunc=hashfunc, hashvalues=hashvaluesq)
         except KeyError:    
             docq = get_one_document_from_mongodb_by_key('_id_numeric', query_id, *collections)
             
             numeric_columns_q, content_q = docq['numeric_columns'], docq['content']
-            token_set_q = _create_token_set(content_q, mode, numeric_columns_q, encode='utf-8')
+            token_set_q = _create_token_set(content_q, mode, numeric_columns_q)
 
             minhash_q = MinHash(num_perm=num_perm, hashfunc=hashfunc)
-            minhash_q.update_batch(token_set_q)
+            # minhash_q.update_batch(token_set_q)
+            for token in token_set_q:
+                minhash_q.update(token)
 
         topk_res = forest.query(minhash_q, k)
         if query_id in topk_res:
