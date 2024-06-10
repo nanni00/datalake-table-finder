@@ -1,11 +1,10 @@
 import statistics
 from collections import defaultdict
 import os
-from pprint import pprint
 
 import pandas as pd
 from tools.utils.settings import DefaultPath as defpath
-from tools.utils.utils import get_mongodb_collections, get_one_document_from_mongodb_by_key, get_query_ids_from_query_file
+from tools.utils.utils import get_mongodb_collections, get_query_ids_from_query_file
 
 
 if __name__ == '__main__':
@@ -93,6 +92,6 @@ if __name__ == '__main__':
     print(precision_at_k_results)
 
 
-        
+    
     
 

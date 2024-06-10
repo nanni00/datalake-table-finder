@@ -5,7 +5,7 @@ TEST_NAME=full
 PY_TESTER=$THESIS_PATH/experiments/main/main_tester.py
 PY_RESULTS_ANALYSIS=$THESIS_PATH/experiments/main/results_basic_extraction.py
 ALGORITHM=josie
-MODE=set
+MODE=bag
 K=10
 NUM_QUERY_SAMPLES=10
 
