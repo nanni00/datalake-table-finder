@@ -1,10 +1,10 @@
+import re
 import os
 import shutil
 import argparse
 from time import time
 
 import pandas as pd
-import pymongo
 
 from tools.utils.settings import DefaultPath as defpath
 
@@ -72,6 +72,9 @@ if __name__ == '__main__':
                         help='number of prefix trees (see datasketch.LSHForest documentation)')
     
     # other general arguments
+    parser.add_argument('-u', '--user-interaction',
+                        required=False, action='store_true',
+                        help='specify if user should be asked to continue if necessary')
     parser.add_argument('--query-file', 
                         required=False, type=str, 
                         help='an absolute path to an existing file containing the queries which will be used for JOSIE tests')
@@ -80,7 +83,7 @@ if __name__ == '__main__':
                         help='works on small collection versions (only for testing)')
     parser.add_argument('--clean', 
                         required=False, action='store_true', 
-                        help='remove PostgreSQL database tables and other big files')
+                        help='remove PostgreSQL database tables and other big files, such as the LSH Forest index file')
 
 
     args = parser.parse_args()
@@ -94,12 +97,14 @@ if __name__ == '__main__':
     l =                 args.l
     small =             args.small
     nsamples =          args.num_query_samples
+    user_interaction =  args.user_interaction
+    nworkers =          min(os.cpu_count(), 64)
 
     # TODO set thresholds as a CLI parameter or somethig else?
     tables_thresholds = {
         'min_rows':     5,
         'min_columns':  2,
-        'min_area':     20,
+        'min_area':     50,
         'max_rows':     999999,
         'max_columns':  999999,
         'max_area':     999999,
@@ -126,6 +131,7 @@ if __name__ == '__main__':
     statistics_dir =            ROOT_TEST_DIR  + '/statistics'
     runtime_stat_file =         statistics_dir + '/runtime.csv'     
     db_stat_file =              statistics_dir + '/db.csv'
+    storage_stat_file =         statistics_dir + '/storage.csv'
 
     runtime_metrics = []
 
@@ -144,7 +150,7 @@ if __name__ == '__main__':
 
     ############# SET UP #############
     if any_task:
-        if os.path.exists(ROOT_TEST_DIR):
+        if os.path.exists(ROOT_TEST_DIR) and user_interaction:
             if input(f'Directory {ROOT_TEST_DIR} already exists: delete it (old data will be lost)? (yes/no) ') in ('y', 'yes'):
                 shutil.rmtree(ROOT_TEST_DIR)
 
@@ -171,13 +177,30 @@ if __name__ == '__main__':
         
         # database statistics
         append = os.path.exists(db_stat_file)
-        pd.DataFrame(josiedb.get_statistics()).to_csv(db_stat_file, index=False, 
-                                                        mode='a' if append else 'w', header=False if append else True)
+        dbstat = pd.DataFrame(josiedb.get_statistics())
+        dbstat.to_csv(db_stat_file, index=False, mode='a' if append else 'w', header=False if append else True)
+
+
+        def convert_to_giga(x):
+            if x.endswith('MB'):
+                return int(re.match(r'\d+', x).group()) / 1024
+            elif x.endswith('KB'):
+                return int(re.match(r'\d+', x).group()) / (1024 ** 2)
+
+        append = os.path.exists(storage_stat_file)
+        dbsize = pd.DataFrame([[algorithm, mode, dbstat['total_size'].apply(convert_to_giga).sum()]], columns=['algorithm', 'mode', 'size(GB)'])
+        dbsize.to_csv(storage_stat_file, index=False, mode='a' if append else 'w', header=False if append else True)
 
     elif algorithm == 'lshforest' and (ALL or DATA_PREPARATION or QUERY):
         start = time()
-        forest = get_or_create_forest(forest_file, num_perm, l, mode, _mmh3_hashfunc, tables_thresholds, *collections)
-        runtime_metrics.append(('data_preparation', round(time() - start, 5), get_current_time()))    
+        forest = get_or_create_forest(forest_file, nworkers, num_perm, l, mode, _mmh3_hashfunc, tables_thresholds, *collections)
+        runtime_metrics.append(('data_preparation', round(time() - start, 5), get_current_time()))
+
+        forest_size_gb = os.path.getsize(forest_file) / (1024 ** 3)
+        
+        append = os.path.exists(storage_stat_file)
+        dbsize = pd.DataFrame([[algorithm, mode, forest_size_gb]], columns=['algorithm', 'mode', 'size(GB)'])
+        dbsize.to_csv(storage_stat_file, index=False, mode='a' if append else 'w', header=False if append else True)
 
 
     ############# SAMPLING TEST VALUES FOR JOSIE ##############
@@ -212,6 +235,8 @@ if __name__ == '__main__':
     if CLEAN:
         print('Cleaning directories and database...')
         josiedb.drop_tables(all=True)
+        if os.path.exists(forest_file):
+            os.remove(forest_file)
         print('Cleaning completed.')
 
     if josiedb:

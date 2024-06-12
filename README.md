@@ -18,15 +18,34 @@ export GOBIN=$GOPATH/bin
 export PATH=$PATH:$GOBIN
 ```
 
-I dati prodotti dal test complessivo sono nella cartella /data/josie-tests/\<nome-test\>, dove \<nome-test\> è un nome definito dall'utente oppure un codice del tipo m\<modalità\> in cui "modalità" è "set" se si lavora con la set semantic, o "bag" se si lavora con la bag semantic.
+I test e le azioni preliminari si possono eseguire direttamente sulle collection principali o sulle toy-collection indicando il parametro --small.
+Prima di eseguire i test, occorre preparare il database MongoDB e le relative collection, aggiungendo un identificatore numerico a ogni documento e un vettore booleano che indichi le colonne numeriche.
 
-Per fare i test con JOSIE è anche necessario:
-- Scaricare il dataset originale usato per il training di TURL (https://github.com/sunlab-osu/TURL.git) (train_tables.jsonl nella cartella OneDrive) e posizionarlo in data/turl_sloth/wikitables/original_turl_train_tables.jsonl o, in alternativa, avere un database MongoDB con già caricato sopra queste tabelle nella collection "optitab.wikitables";
-- scaricare PostgreSQL (seguire le istruzioni sulla repository https://github.com/ekzhu/josie.git);
-- creare un database con lo stesso nome \<nome-test\> in cui verranno caricate le tabelle usate da JOSIE;
-- è possibile che vadano scaricati i pacchetti necessari per il codice Go, indicati nel .mod se non già presenti;
+Per aggiungere l'identificatore numerico,
 
-Per eseguire il test c'è lo script python experiments/josie/josie_testing.py che si può configurare con i vari argomenti. Un esempio di run è in experiments/josie/run_test.sh
+```
+python create_numeric_index_on_collections.py --task set
+```
 
-Per confrontare i risultati di JOSIE con SLOTH c'è lo script experiments/josie/compare_josie_and_sloth.py.
+questa azione è reversibile (vd --task unset).
+
+
+Per creare i vettori relativi alle colonne numeriche,
+
+```
+python detect_numeric_columns.py --task set --mode naive
+```
+
+anche qui ci sono alcune opzioni accessibili (e.g. nella modalità spacy le colonne vengono selezionate con un modo un po' più fine, ma forse non è così necessario e inoltre è computazionalmente più pesante). Anche questa azione è reversibile (vd --task unset).
+
+Una volta completato il set up, si possono eseguire i test,
+
+```
+./run_all_<small/big>_tests.sh
+```
+
+indicando quali parti eseguire tra testing, analisi e cleaning (la parte di cleaning non rimuove quanto fatto nel setup indicato sopra).
+
+
+
 

@@ -1,56 +1,158 @@
+import os
+import json
 import mmh3
 import base64
-import json
-import pandas as pd
-import pymongo
-import os
-from datasketch import MinHashLSHForest, MinHash
-import pymongo.collection
 from tqdm import tqdm
+
+import orjson
+import pymongo
+import pandas as pd
+import pymongo.collection
+import multiprocessing as mp
+from datasketch import MinHashLSHForest, MinHash
 
 from tools.utils.utils import _create_token_set
 from tools.utils.utils import get_one_document_from_mongodb_by_key
 
- 
+
+
+def _work_forest(inp):
+    key, data, mode = inp
+    encode_hash = lambda h: base64.b64encode(h).decode('utf-8')
+    decode_hash = lambda h: base64.b64decode(h.encode('utf-8'))
+
+    if key == 'keys':
+        return 0, {k: [encode_hash(hash) if mode == 'save' else decode_hash(hash) for hash in v] for k, v in data.items()}
+            
+    elif key == 'hashtables':
+        return 1, [{encode_hash(k) if mode == 'save' else decode_hash(k): v for k, v in hashtable.items()} for hashtable in data]
+    
+    elif key == 'sorted_hashtables':
+        return 2, [[encode_hash(hash) if mode == 'save' else decode_hash(hash) for hash in hashtable] for hashtable in data]
+        
+
+
+def _forest_handler(forest_file, task, forest:None|MinHashLSHForest=None, num_perm=None):
+    if task == 'save':
+        with mp.Pool(3) as pool:
+            rv = pool.map(_work_forest, [(key, data, task) for key, data in zip(
+                                ['keys', 'hashtables', 'sorted_hashtables'], 
+                                [forest.keys, forest.hashtables, forest.sorted_hashtables])], chunksize=1)
+        rv = sorted(rv, key=lambda x: x[0])
+
+        with open(forest_file, 'wb') as fwriter:
+            json_bytes = orjson.dumps(
+                {
+                    'num_perm':             num_perm,
+                    'k':                    forest.k,
+                    'l':                    forest.l,
+                    'hashranges':           forest.hashranges,
+                    'keys':                 str(rv[0][1]),
+                    'hashtables':           str(rv[1][1]),
+                    'sorted_hashtables':    str(rv[2][1])                
+                }    
+            )
+            fwriter.write(json_bytes)
+
+    elif task == 'load':
+        with open(forest_file) as freader:
+            forest_data = orjson.loads(freader.read())
+
+        forest = MinHashLSHForest(num_perm=forest_data['num_perm'], l=forest_data['l'])
+
+        with mp.Pool(3) as pool:
+            rv = pool.map(_work_forest, [(key, data, task) for key, data in zip(
+                                ['keys', 'hashtables', 'sorted_hashtables'], 
+                                [eval(forest_data['keys']), eval(forest_data['hashtables']), eval(forest_data['sorted_hashtables'])])], chunksize=1)
+        rv = sorted(rv, key=lambda x: x[0])
+
+        forest.k =                  forest_data['k']
+        forest.hashranges =         forest_data['hashranges']
+        forest.keys =               rv[0][1]
+        forest.hashtables =         rv[1][1]
+        forest.sorted_hashtables =  rv[2][1]
+
+        return forest
+
 
 def save_forest(forest, forest_file, num_perm):
-    encode_hash = lambda h: base64.b64encode(h).decode('utf-8')
-    with open(forest_file, 'w') as fwriter:
-        json.dump(
-            {
-                'num_perm':             num_perm,
-                'k':                    forest.k,
-                'l':                    forest.l,
-                'hashranges':           forest.hashranges,
-                'keys':                 {k: [encode_hash(hash) for hash in v] for k, v in forest.keys.items()},
-                'hashtables':           [{encode_hash(k): v for k, v in hashtable.items()} for hashtable in forest.hashtables],
-                'sorted_hashtables':    [[encode_hash(hash) for hash in hashtable] for hashtable in forest.sorted_hashtables]
-            },
-            fwriter
-        )
+    _forest_handler(forest_file, 'save', forest, num_perm)
 
 
 def load_forest(forest_file) -> MinHashLSHForest:
-    with open(forest_file) as freader:
-        forest_data = json.load(freader)
-
-    forest = MinHashLSHForest(num_perm=forest_data['num_perm'], l=forest_data['l'])
-    decode_hash = lambda h: base64.b64decode(h.encode('utf-8'))
-
-    forest.k =                  forest_data['k']
-    forest.hashranges =         forest_data['hashranges']
-    forest.keys =               {k: [decode_hash(hash) for hash in v] for k, v in forest_data['keys'].items()}
-    forest.hashtables =         [{decode_hash(k): v for k, v in hashtable.items()} for hashtable in forest_data['hashtables']]
-    forest.sorted_hashtables =  [[decode_hash(hash) for hash in hashtable] for hashtable in forest_data['sorted_hashtables']]
-
-    return forest
+    return _forest_handler(forest_file, 'load')
 
 
 def _mmh3_hashfunc(d):
     return mmh3.hash(d, signed=False)
 
 
-def get_or_create_forest(forest_file, num_perm, l, mode, hashfunc, tables_thresholds, *collections) -> MinHashLSHForest:
+def _worker_forest_creation(inp):
+    doc, mode, num_perm, hashfunc, MIN_ROW, MAX_ROW, MIN_COLUMN, MAX_COLUMN, MIN_AREA, MAX_AREA = inp
+    _id_numeric, numeric_columns, content = doc['_id_numeric'], doc['numeric_columns'], doc['content']     
+
+    if MIN_ROW <= len(content) <= MAX_ROW and \
+        MIN_COLUMN <= len(content[0]) <= MAX_COLUMN and \
+        MIN_AREA <= len(content) * len(content[0]) <= MAX_AREA: 
+        minhash = MinHash(num_perm=num_perm, hashfunc=hashfunc)
+
+        token_set = _create_token_set(content, mode, numeric_columns)
+        minhash.update_batch(token_set)
+        # for token in token_set:
+        #     minhash.update(token)
+
+        return (_id_numeric, minhash)
+    return (_id_numeric, None)
+
+
+def init_pool(hashfunc):
+    hashfunc = hashfunc
+
+
+def get_or_create_forest(forest_file, nworkers, num_perm, l, mode, hashfunc, tables_thresholds, *collections) -> MinHashLSHForest:
+    if os.path.exists(forest_file):
+        print('Loading forest...')
+        forest = load_forest(forest_file)
+    else:
+        print('Creating forest...')                
+        MIN_ROW =     tables_thresholds['min_rows']
+        MAX_ROW =     tables_thresholds['max_rows']
+        MIN_COLUMN =  tables_thresholds['min_columns']
+        MAX_COLUMN =  tables_thresholds['max_columns']
+        MIN_AREA =    tables_thresholds['min_area']
+        MAX_AREA =    tables_thresholds['max_area']
+
+        forest = MinHashLSHForest(num_perm=num_perm, l=l)
+ 
+        with mp.Pool(processes=nworkers) as pool:
+            for collection in collections:
+                collsize = collection.count_documents({})
+    
+                print(f'Starting pool working on {collection.database.name}.{collection.name}...')
+                for i, res in enumerate(pool.imap(
+                                            _worker_forest_creation, 
+                                            (
+                                                (doc, mode, num_perm, hashfunc, MIN_ROW, MAX_ROW, MIN_COLUMN, MAX_COLUMN, MIN_AREA, MAX_AREA) 
+                                                for doc in collection.find({}, 
+                                                                      projection={"_id_numeric": 1, "numeric_columns": 1, "content": 1}
+                                                )
+                                            ), 
+                                            chunksize=500)):
+                    if i % 1000 == 0:
+                        print(round(100 * i / collsize, 3), '%', end='\r')
+                    _id_numeric, minhash = res
+                    if minhash:
+                        forest.add(_id_numeric, minhash)
+                print(f'{collection.database.name}.{collection.name} updated.')        
+            
+            print('Indexing forest...')
+            forest.index()
+        print('Saving forest...')
+        save_forest(forest, forest_file, num_perm)
+    return forest
+
+
+def _get_or_create_forest(forest_file, num_perm, l, mode, hashfunc, tables_thresholds, *collections) -> MinHashLSHForest:
     if os.path.exists(forest_file):
         print('Loading forest...')
         forest = load_forest(forest_file)

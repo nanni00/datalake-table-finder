@@ -1,10 +1,10 @@
 import os
 import random
-import pymongo
 import argparse
 import multiprocessing as mp
 
 from tools.sloth.utils import parse_table
+from tools.utils.utils import get_mongodb_collections
 
 
 NUMERICAL_NER_TAGS = {
@@ -109,7 +109,8 @@ if __name__ == '__main__':
                         type=int, required=False, default=3,
                         help='defines how many cell(s) must be sampled in spacy mode from each column to detect wheter or not the column is numeric, \
                             default is 3. If set to -1 analyses the whole column.')
-    parser.add_argument('--small', required=False, action='store_true',
+    parser.add_argument('--small',
+                         required=False, action='store_true',
                         help='works on small collection versions (only for testing)')
 
     args = parser.parse_args()
@@ -119,13 +120,7 @@ if __name__ == '__main__':
     nsamples = args.sample_size
     small = args.small
 
-    mongoclient = pymongo.MongoClient()
-    if not small:
-        turlcoll = mongoclient.optitab.turl_training_set
-        snapcoll = mongoclient.sloth.latest_snapshot_tables
-    else:
-        turlcoll = mongoclient.optitab.turl_training_set_small
-        snapcoll = mongoclient.sloth.latest_snapshot_tables_small
+    mongoclient, collections = get_mongodb_collections(small)
 
     if task == 'set':
         if mode == 'spacy':
@@ -135,24 +130,21 @@ if __name__ == '__main__':
         else:
             nlp = []
 
-        turlcoll_size = 570000 if not small else 10000
-        snapshot_size = 2100000 if not small else 10000
-
         with mp.Pool(processes=ncpu, initializer=init_pool, initargs=(nlp, ncpu, nsamples, mode)) as pool:
-            for (collection, collsize, collname) in [(snapcoll, snapshot_size, 'sloth.latest_snapshot_tables'), 
-                                                     (turlcoll, turlcoll_size, 'optitab.turl_training_set')]:
-                print(f'Starting pool working on {collname}...')
+            
+            for collection in collections:
+                collsize = collection.count_documents({})
+
+                print(f'Starting pool working on {collection.database.name}.{collection.name}...')
                 for i, res in enumerate(pool.imap(worker, ((t['_id'], t['content'], mode) for t in collection.find({}, projection={"_id": 1, "content": 1})), chunksize=100)):
                     if i % 1000 == 0:
                         print(round(100 * i / collsize, 3), '%', end='\r')
                     collection.update_one({"_id": res[0]}, {"$set": {"numeric_columns": res[1]}})
-                print(f'{collname} updated.')
+                print(f'{collection.database.name}.{collection.name} updated.')
     else:
-        print('Start unsetting field "numeric_columns" from optitab.turl_training_set...')
-        turlcoll.update_many({}, {"$unset": {"numeric_columns": 1}})
-        print('optitab.turl_training_set updated.')
-        
-        print('Start unsetting field "numeric_columns" from sloth.latest_snapshot_tables...')
-        snapcoll.update_many({}, {"$unset": {"numeric_columns": 1}})
-        print('sloth.latest_snapshot_tables updated.')
+        for collection in collections:
+            print(f'Start unsetting field "numeric_columns" from {collection.database.name}.{collection.name}...')
+            collection.update_many({}, {"$unset": {"numeric_columns": 1}})
+            print(f'{collection.database.name}.{collection.name} updated.')
+            
         

@@ -1,5 +1,7 @@
 import argparse
-import pymongo
+from tqdm import tqdm
+
+from tools.utils.utils import get_mongodb_collections
 
 
 
@@ -17,34 +19,19 @@ if __name__ == '__main__':
     task = args.task
     small = args.small
 
-    mongoclient = pymongo.MongoClient()
-    if not small:
-        turlcoll = mongoclient.optitab.turl_training_set
-        snapcoll = mongoclient.sloth.latest_snapshot_tables
-    else:
-        turlcoll = mongoclient.optitab.turl_training_set_small
-        snapcoll = mongoclient.sloth.latest_snapshot_tables_small
-
+    mongoclient, collections = get_mongodb_collections(small)
+    
     if task == 'set':
-        turlcoll_size = 570000 if not small else 10000
-        snapshot_size = 2100000 if not small else 10000
-
         _id_numeric = 0
-        for (collection, collsize, collname) in [(snapcoll, snapshot_size, 'sloth.latest_snapshot_tables'), 
-                                                (turlcoll, turlcoll_size, 'optitab.turl_training_set')]:
-            print(f"Starting creating \"_id_numeric\" field on collection {collname}...")
-            for i, doc in enumerate(collection.find({}, projection={"_id": 1})):
-                collection.update_one({"_id": doc["_id"]}, {"$set": {"_id_numeric": _id_numeric}})
+        for collection in collections:
+            print(f'Scanning documents from {collection.database.name}.{collection.name}...')
+            for doc in tqdm(collection.find({}, projection={"_id": 1}), total=collection.count_documents({})):
+                collection.update_one({"_id": doc["_id"]}, {"$set": {"_id_numeric": _id_numeric}})            
                 _id_numeric += 1
-                if i % 1000 == 0:
-                    print(round((i * 100) / collsize, 3), '%', end='\r')
-            print(f'{collname} updated.')
-            
     else:
-        print('Start unsetting field "_id_numeric" from optitab.turl_training_set...')
-        turlcoll.update_many({}, {"$unset": {"_id_numeric": 1}})
-        print('optitab.turl_training_set updated.')
+        for collection in collections:
+            print(f'Start unsetting field "_id_numeric" from {collection.database.name}.{collection.name}...')
+            collection.update_many({}, {"$unset": {"_id_numeric": 1}})
+            print(f'{collection.database.name}.{collection.name} updated.')
         
-        print('Start unsetting field "_id_numeric" from sloth.latest_snapshot_tables...')
-        snapcoll.update_many({}, {"$unset": {"_id_numeric": 1}})
-        print('sloth.latest_snapshot_tables updated.')
+    mongoclient.close()

@@ -28,7 +28,7 @@ class JosieDB:
         self._dbconn = psycopg.connect(f"port=5442 host=/tmp dbname={self.dbname}")
         self._dbcur = None
 
-    @print_info(msg_before='Committing to the database and closing connection...')
+    @print_info(msg_before='Closing connection...')
     def close(self):
         self._dbconn.close()
 
