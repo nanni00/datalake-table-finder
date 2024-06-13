@@ -6,6 +6,8 @@ from time import time
 
 import pandas as pd
 
+import fasttext
+
 from tools.utils.settings import DefaultPath as defpath
 
 from tools.utils.utils import (
@@ -18,11 +20,12 @@ from tools.utils.utils import (
 from tools.lshforest import (
     _mmh3_hashfunc, 
     get_or_create_forest, 
-    query_lsh_forest
+    query
 )
 
 from tools.josiestuff.db import JosieDB
 from tools.josiestuff.functions import *
+from tools import embeddings
 
 
 
@@ -34,10 +37,12 @@ if __name__ == '__main__':
                         type=str, required=True)
     parser.add_argument('-a', '--algorithm',
                         required=False, default='josie',
-                        choices=['josie', 'lshforest'])
+                        choices=['josie', 'lshforest', 'embedding'])
     parser.add_argument('-m', '--mode', 
                         required=False, default='set',
-                        choices=['set', 'bag'])
+                        choices=['set', 'bag', 'fasttext'],
+                        help='the specific version of the algorithm. Note that an algorithm doesn\'t support all the available modes: for example, \
+                            if "algorithm"="embedding", the only accepted mode is "fasttext"')
     parser.add_argument('-k', 
                         type=int, required=False, default=5,
                         help='the K value for the top-K search')
@@ -101,12 +106,12 @@ if __name__ == '__main__':
     nworkers =          min(os.cpu_count(), 64)
 
     # TODO set thresholds as a CLI parameter or somethig else?
-    tables_thresholds = {
-        'min_rows':     5,
-        'min_columns':  2,
+    table_thresholds = {
+        'min_row':     5,
+        'min_column':  2,
         'min_area':     50,
-        'max_rows':     999999,
-        'max_columns':  999999,
+        'max_row':     999999,
+        'max_column':  999999,
         'max_area':     999999,
     }
 
@@ -123,9 +128,17 @@ if __name__ == '__main__':
     # output files
     ROOT_TEST_DIR =             defpath.data_path.base + f'/josie-tests/{test_name}'
     query_file =                ROOT_TEST_DIR + '/query.json' if not args.query_file else args.query_file
-    forest_file =               ROOT_TEST_DIR + f'/forest_m{mode}.json' if not args.forest_file else args.forest_file
-    results_dir =               ROOT_TEST_DIR + '/results'
-    topk_results_file =         results_dir + f'/a{algorithm}_m{mode}_k{k}.csv'
+
+    forest_dir =                ROOT_TEST_DIR + f'/lshforest' 
+    forest_file =               forest_dir + f'/forest_m{mode}.json' if not args.forest_file else args.forest_file
+    
+    embeddings_dir =            ROOT_TEST_DIR + '/embeddings'
+    clut_file =                 embeddings_dir + '/clut.json'
+    cidx_file =                 embeddings_dir + '/cidx.index'
+
+    results_base_dir =          ROOT_TEST_DIR + '/results/base'
+    results_extr_dir =          ROOT_TEST_DIR + '/results/extracted'
+    topk_results_file =         results_base_dir + f'/a{algorithm}_m{mode}_k{k}.csv'
 
     # statistics stuff
     statistics_dir =            ROOT_TEST_DIR  + '/statistics'
@@ -147,6 +160,13 @@ if __name__ == '__main__':
         josiedb = JosieDB(user_dbname, table_prefix)
         josiedb.open()
 
+    if algorithm == 'embedding':
+        print('Loading fastText model...')
+        start = time()
+        model = fasttext.load_model(defpath.model_path.fasttext + '/cc.en.300.bin')
+        print('loaded model in ', round(time() - start, 3), 's')
+
+        clut, cidx = None, None
 
     ############# SET UP #############
     if any_task:
@@ -154,24 +174,19 @@ if __name__ == '__main__':
             if input(f'Directory {ROOT_TEST_DIR} already exists: delete it (old data will be lost)? (yes/no) ') in ('y', 'yes'):
                 shutil.rmtree(ROOT_TEST_DIR)
 
-        if not os.path.exists(ROOT_TEST_DIR): 
-            print(f'Creating test directory {ROOT_TEST_DIR}...')
-            os.makedirs(ROOT_TEST_DIR)
-            print(f'Creating test statistics directory {statistics_dir}...')
-            os.makedirs(statistics_dir)
-            print(f'Creating results statistics directory {results_dir}...')
-            os.makedirs(results_dir)
-
+        for directory in [ROOT_TEST_DIR, statistics_dir, results_base_dir, results_extr_dir, forest_dir, embeddings_dir]:
+            if not os.path.exists(directory): 
+                print(f'Creating directory {directory}...')
+                os.makedirs(directory)
+            
 
     ############# DATA PREPARATION #############
     if algorithm == 'josie' and (ALL or DATA_PREPARATION):
         josiedb.drop_tables()
         josiedb.create_tables()
-
         start = time()
-        create_index(mode, tables_thresholds, small, table_prefix)
+        create_index(mode, table_thresholds, small, table_prefix)
         runtime_metrics.append(('data_preparation', round(time() - start, 5), get_current_time()))
-        
         josiedb.create_inverted_list_index()
         josiedb.create_sets_index()
         
@@ -193,7 +208,7 @@ if __name__ == '__main__':
 
     elif algorithm == 'lshforest' and (ALL or DATA_PREPARATION or QUERY):
         start = time()
-        forest = get_or_create_forest(forest_file, nworkers, num_perm, l, mode, _mmh3_hashfunc, tables_thresholds, *collections)
+        forest = get_or_create_forest(forest_file, nworkers, num_perm, l, mode, _mmh3_hashfunc, table_thresholds, *collections)
         runtime_metrics.append(('data_preparation', round(time() - start, 5), get_current_time()))
 
         forest_size_gb = os.path.getsize(forest_file) / (1024 ** 3)
@@ -202,23 +217,42 @@ if __name__ == '__main__':
         dbsize = pd.DataFrame([[algorithm, mode, forest_size_gb]], columns=['algorithm', 'mode', 'size(GB)'])
         dbsize.to_csv(storage_stat_file, index=False, mode='a' if append else 'w', header=False if append else True)
 
+    elif algorithm == 'embedding' and (ALL or DATA_PREPARATION):
+        start = time()
+        clut, cidx = embeddings.data_preparation(clut_file, cidx_file, model, table_thresholds, *collections)
+        runtime_metrics.append(('data_preparation', round(time() - start, 5), get_current_time()))
+
+        clut_size_gb = os.path.getsize(clut_file) / (1024 ** 3)
+        cidx_file_gb = os.path.getsize(cidx_file) / (1024 ** 3)
+        
+        append = os.path.exists(storage_stat_file)
+        storage = pd.DataFrame([[algorithm, mode, clut_size_gb + cidx_file_gb]], columns=['algorithm', 'mode', 'size(GB)'])
+        storage.to_csv(storage_stat_file, index=False, mode='a' if append else 'w', header=False if append else True)
+
 
     ############# SAMPLING TEST VALUES FOR JOSIE ##############
     if ALL or SAMPLE_QUERIES:
-        sample_queries(query_file, nsamples, tables_thresholds, *collections)
+        sample_queries(query_file, nsamples, table_thresholds, *collections)
 
 
     ################## RUNNING JOSIE ##################
     if ALL or QUERY:
         start = time()
-        sampled_ids = get_query_ids_from_query_file(query_file)
+        query_ids = get_query_ids_from_query_file(query_file)
         if algorithm == 'josie':
             josiedb.clear_query_table()
-            josiedb.insert_data_into_query_table(sampled_ids)
+            josiedb.insert_data_into_query_table(query_ids)
 
-            josie_test(user_dbname, table_prefix, results_dir, topk_results_file, k)
+            josie_test(user_dbname, table_prefix, results_base_dir, topk_results_file, k)
         elif algorithm == 'lshforest':
-            query_lsh_forest(topk_results_file, forest, sampled_ids, mode, num_perm, k, _mmh3_hashfunc, *collections)
+            query(topk_results_file, forest, query_ids, mode, num_perm, k, _mmh3_hashfunc, *collections)
+        elif algorithm == 'embedding':
+            if not clut or not cidx:
+                print('Loading LUT and index...')
+                clut, cidx = embeddings.load_lut_index(clut_file, cidx_file)
+            print('Querying...')
+            embeddings.query(topk_results_file, model, clut, cidx, query_ids, k, *collections)
+
         runtime_metrics.append(('query', round(time() - start, 5), get_current_time()))
 
     if any_task:
@@ -229,8 +263,6 @@ if __name__ == '__main__':
 
             for (t_name, t_time, t_loctime) in runtime_metrics:
                 rfw.write(f"{t_loctime},{algorithm},{mode},{t_name},{t_time}\n")
-        print('All tasks have been completed.')
-
 
     if CLEAN:
         print('Cleaning directories and database...')
@@ -243,3 +275,5 @@ if __name__ == '__main__':
         josiedb.close()
     elif mongoclient:
         mongoclient.close()
+
+print('All tasks have been completed.')

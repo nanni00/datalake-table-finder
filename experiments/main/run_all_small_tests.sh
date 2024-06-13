@@ -1,6 +1,6 @@
 #!/bin/bash
 
-TEST_NAME=alltests_small
+TEST_NAME=smalltest
 
 # python scripts
 PY_TESTER=$THESIS_PATH/experiments/main/main_tester.py
@@ -18,20 +18,28 @@ L=16
 NUM_PERM=256
 
 # algorithm tasks to do
-DATA_PREPRATION=0
-SAMPLE_QUERIES=0
+DATA_PREPRATION=1
+SAMPLE_QUERIES=1
 QUERY=1
 
-ANALYSE=1
+ANALYSE=0
 CLEAN=0
 
 # used for tasks, in order to have the same queries for all the algorithms and modes
 i=0
 
-for ALGORITHM in lshforest
+for ALGORITHM in lshforest embedding
 do
-    for MODE in set
+    for MODE in set fasttext
     do
+        if [[ $ALGORITHM != "embedding" && $MODE == "fasttext" ]]; then
+            continue
+        fi
+        
+        if [[ $ALGORITHM == "embedding" && $MODE != "fasttext" ]]; then
+            continue
+        fi
+
         TASKS=''
 
         if [[ $DATA_PREPRATION -eq 1 ]]; then

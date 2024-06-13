@@ -1,10 +1,8 @@
 import os
-from pprint import pprint
 import re
 import argparse
 
 import pandas as pd
-import pymongo
 
 import multiprocessing as mp
 
@@ -37,22 +35,27 @@ def _worker_result_extractor(inp):
     numeric_columns1 = doc_table1['numeric_columns']
     numeric_columns2 = doc_table2['numeric_columns']
 
-    set1 = _create_token_set(table1, mode, numeric_columns1)
+    set1 = _create_token_set(table1, mode if mode != 'fasttext' else 'bag', numeric_columns1)
     if algorithm == 'josie':
         algorithm_overlap = int(algorithm_overlap)
     elif algorithm == 'lshforest':
         set2 = _create_token_set(table2, mode, numeric_columns2)
         algorithm_overlap = len(set(set1).intersection(set(set2)))
+    elif algorithm == 'embedding':
+        set2 = _create_token_set(table2, 'bag', numeric_columns2)
+        algorithm_overlap = len(set(set1).intersection(set(set2)))
+    
         
     query_size = len(set1)
     sloth_overlap = apply_sloth(table1, table2, numeric_columns1, numeric_columns2)
     difference_overlap = algorithm_overlap - sloth_overlap
-    difference_overlap_norm = difference_overlap / query_size
-    
-    return query_id, result_id, algorithm, mode, query_size, rank, algorithm_overlap, sloth_overlap, difference_overlap, difference_overlap_norm
 
-
-
+    max_table_overlap_size = len(table1) * (len(table1[0]) - sum(numeric_columns1))
+    try:    
+        difference_overlap_norm = difference_overlap / max_table_overlap_size
+    except ZeroDivisionError:
+        return query_id, result_id, algorithm, mode, -1, -1, rank, algorithm_overlap, sloth_overlap, difference_overlap, difference_overlap_norm
+    return query_id, result_id, algorithm, mode, query_size, max_table_overlap_size, rank, algorithm_overlap, sloth_overlap, difference_overlap, difference_overlap_norm
 
 
 
@@ -61,10 +64,10 @@ if __name__ == '__main__':
     parser.add_argument('--test-name', required=True, type=str, help='a user defined test name, used instead of the default one m<mode>')
     parser.add_argument('-a', '--algorithm', 
                         required=False, default='josie',
-                        choices=['josie', 'lshforest'])
+                        choices=['josie', 'lshforest', 'embedding'])
     parser.add_argument('-m', '--mode', 
                         required=False, default='set',
-                        choices=['set', 'bag'])
+                        choices=['set', 'bag', 'fasttext'])
     parser.add_argument('-k', required=True, type=int)
     parser.add_argument('--analyse-up-to', required=False, type=int)
     parser.add_argument('--small', required=False, action='store_true',
@@ -85,11 +88,13 @@ if __name__ == '__main__':
 
 
     ROOT_TEST_DIR =             defpath.data_path.base + f'/josie-tests/{test_name}'
-    results_directory =         ROOT_TEST_DIR + '/results'
-    josie_results_file =        results_directory + f'/a{algorithm}_m{mode}_k{k}.csv'
-    extracted_results_file =    results_directory + f'/a{algorithm}_m{mode}_k{k}_extracted.csv' 
+    results_base_directory =    ROOT_TEST_DIR + '/results/base'
+    results_extr_directory =    ROOT_TEST_DIR + '/results/extracted'
 
-    results = pd.read_csv(josie_results_file)[['query_id', 'results']]
+    results_file =              results_base_directory + f'/a{algorithm}_m{mode}_k{k}.csv'
+    extracted_results_file =    results_extr_directory + f'/a{algorithm}_m{mode}_k{k}_extracted.csv' 
+
+    results = pd.read_csv(results_file)[['query_id', 'results']]
 
     if algorithm == 'josie':
         jr = results.values.tolist()
@@ -101,7 +106,7 @@ if __name__ == '__main__':
                     re.findall(r'\d+', r[1])[1::2] if type(r[1]) == str else [None],
                     ), start=1) if rank <= ank and r[1]
             ]
-    elif algorithm == 'lshforest':
+    elif algorithm == 'lshforest' or algorithm == 'embedding':
         results['results'] = results['results'].apply(eval)
         work = [
             (res[0], sid, rank, None)
@@ -109,6 +114,7 @@ if __name__ == '__main__':
             for rank, sid in enumerate(res[1], start=1)
         ]
 
+    print('Start processing results...')
     with mp.Pool(processes=nworkers) as pool:
         res = pool.map(_worker_result_extractor, work)
 
@@ -122,6 +128,7 @@ if __name__ == '__main__':
         'algorithm',
         'mode',
         'query_size',
+        'max_table_overlap_size',
         'rank', 
         'algorithm_overlap', 
         'sloth_overlap', 

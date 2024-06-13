@@ -48,10 +48,10 @@ def create_index(
     small,
     josiedb_table_prefix):
 
-    MIN_ROW =     thresholds['min_rows']
-    MAX_ROW =     thresholds['max_rows']
-    MIN_COLUMN =  thresholds['min_columns']
-    MAX_COLUMN =  thresholds['max_columns']
+    MIN_ROW =     thresholds['min_row']
+    MAX_ROW =     thresholds['max_row']
+    MIN_COLUMN =  thresholds['min_column']
+    MAX_COLUMN =  thresholds['max_column']
     MIN_AREA =    thresholds['min_area']
     MAX_AREA =    thresholds['max_area']
 
@@ -278,7 +278,7 @@ def create_index(
         set_sizes = [s[1] for s in sets]
         set_pos = [s[2] for s in sets]
 
-        return (token, len(sets), gid, 1, raw_token, byteatoken, set_ids, set_sizes, set_pos)
+        return (token, len(sets), gid, 1, byteatoken, set_ids, set_sizes, set_pos)
 
     integer_sets.map(
         lambda t: _set_format_psql(t)
@@ -288,7 +288,7 @@ def create_index(
         lambda t: _postinglist_format_psql(t)
     ).toDF(schema=[
         'token', 'frequency', 'duplicate_group_id', 'duplicate_group_count', 
-        'str_token', 'raw_token', 'set_ids', 'set_sizes', 'match_positions'
+        'raw_token', 'set_ids', 'set_sizes', 'match_positions'
         ]
     ).write.jdbc(url, josiedb_table_prefix + '_inverted_lists', 'overwrite', properties)
 

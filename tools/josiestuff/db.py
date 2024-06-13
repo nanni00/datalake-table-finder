@@ -70,7 +70,6 @@ class JosieDB:
                 frequency integer NOT NULL,
                 duplicate_group_id integer NOT NULL,
                 duplicate_group_count integer NOT NULL,
-                str_token TEXT NOT NULL,
                 raw_token bytea NOT NULL,
                 set_ids integer[] NOT NULL,
                 set_sizes integer[] NOT NULL,

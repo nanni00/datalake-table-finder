@@ -1,13 +1,13 @@
 #!/bin/bash
 
-TEST_NAME=alltests
+TEST_NAME=bigtest
 
 # python scripts
 PY_TESTER=$THESIS_PATH/experiments/main/main_tester.py
 PY_RESULTS_ANALYSIS=$THESIS_PATH/experiments/main/results_basic_extraction.py
 
 # query generic parameters
-K=20
+K=10
 NUM_QUERY_SAMPLES=500
 
 # JOSIE parameter
@@ -19,8 +19,8 @@ NUM_PERM=256
 
 # tasks
 DATA_PREPRATION=1
-SAMPLE_QUERIES=1
-QUERY=1
+SAMPLE_QUERIES=0
+QUERY=0
 
 ANALYSE=0
 CLEAN=0
@@ -28,10 +28,20 @@ CLEAN=0
 # used for tasks, in order to have the same queries for all the algorithms and modes
 i=0
 
-for ALGORITHM in josie lshforest
+for ALGORITHM in josie # lshforest embedding
 do
-    for MODE in set bag
+    for MODE in set bag # fasttext
     do
+        # check is the configuration is correct or not
+        if [[ $ALGORITHM != "embedding" && $MODE == "fasttext" ]]; then
+            continue
+        fi
+        
+        if [[ $ALGORITHM == "embedding" && $MODE != "fasttext" ]]; then
+            continue
+        fi
+
+
         TASKS=''
 
         if [[ $DATA_PREPRATION -eq 1 ]]; then

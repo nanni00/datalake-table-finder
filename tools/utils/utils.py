@@ -75,8 +75,6 @@ def get_current_time():
     return time.strftime("%Y/%m/%d %H:%M:%S")
 
 
-
-
 def get_mongodb_collections(small=True):
     mongoclient = pymongo.MongoClient()
 
@@ -97,6 +95,11 @@ def get_one_document_from_mongodb_by_key(key, value, *collections):
         if document:
             return document
 
+
+def check_table_is_in_thresholds(content, table_thresholds):
+    return table_thresholds['min_row'] <= len(content) <= table_thresholds['max_row'] and \
+        table_thresholds['min_column'] <= len(content[0]) <= table_thresholds['max_column'] and \
+        table_thresholds['min_area'] <= len(content) * len(content[0]) <= table_thresholds['max_area']
 
 
 
@@ -161,21 +164,13 @@ def sample_queries(
     *collections
     ):
 
-    MIN_ROW =     tables_thresholds['min_rows']
-    MAX_ROW =     tables_thresholds['max_rows']
-    MIN_COLUMN =  tables_thresholds['min_columns']
-    MAX_COLUMN =  tables_thresholds['max_columns']
-    MIN_AREA =    tables_thresholds['min_area']
-    MAX_AREA =    tables_thresholds['max_area']
-    
     samples = [collection.aggregate([{"$sample": {"size": nsamples // 2}}]) for collection in collections]
 
     samples = [
-        {'_id': t['_id'], '_id_numeric': t['_id_numeric'], 'content': t['content'], 'numeric_columns': t['numeric_columns']} 
+        {'_id': t['_id'], '_id_numeric': t['_id_numeric'], 'numeric_columns': t['numeric_columns']} 
         for s in samples for t in list(s)
-        if MIN_ROW <= len(t['content']) <= MAX_ROW \
-        and MIN_COLUMN <= len(t['content'][0]) <= MAX_COLUMN \
-        and MIN_AREA <= len(t['content']) * len(t['content'][0]) <= MAX_AREA
+        if check_table_is_in_thresholds(t['content'], tables_thresholds) \
+        and not all(t['numeric_columns'])
     ]
 
     print(f'Sampled {len(samples)} tables')
