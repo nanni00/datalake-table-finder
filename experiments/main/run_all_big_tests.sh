@@ -18,19 +18,19 @@ L=16
 NUM_PERM=256
 
 # tasks
-DATA_PREPRATION=1
+DATA_PREPRATION=0
 SAMPLE_QUERIES=0
 QUERY=0
 
 ANALYSE=0
-CLEAN=0
+CLEAN=1
 
 # used for tasks, in order to have the same queries for all the algorithms and modes
 i=0
 
-for ALGORITHM in josie # lshforest embedding
+for ALGORITHM in josie lshforest embedding
 do
-    for MODE in set bag # fasttext
+    for MODE in set bag fasttext
     do
         # check is the configuration is correct or not
         if [[ $ALGORITHM != "embedding" && $MODE == "fasttext" ]]; then
