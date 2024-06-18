@@ -1,14 +1,14 @@
 #!/bin/bash
 
-TEST_NAME=smalltest
+TEST_NAME=graphtest
 
 # python scripts
 PY_TESTER=$THESIS_PATH/experiments/main/main_tester.py
 PY_RESULTS_ANALYSIS=$THESIS_PATH/experiments/main/results_basic_extraction.py
 
 # query generic parameters
-K=20
-NUM_QUERY_SAMPLES=10
+K=10
+NUM_QUERY_SAMPLES=500
 
 # JOSIE parameter
 DBNAME=nanni
@@ -17,10 +17,15 @@ DBNAME=nanni
 L=16
 NUM_PERM=256
 
-# algorithm tasks to do
+# Neo4j graph parameters
+NEO4J_USER=neo4j
+NEO4J_PASSWORD=12345678
+
+
+# tasks
 DATA_PREPRATION=1
-SAMPLE_QUERIES=1
-QUERY=1
+SAMPLE_QUERIES=0
+QUERY=0
 
 ANALYSE=0
 CLEAN=0
@@ -28,18 +33,10 @@ CLEAN=0
 # used for tasks, in order to have the same queries for all the algorithms and modes
 i=0
 
-for ALGORITHM in lshforest embedding
+for ALGORITHM in graph
 do
-    for MODE in set fasttext
+    for MODE in neo4j
     do
-        if [[ $ALGORITHM != "embedding" && $MODE == "fasttext" ]]; then
-            continue
-        fi
-        
-        if [[ $ALGORITHM == "embedding" && $MODE != "fasttext" ]]; then
-            continue
-        fi
-
         TASKS=''
 
         if [[ $DATA_PREPRATION -eq 1 ]]; then
@@ -68,7 +65,8 @@ do
                 -k $K \
                 -l $L \
                 --num-perm $NUM_PERM \
-                --small
+                --neo4j-user $NEO4J_USER \
+                --neo4j-password $NEO4J_PASSWORD
         fi
 
 
@@ -79,8 +77,7 @@ do
                 --algorithm $ALGORITHM \
                 --mode $MODE \
                 -k $K \
-                --analyse-up-to 10 \
-                --small
+                --analyse-up-to 10
         fi
 
 
@@ -89,7 +86,7 @@ do
             python $PY_TESTER \
                 --test-name $TEST_NAME \
                 --dbname $DBNAME \
-                --small
-        fi        
+                --clean
+        fi
     done
 done

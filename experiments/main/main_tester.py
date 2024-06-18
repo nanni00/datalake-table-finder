@@ -1,12 +1,10 @@
-import re
 import os
 import shutil
 import argparse
-from time import time
+import sys
 
 import pandas as pd
 
-import fasttext
 
 from tools.utils.settings import DefaultPath as defpath
 
@@ -17,15 +15,9 @@ from tools.utils.utils import (
     sample_queries
 )
 
-from tools.lshforest import (
-    _mmh3_hashfunc, 
-    get_or_create_forest, 
-    query
-)
+from tools import josie, lshforest, embeddings, neo4j_graph
 
-from tools.josiestuff.db import JosieDB
-from tools.josiestuff.functions import *
-from tools import embeddings
+
 
 
 
@@ -37,10 +29,10 @@ if __name__ == '__main__':
                         type=str, required=True)
     parser.add_argument('-a', '--algorithm',
                         required=False, default='josie',
-                        choices=['josie', 'lshforest', 'embedding'])
+                        choices=['josie', 'lshforest', 'embedding', 'graph'])
     parser.add_argument('-m', '--mode', 
                         required=False, default='set',
-                        choices=['set', 'bag', 'fasttext'],
+                        choices=['set', 'bag', 'fasttext', 'neo4j'],
                         help='the specific version of the algorithm. Note that an algorithm doesn\'t support all the available modes: for example, \
                             if "algorithm"="embedding", the only accepted mode is "fasttext"')
     parser.add_argument('-k', 
@@ -76,6 +68,12 @@ if __name__ == '__main__':
                         required=False, type=int, default=8,
                         help='number of prefix trees (see datasketch.LSHForest documentation)')
     
+    # Neo4j graph specific arguments
+    parser.add_argument('--neo4j-user', 
+                        required=False, type=str, default='neo4j')
+    parser.add_argument('--neo4j-password', 
+                        required=False, type=str, default='12345678')
+
     # other general arguments
     parser.add_argument('-u', '--user-interaction',
                         required=False, action='store_true',
@@ -103,10 +101,24 @@ if __name__ == '__main__':
     small =             args.small
     nsamples =          args.num_query_samples
     user_interaction =  args.user_interaction
-    nworkers =          min(os.cpu_count(), 64)
+    neo4j_user =        args.neo4j_user
+    neo4j_passwd =      args.neo4j_password
+    num_cpu =          min(os.cpu_count(), 64)
+
+    # check configuration
+    if (algorithm, mode) not in {
+        ('josie', 'set'),       
+        ('josie', 'bag'), 
+        ('lshforest', 'set'),       
+        ('lshforest', 'bag'),
+        ('embedding', 'fasttext'), 
+        ('graph', 'neo4j')
+        }:
+        sys.exit(0)
+
 
     # TODO set thresholds as a CLI parameter or somethig else?
-    table_thresholds = {
+    tables_thresholds = {
         'min_row':     5,
         'min_column':  2,
         'min_area':     50,
@@ -115,12 +127,9 @@ if __name__ == '__main__':
         'max_area':     999999,
     }
 
-    ALL =                   'all' in tasks
-    DATA_PREPARATION =      'data-preparation' in tasks
-    SAMPLE_QUERIES =        'sample-queries' in tasks
-    QUERY =                 'query' in tasks
-
-    any_task = bool(args.tasks)
+    DATA_PREPARATION =      'data-preparation' in tasks or 'all' in tasks
+    SAMPLE_QUERIES =        'sample-queries' in tasks or 'all' in tasks
+    QUERY =                 'query' in tasks or 'all' in tasks
 
     CLEAN =             args.clean
 
@@ -151,25 +160,23 @@ if __name__ == '__main__':
     # the MongoDB collections where data are stored
     mongoclient, collections = get_mongodb_collections(small)
 
-    forest = None
-    josiedb = None
     table_prefix = f'{test_name}_m{mode}'
 
-    # JOSIE database handler
-    if algorithm == 'josie' or CLEAN:
-        josiedb = JosieDB(user_dbname, table_prefix)
-        josiedb.open()
+    tester = None
 
-    if algorithm == 'embedding':
-        print('Loading fastText model...')
-        start = time()
-        model = fasttext.load_model(defpath.model_path.fasttext + '/cc.en.300.bin')
-        print('loaded model in ', round(time() - start, 3), 's')
+    if algorithm == 'josie':
+        tester = josie.JOSIETester(mode, small, tables_thresholds, num_cpu, user_dbname, table_prefix, db_stat_file)
+    elif algorithm == 'lshforest':
+        tester = lshforest.LSHForestTester(mode, small, tables_thresholds, num_cpu, forest_file, num_perm, l, collections)
+    elif algorithm == 'embedding':
+        tester = embeddings.EmbeddingTester(mode, small, tables_thresholds, num_cpu, defpath.model_path.fasttext + '/cc.en.300.bin', clut_file, cidx_file)
+    elif algorithm == 'graph':
+        if mode == 'neo4j':
+            tester = neo4j_graph.Neo4jTester(mode, small, tables_thresholds, num_cpu, neo4j_user, neo4j_passwd, os.environ["NEO4J_HOME"] + "/data/databases/neo4j/")
 
-        clut, cidx = None, None
 
     ############# SET UP #############
-    if any_task:
+    if DATA_PREPARATION or QUERY or SAMPLE_QUERIES:
         if os.path.exists(ROOT_TEST_DIR) and user_interaction:
             if input(f'Directory {ROOT_TEST_DIR} already exists: delete it (old data will be lost)? (yes/no) ') in ('y', 'yes'):
                 shutil.rmtree(ROOT_TEST_DIR)
@@ -179,83 +186,28 @@ if __name__ == '__main__':
                 print(f'Creating directory {directory}...')
                 os.makedirs(directory)
             
-
-    ############# DATA PREPARATION #############
-    if algorithm == 'josie' and (ALL or DATA_PREPARATION):
-        josiedb.drop_tables()
-        josiedb.create_tables()
-        start = time()
-        create_index(mode, table_thresholds, small, table_prefix)
-        runtime_metrics.append(('data_preparation', round(time() - start, 5), get_current_time()))
-        josiedb.create_inverted_list_index()
-        josiedb.create_sets_index()
         
-        # database statistics
-        append = os.path.exists(db_stat_file)
-        dbstat = pd.DataFrame(josiedb.get_statistics())
-        dbstat.to_csv(db_stat_file, index=False, mode='a' if append else 'w', header=False if append else True)
+    if DATA_PREPARATION:
+        exec_time, storage_size = tester.data_preparation()
 
-
-        def convert_to_giga(x):
-            if x.endswith('MB'):
-                return int(re.match(r'\d+', x).group()) / 1024
-            elif x.endswith('KB'):
-                return int(re.match(r'\d+', x).group()) / (1024 ** 2)
+        runtime_metrics.append(('data_preparation', exec_time), get_current_time())
 
         append = os.path.exists(storage_stat_file)
-        dbsize = pd.DataFrame([[algorithm, mode, dbstat['total_size'].apply(convert_to_giga).sum()]], columns=['algorithm', 'mode', 'size(GB)'])
+        dbsize = pd.DataFrame([[algorithm, mode, storage_size]], columns=['algorithm', 'mode', 'size(GB)'])
         dbsize.to_csv(storage_stat_file, index=False, mode='a' if append else 'w', header=False if append else True)
 
-    elif algorithm == 'lshforest' and (ALL or DATA_PREPARATION or QUERY):
-        start = time()
-        forest = get_or_create_forest(forest_file, nworkers, num_perm, l, mode, _mmh3_hashfunc, table_thresholds, *collections)
-        runtime_metrics.append(('data_preparation', round(time() - start, 5), get_current_time()))
-
-        forest_size_gb = os.path.getsize(forest_file) / (1024 ** 3)
-        
-        append = os.path.exists(storage_stat_file)
-        dbsize = pd.DataFrame([[algorithm, mode, forest_size_gb]], columns=['algorithm', 'mode', 'size(GB)'])
-        dbsize.to_csv(storage_stat_file, index=False, mode='a' if append else 'w', header=False if append else True)
-
-    elif algorithm == 'embedding' and (ALL or DATA_PREPARATION):
-        start = time()
-        clut, cidx = embeddings.data_preparation(clut_file, cidx_file, model, table_thresholds, *collections)
-        runtime_metrics.append(('data_preparation', round(time() - start, 5), get_current_time()))
-
-        clut_size_gb = os.path.getsize(clut_file) / (1024 ** 3)
-        cidx_file_gb = os.path.getsize(cidx_file) / (1024 ** 3)
-        
-        append = os.path.exists(storage_stat_file)
-        storage = pd.DataFrame([[algorithm, mode, clut_size_gb + cidx_file_gb]], columns=['algorithm', 'mode', 'size(GB)'])
-        storage.to_csv(storage_stat_file, index=False, mode='a' if append else 'w', header=False if append else True)
+            
+    if SAMPLE_QUERIES:
+        sample_queries(query_file, nsamples, tables_thresholds, *collections)
 
 
-    ############# SAMPLING TEST VALUES FOR JOSIE ##############
-    if ALL or SAMPLE_QUERIES:
-        sample_queries(query_file, nsamples, table_thresholds, *collections)
-
-
-    ################## RUNNING JOSIE ##################
-    if ALL or QUERY:
-        start = time()
+    if QUERY:
         query_ids = get_query_ids_from_query_file(query_file)
-        if algorithm == 'josie':
-            josiedb.clear_query_table()
-            josiedb.insert_data_into_query_table(query_ids)
+        exec_time = tester.query(topk_results_file, k, query_ids, results_directory=results_base_dir)
+        runtime_metrics.append(('query', exec_time, get_current_time()))
 
-            josie_test(user_dbname, table_prefix, results_base_dir, topk_results_file, k)
-        elif algorithm == 'lshforest':
-            query(topk_results_file, forest, query_ids, mode, num_perm, k, _mmh3_hashfunc, *collections)
-        elif algorithm == 'embedding':
-            if not clut or not cidx:
-                print('Loading LUT and index...')
-                clut, cidx = embeddings.load_lut_index(clut_file, cidx_file)
-            print('Querying...')
-            embeddings.query(topk_results_file, model, clut, cidx, query_ids, k, *collections)
 
-        runtime_metrics.append(('query', round(time() - start, 5), get_current_time()))
-
-    if any_task:
+    if DATA_PREPARATION or QUERY or SAMPLE_QUERIES:
         add_header = not os.path.exists(runtime_stat_file)
         with open(runtime_stat_file, 'a') as rfw:
             if add_header:
@@ -265,15 +217,9 @@ if __name__ == '__main__':
                 rfw.write(f"{t_loctime},{algorithm},{mode},{t_name},{t_time}\n")
 
     if CLEAN:
-        print('Cleaning directories and database...')
-        josiedb.drop_tables(all=True)
-        if os.path.exists(forest_file):
-            os.remove(forest_file)
-        print('Cleaning completed.')
+        tester.clean()
 
-    if josiedb:
-        josiedb.close()
-    elif mongoclient:
+    if mongoclient:
         mongoclient.close()
 
 print('All tasks have been completed.')

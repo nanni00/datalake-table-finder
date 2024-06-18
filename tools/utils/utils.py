@@ -75,6 +75,15 @@ def get_current_time():
     return time.strftime("%Y/%m/%d %H:%M:%S")
 
 
+def convert_to_giga(x):
+    if x.endswith('MB'):
+        return int(re.match(r'\d+', x).group()) / 1024
+    elif x.endswith('KB'):
+        return int(re.match(r'\d+', x).group()) / (1024 ** 2)
+
+
+
+
 def get_mongodb_collections(small=True):
     mongoclient = pymongo.MongoClient()
 
