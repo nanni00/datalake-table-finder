@@ -1,3 +1,4 @@
+from functools import reduce
 import os
 from time import time
 from collections import Counter
@@ -5,9 +6,8 @@ from collections import Counter
 import mmh3
 import pandas as pd
 from neo4j import GraphDatabase
-from pyspark.sql import SparkSession
 
-from tools.josie import AlgorithmTester
+from tools.utils.utils import AlgorithmTester, get_initial_spark_rdd
 
 
 def get_table_tokens_counter(table, numeric_columns):
@@ -26,19 +26,11 @@ class Neo4jTester(AlgorithmTester):
         
         self.user, self.password, self.neo4j_db_dir = args
 
-
     def data_preparation(self):
         start_data_prep = time()
         AUTH = (self.user, self.password)
         DATABASE = "neo4j"
         URI = f"bolt://localhost:7687"
-
-        MIN_ROW =     self.tables_thresholds['min_row']
-        MAX_ROW =     self.tables_thresholds['max_row']
-        MIN_COLUMN =  self.tables_thresholds['min_column']
-        MAX_COLUMN =  self.tables_thresholds['max_column']
-        MIN_AREA =    self.tables_thresholds['min_area']
-        MAX_AREA =    self.tables_thresholds['max_area']
 
         spark_jars_packages = [
             'org.neo4j:neo4j-connector-apache-spark_2.12:4.1.5_for_spark_3',
@@ -50,57 +42,10 @@ class Neo4jTester(AlgorithmTester):
                 session.run("CREATE INDEX table_id_range_index IF NOT EXISTS FOR (tab:Table) ON (tab.table_id)")
                 session.run("CREATE INDEX token_id_range_index IF NOT EXISTS FOR (tok:Token) ON (tok.token_id)")
 
-        builder = SparkSession.Builder()
-        spark = (
-            builder
-            .appName("Final Test with Neo4j")
-            .master(f"local[{self.num_cpu}]")
-            .config('spark.jars.packages', ','.join(spark_jars_packages))
-            .config('spark.executor.memory', '100g')
-            .config('spark.driver.memory', '10g')
-            .config('neo4j.url', URI)
-            .config('neo4j.authentication.basic.username', self.user)
-            .config('neo4j.authentication.basic.password', self.password)
-            # .config("neo4j.database", DATABASE)
-            .getOrCreate()
-        )
-
-        # adjusting logging level to error, avoiding warnings
-        spark.sparkContext.setLogLevel("ERROR")
-            
-        optitab__turl_training_set_df = spark \
-            .read \
-            .format("mongodb") \
-            .option ("uri", "mongodb://127.0.0.1:27017/") \
-            .option("database", "optitab") \
-            .option("collection", "turl_training_set" if not self.small else "turl_training_set_small") \
-            .load() \
-            .select('_id_numeric', 'content', 'numeric_columns') \
-            .filter(f"""
-                    size(content) BETWEEN {MIN_ROW} AND {MAX_ROW} 
-                    AND size(content[0]) BETWEEN {MIN_COLUMN} AND {MAX_COLUMN} 
-                    AND size(content) * size(content[0]) BETWEEN {MIN_AREA} AND {MAX_AREA}""") \
-
-        df = spark \
-            .read \
-            .format('mongodb')\
-            .option("uri", "mongodb://127.0.0.1:27017/") \
-            .option("database", "sloth") \
-            .option("collection", "latest_snapshot_tables" if not self.small else "latest_snapshot_tables_small") \
-            .load() \
-            .select('_id_numeric', 'content', 'numeric_columns') \
-            .filter(f"""
-                    size(content) BETWEEN {MIN_ROW} AND {MAX_ROW} 
-                    AND size(content[0]) BETWEEN {MIN_COLUMN} AND {MAX_COLUMN} 
-                    AND size(content) * size(content[0]) BETWEEN {MIN_AREA} AND {MAX_AREA}""") \
-            .rdd \
-            .map(list) \
-            .union(
-                optitab__turl_training_set_df.rdd.map(list)    
-            )
-        
-        optitab__turl_training_set_df.unpersist()   # free memory used by the dataframe (is this really useful?)
-
+        spark, initial_rdd = get_initial_spark_rdd(self.small, self.num_cpu, spark_jars_packages, self.tables_thresholds, 
+                        {'neo4j.authentication.basic.username': self.user,
+                         'neo4j.authentication.basic.password': self.password,
+                         'neo4j.url': URI})
 
         def prepare_tuple(t):
             # t = (_id_numeric, content, numeric_columns)
@@ -110,7 +55,7 @@ class Neo4jTester(AlgorithmTester):
 
 
         table_token_cnt = (
-            df
+            initial_rdd
             .map(
                 # (_id, _id_numeric, content, numeric_columns) -> (_id_numeric, [token1, token2, token3, ...])
                 lambda t: prepare_tuple(t)
@@ -210,7 +155,7 @@ class Neo4jTester(AlgorithmTester):
         return round(time() - start_data_prep, 5), sum(os.path.getsize(self.neo4j_db_dir + dbfile) for dbfile in os.listdir(self.neo4j_db_dir)) / (1024 ** 3)
 
 
-    def query(self, results_file, query_ids, k):
+    def query(self, results_file, query_ids, k, **kwargs):
         start = time()
         AUTH = (self.user, self.password)
         DATABASE = "neo4j"
@@ -257,5 +202,8 @@ class Neo4jTester(AlgorithmTester):
         )
         return round(time() - start, 5)
     
+
+    def clean(self):
+        print("Not implemented yet")
 
 

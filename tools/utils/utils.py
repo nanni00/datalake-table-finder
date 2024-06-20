@@ -1,3 +1,4 @@
+from abc import ABC, abstractmethod
 from collections import defaultdict
 import json
 import re
@@ -5,6 +6,9 @@ import time
 import numpy as np
 import pandas as pd
 import pymongo
+
+import pyspark.rdd
+from pyspark.sql import SparkSession
 
 from tools.sloth.sloth import sloth
 
@@ -22,14 +26,14 @@ def print_info(**dec_kwargs):
             if msg_before: 
                 print(msg_before, end=end_line)
             start = time.time()
-            results = func(*args, **kwargs)            
+            result = func(*args, **kwargs)            
             end = time.time()
 
             if 'time' in dec_kwargs: 
                 print(f'Elapsed time: {round(end - start, 3)}s')
             if msg_after:
                 print(msg_after)
-            return results
+            return result
         return wrapper
     return decorator
 
@@ -71,7 +75,7 @@ def get_int_from_(s: str):
     return [int(x) for x in re.findall(r'\d+', s)]
     
 
-def get_current_time():
+def get_local_time():
     return time.strftime("%Y/%m/%d %H:%M:%S")
 
 
@@ -109,6 +113,85 @@ def check_table_is_in_thresholds(content, table_thresholds):
     return table_thresholds['min_row'] <= len(content) <= table_thresholds['max_row'] and \
         table_thresholds['min_column'] <= len(content[0]) <= table_thresholds['max_column'] and \
         table_thresholds['min_area'] <= len(content) * len(content[0]) <= table_thresholds['max_area']
+
+
+
+
+
+class AlgorithmTester(ABC):
+    def __init__(self, mode, small, tables_thresholds, num_cpu) -> None:
+        self.mode = mode
+        self.small = small
+        self.num_cpu = num_cpu
+        self.tables_thresholds = tables_thresholds
+
+    @abstractmethod
+    def data_preparation(self) -> None:
+        pass
+    
+    @abstractmethod
+    def query(self, results_file, k, query_ids, *args) -> None:
+        pass
+
+    @abstractmethod
+    def clean(self) -> None:
+        pass
+
+
+
+
+def get_tables_thresholds_from(tables_thresholds):
+    return tables_thresholds['min_row'], tables_thresholds['max_row'], tables_thresholds['min_column'], \
+        tables_thresholds['max_column'], tables_thresholds['min_area'], tables_thresholds['max_area']
+
+
+def get_initial_spark_rdd(small, num_cpu, spark_jars_packages, tables_thresholds):
+        MIN_ROW, MAX_ROW, MIN_COLUMN, MAX_COLUMN, MIN_AREA, MAX_AREA = get_tables_thresholds_from(tables_thresholds)
+
+        # fine tune of executor/driver.memory?
+        builder = SparkSession.Builder()
+        spark = (
+            builder
+            .appName("Big Bang Testing with MongoDB")
+            .master(f"local[{num_cpu}]")
+            .config('spark.jars.packages', ','.join(spark_jars_packages))
+            .config('spark.executor.memory', '100g')
+            .config('spark.driver.memory', '10g')
+            .config('spark.local.dir', '/data4/nanni/spark')
+            .getOrCreate()
+        )
+
+        # adjusting logging level to error, avoiding warnings
+        spark.sparkContext.setLogLevel("ERROR")
+
+        db_collections = zip(['optitab', 'sloth'], 
+                             ["turl_training_set_small" if small else "turl_training_set", 
+                              "latest_snapshot_tables_small" if small else "latest_snapshot_tables"])
+
+        initial_rdd = spark.sparkContext.emptyRDD()
+
+        for database, collection_name in db_collections:
+            initial_rdd = initial_rdd.union(
+                spark 
+                .read 
+                .format("mongodb") 
+                .option ("uri", "mongodb://127.0.0.1:27017/") 
+                .option("database", database) 
+                .option("collection", collection_name) 
+                .load() 
+                .select('_id_numeric', 'content', 'numeric_columns') 
+                .filter(f"""
+                    size(content) BETWEEN {MIN_ROW} AND {MAX_ROW}
+                    AND size(content[0]) BETWEEN {MIN_COLUMN} AND {MAX_COLUMN}
+                    AND size(content) * size(content[0]) BETWEEN {MIN_AREA} AND {MAX_AREA}"""
+                )
+                .rdd
+                .map(list)
+            )
+
+        return spark, initial_rdd
+
+
 
 
 
@@ -173,29 +256,40 @@ def sample_queries(
     *collections
     ):
 
-    samples = [collection.aggregate([{"$sample": {"size": nsamples // 2}}]) for collection in collections]
+    s = set()
+    while len(s) < nsamples:
+        samples = [collection.aggregate([{"$sample": {"size": nsamples}}]) for collection in collections]
+        for p in samples:
+            for t in list(p):
+                if not check_table_is_in_thresholds(t['content'], tables_thresholds) or all(t['numeric_columns']):
+                    continue
+                s.add(t['_id_numeric'])
+                if len(s) >= nsamples:
+                    break            
+            
+        # s = [
+        #         t['_id_numeric']
+        #         for s in samples for t in list(s)
+        #         if  \
+        #         and not all(t['numeric_columns'])
+        #     ]
+        
 
-    samples = [
-        {'_id': t['_id'], '_id_numeric': t['_id_numeric'], 'numeric_columns': t['numeric_columns']} 
-        for s in samples for t in list(s)
-        if check_table_is_in_thresholds(t['content'], tables_thresholds) \
-        and not all(t['numeric_columns'])
-    ]
-
-    print(f'Sampled {len(samples)} tables')
+    samples = {
+        '_id_numeric': list(s)[:nsamples]
+    }
+    
     with open(output_query_json, 'w') as wf:
         json.dump(
             samples,
             wf,
             indent=1
         )
-    return len(samples)
+    return len(samples['_id_numeric'])
+
 
 
 def get_query_ids_from_query_file(query_file):
     with open(query_file) as fr:
-        return [t['_id_numeric'] for t in json.load(fr)]
-
-
-
+        return json.load(fr)['_id_numeric']
 

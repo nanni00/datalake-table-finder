@@ -11,11 +11,11 @@ import pandas as pd
 
 import orjson
 
-from tools.josie import AlgorithmTester
 from tools.sloth.utils import parse_table
 from tools.utils.utils import ( 
     check_table_is_in_thresholds,
     get_one_document_from_mongodb_by_key, 
+    AlgorithmTester
 )
 
 
@@ -118,4 +118,11 @@ class EmbeddingTester(AlgorithmTester):
                 results.append([query_id, []])
         pd.DataFrame(results, columns=['query_id', 'results']).to_csv(results_file, index=False)    
         return round(time() - start, 5)
+    
+    def clean(self):
+        if os.path.exists(self.cidx_file):
+            os.remove(self.cidx_file)
+        
+        if os.path.exists(self.clut_file):
+            os.remove(self.clut_file)
     

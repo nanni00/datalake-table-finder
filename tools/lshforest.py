@@ -1,35 +1,38 @@
 import os
 import pickle
 from time import time
+import multiprocessing as mp
+
 import mmh3
 import pandas as pd
-import multiprocessing as mp
+import polars as pl
+from tqdm import tqdm
 from datasketch import MinHashLSHForest, MinHash
 
-from tools.josie import AlgorithmTester
-from tools.utils.utils import _create_token_set, check_table_is_in_thresholds
-from tools.utils.utils import get_one_document_from_mongodb_by_key
-
-
-def _worker_forest_creation(inp):
-    doc, mode, num_perm, hashfunc, table_thresholds = inp
-    _id_numeric, numeric_columns, content = doc['_id_numeric'], doc['numeric_columns'], doc['content']     
-
-    if check_table_is_in_thresholds(content, table_thresholds):
-        minhash = MinHash(num_perm=num_perm, hashfunc=hashfunc)
-        token_set = _create_token_set(content, mode, numeric_columns)
-        minhash.update_batch(token_set)
-        # for token in token_set:
-        #     minhash.update(token)
-
-        return (_id_numeric, minhash)
-    return (_id_numeric, None)
+from tools.utils.utils import _create_token_set, check_table_is_in_thresholds, get_initial_spark_rdd, AlgorithmTester, get_one_document_from_mongodb_by_key
 
 
 def _mmh3_hashfunc(d):
     return mmh3.hash(d, signed=False)
 
 
+def create_table_minhash(table, mode, numeric_columns, num_perm):
+    m = MinHash(num_perm=num_perm, hashfunc=_mmh3_hashfunc)
+    token_set = _create_token_set(table, mode, numeric_columns, encode='utf-8')
+    m.update_batch(token_set)
+    return m
+
+
+def _worker(input):
+    tables_thresholds, mode, num_perm, document = input
+    _id_numeric, content, numeric_columns = document['_id_numeric'], document['content'], document['numeric_columns']
+
+    if check_table_is_in_thresholds(content, tables_thresholds):
+        token_set = _create_token_set(content, mode, numeric_columns, 'utf-8')
+        m = MinHash(num_perm, hashfunc=_mmh3_hashfunc)
+        m.update_batch(token_set)
+        return _id_numeric, m
+    return _id_numeric, None
 
 
 class LSHForestTester(AlgorithmTester):
@@ -38,7 +41,6 @@ class LSHForestTester(AlgorithmTester):
         self.forest_file, self.num_perm, self.l, self.collections = args
 
         self.forest = None
-
     
     def _forest_handler(self, task):
         if task == 'save':
@@ -49,76 +51,97 @@ class LSHForestTester(AlgorithmTester):
             with open(self.forest_file, 'rb') as freader:
                 self.forest = pickle.load(freader)
 
-    def init_pool(hashfunc):
-        hashfunc = hashfunc
 
-
-    def data_preparation(self) -> MinHashLSHForest:
+    def data_preparation(self):
         start = time()
-        if os.path.exists(self.forest_file):
-            print('Loading forest...')
-            self._forest_handler('load')
-        else:
-            print('Creating forest...')
 
-            forest = MinHashLSHForest(num_perm=self.num_perm, l=self.l)
-    
-            with mp.Pool(processes=self.num_cpu) as pool:
-                for collection in self.collections:
-                    collsize = collection.count_documents({})
+        self.forest = MinHashLSHForest(self.num_perm, self.l)
+
+        total = sum(c.count_documents({}) for c in self.collections)
+
+        with mp.Pool(processes=self.num_cpu) as pool:
+            for i, result in enumerate(pool.imap(_worker, 
+                                            (
+                                                (self.tables_thresholds, self.mode, self.num_perm, document)
+                                                for collection in self.collections
+                                                for document in collection.find({}, projection={"_id_numeric": 1, "content": 1, "numeric_columns": 1})
+                                            ), chunksize=500)):
+                if i % 10000:
+                    it_per_sec = round(i / (time() - start), 3)
+                    print(f"{round(100 * i / total, 3)}%\t\t{it_per_sec}it/s      eta:{round((total - i) / it_per_sec, 3)}", end='\r')
+                if result[1] == None:
+                    continue
+                self.forest.add(result[0], result[1])
+        print(end='\r')
+        print("Indexing forest...")
+        self.forest.index()
+
+        print("Saving forest...")
+        self._forest_handler('save')
         
-                    print(f'Starting pool working on {collection.database.name}.{collection.name}...')
-                    for i, res in enumerate(pool.imap(
-                                                _worker_forest_creation, 
-                                                (
-                                                    (doc, self.mode, self.num_perm, _mmh3_hashfunc, self.tables_thresholds) 
-                                                    for doc in collection.find({}, 
-                                                                        projection={"_id_numeric": 1, "numeric_columns": 1, "content": 1}
-                                                    )
-                                                ), 
-                                                chunksize=500)):
-                        if i % 1000 == 0:
-                            print(round(100 * i / collsize, 3), '%', end='\r')
-                        _id_numeric, minhash = res
-                        if minhash:
-                            forest.add(_id_numeric, minhash)
-                    print(f'{collection.database.name}.{collection.name} updated.')        
-                
-                print('Indexing forest...')
-                forest.index()
-            print('Saving forest...')
-            self._forest_handler('save')
-             
         return round(time() - start, 5), os.path.getsize(self.forest_file) / (1024 ** 3)
 
+
+
+    def __data_preparation(self):
+        # TODO why spark is so slow compared to the multiprocessing version? ~20min vs ~5min???
+        start = time()
+
+        spark_jars_packages = [
+            'org.mongodb.spark:mongo-spark-connector_2.12:10.3.0'
+        ]
+
+        _, initial_rdd = get_initial_spark_rdd(self.small, self.num_cpu, spark_jars_packages, self.tables_thresholds)
+
+        self.forest = MinHashLSHForest(self.num_perm, self.l)
+
+        mode = self.mode
+        num_perm = self.num_perm
+        initial_rdd = initial_rdd.map(lambda t: (t[0], create_table_minhash(t[1], mode, t[2], num_perm)))
+        total = initial_rdd.count()
+
+
+        # reducing number of partitions it seems that time goes down, but boh
+        for t in tqdm(initial_rdd.cache().toLocalIterator(prefetchPartitions=True), total=total, position=2):
+            self.forest.add(t[0], t[1])
+        
+        print("Indexing forest...")
+        self.forest.index()
+
+        print("Saving forest...")
+        self._forest_handler('save')
+        
+        return round(time() - start, 5), os.path.getsize(self.forest_file) / (1024 ** 3)
+        
 
     def query(self, results_file, k, query_ids, **kwargs):
         start = time()
         results = []
 
         if not self.forest:
+            print('Loading forest...')
             self._forest_handler('load')
 
-        for query_id in query_ids:
-            try:
-                hashvaluesq = self.forest.get_minhash_hashvalues(query_id)
-                minhash_q = MinHash(self.num_perm, hashfunc=_mmh3_hashfunc, hashvalues=hashvaluesq)
-            except KeyError:    
-                docq = get_one_document_from_mongodb_by_key('_id_numeric', query_id, *self.collections)
-                
-                numeric_columns_q, content_q = docq['numeric_columns'], docq['content']
-                token_set_q = _create_token_set(content_q, self.mode, numeric_columns_q)
+        for query_id in tqdm(query_ids):
+            docq = get_one_document_from_mongodb_by_key('_id_numeric', query_id, *self.collections)
+            
+            numeric_columns_q, content_q = docq['numeric_columns'], docq['content']
+            token_set_q = _create_token_set(content_q, self.mode, numeric_columns_q)
 
-                minhash_q = MinHash(num_perm=self.num_perm, hashfunc=_mmh3_hashfunc)
-                minhash_q.update_batch(token_set_q)
-                
-            topk_res = self.forest.query(minhash_q, k)
+            minhash_q = MinHash(num_perm=self.num_perm, hashfunc=_mmh3_hashfunc)
+            minhash_q.update_batch(token_set_q)
+            
+            start_query = time()
+            topk_res = self.forest.query(minhash_q, k + 1) # the "k+1" because often LSHForest returns the query table itself if it's already in the index
+            end_query = time()
+            
             if query_id in topk_res:
                 topk_res.remove(query_id)
-            results.append([query_id, topk_res])
+            
+            results.append([query_id, round(end_query - start_query, 3), str(topk_res[:k]), str([])])
 
         print(f'Saving results to {results_file}...')
-        pd.DataFrame(results, columns=['query_id', 'results']).to_csv(results_file, index=False)
+        pl.DataFrame(results, schema=['query_id', 'duration', 'results_id', 'results_overlap']).write_csv(results_file)
         return round(time() - start, 5)
 
     def clean(self):

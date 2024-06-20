@@ -4,7 +4,6 @@ import (
 	"database/sql"
 	"flag"
 	"fmt"
-	"log"
 	"time"
 
 	"github.com/ekzhu/josie"
@@ -36,7 +35,7 @@ func main() {
 	flag.StringVar(&pgTableReadListCostSamples, "pg-table-read-list-cost-samples", 	"n45673_mset_read_list_cost_samples", "Postgres table for samples for read list cost estimation")
 	flag.IntVar(&minListLength, "cost-min-list-size", 0, "Minimum list length for cost estimation")
 	flag.IntVar(&maxListLength, "cost-max-list-size", 20000, "Maximum list length for cost estimation")
-	flag.IntVar(&listLengthStep, "cost-list-size-step", 1000, "Step size for cost estimation")
+	flag.IntVar(&listLengthStep, "cost-list-size-step", 100, "Step size for cost estimation")
 	flag.IntVar(&samplePerStep, "cost-sample-per-size", 10, "Number of samples per each step")
 	flag.Parse()
 	db, err := sql.Open("postgres", fmt.Sprintf("host=%s port=%s database=%s sslmode=disable", pgServer, pgPort, pgDatabase))
@@ -126,9 +125,9 @@ func sampleReadListCost(db *sql.DB, pgTableLists, pgTableReadListCostSamples str
 		if err != nil {
 			panic(err)
 		}
-		if count < sampleSizePerStep {
-			log.Printf("Could not sample %d lists with length = (%d, %d]", sampleSizePerStep, l, l+step)
-		}
+		//if count < sampleSizePerStep {
+		//	log.Printf("Could not sample %d lists with length = (%d, %d]", sampleSizePerStep, l, l+step)
+		//}
 	}
 
 	// Obtain costs

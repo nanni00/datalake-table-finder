@@ -1,21 +1,21 @@
 #!/bin/bash
 
-TEST_NAME=graphtest
+TEST_NAME=main_test
 
 # python scripts
 PY_TESTER=$THESIS_PATH/experiments/main/main_tester.py
-PY_RESULTS_ANALYSIS=$THESIS_PATH/experiments/main/results_basic_extraction.py
+PY_RESULTS_ANALYSIS=$THESIS_PATH/experiments/main/extract_results.py
 
 # query generic parameters
 K=10
-NUM_QUERY_SAMPLES=500
+NUM_QUERY_SAMPLES=1000
 
 # JOSIE parameter
 DBNAME=nanni
 
 # LSHForest parameters
-L=16
 NUM_PERM=256
+L=32
 
 # Neo4j graph parameters
 NEO4J_USER=neo4j
@@ -24,18 +24,18 @@ NEO4J_PASSWORD=12345678
 
 # tasks
 DATA_PREPRATION=1
-SAMPLE_QUERIES=0
-QUERY=0
+SAMPLE_QUERIES=1
+QUERY=1
 
-ANALYSE=0
+ANALYSE=1
 CLEAN=0
 
 # used for tasks, in order to have the same queries for all the algorithms and modes
 i=0
 
-for ALGORITHM in graph
+for ALGORITHM in josie lshforest
 do
-    for MODE in neo4j
+    for MODE in set bag
     do
         TASKS=''
 
@@ -64,20 +64,7 @@ do
                 --num-query-samples $NUM_QUERY_SAMPLES \
                 -k $K \
                 -l $L \
-                --num-perm $NUM_PERM \
-                --neo4j-user $NEO4J_USER \
-                --neo4j-password $NEO4J_PASSWORD
-        fi
-
-
-        if [[ $ANALYSE -eq 1 ]]; then
-            echo "######################### ANALYSIS $ALGORITHM $MODE ##################################"
-            python $PY_RESULTS_ANALYSIS \
-                --test-name $TEST_NAME \
-                --algorithm $ALGORITHM \
-                --mode $MODE \
-                -k $K \
-                --analyse-up-to 10
+                --num-perm $NUM_PERM                 
         fi
 
 
@@ -85,8 +72,19 @@ do
             echo "######################### CLEANING $ALGORITHM $MODE ##################################"
             python $PY_TESTER \
                 --test-name $TEST_NAME \
+                --algorithm $ALGORITHM \
+                --mode $MODE \
                 --dbname $DBNAME \
                 --clean
         fi
     done
 done
+
+
+
+
+if [[ $ANALYSE -eq 1 ]]; then
+    echo "######################### ANALYSIS ##################################"
+    python $PY_RESULTS_ANALYSIS \
+        --test-name $TEST_NAME
+fi

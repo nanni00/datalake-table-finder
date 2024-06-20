@@ -1,4 +1,4 @@
-name: nanni-tesi-env
+name: nanni-env
 
 dependencies:
   - python=3.10.13
@@ -13,3 +13,6 @@ dependencies:
   - psycopg
   - jsonlines
   - pymongo
+  # - timeout_decorator
+  # - bitarray
+  # - datasketch

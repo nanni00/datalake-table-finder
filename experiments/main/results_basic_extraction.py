@@ -3,6 +3,7 @@ import re
 import argparse
 
 import pandas as pd
+import polars as pl
 
 import multiprocessing as mp
 
@@ -36,26 +37,29 @@ def _worker_result_extractor(inp):
     numeric_columns2 = doc_table2['numeric_columns']
 
     set1 = _create_token_set(table1, mode if mode != 'fasttext' else 'bag', numeric_columns1)
+    set2 = _create_token_set(table2, mode, numeric_columns2)
+
+    set1_set = set1 if mode == 'set' else _create_token_set(table1, 'set', numeric_columns2)
+    set2_set = set2 if mode == 'set' else _create_token_set(table2, 'set', numeric_columns2)
+
+    table_set_intersection_size = len(set(set1_set).intersection(set2_set))
+    table_set_union_size = len(set1_set) + len(set2_set) - table_set_intersection_size
+
     if algorithm == 'josie':
         algorithm_overlap = int(algorithm_overlap)
     elif algorithm == 'lshforest':
-        set2 = _create_token_set(table2, mode, numeric_columns2)
         algorithm_overlap = len(set(set1).intersection(set(set2)))
     elif algorithm == 'embedding':
-        set2 = _create_token_set(table2, 'bag', numeric_columns2)
         algorithm_overlap = len(set(set1).intersection(set(set2)))
     
-        
+
     query_size = len(set1)
     sloth_overlap = apply_sloth(table1, table2, numeric_columns1, numeric_columns2)
+    
     difference_overlap = algorithm_overlap - sloth_overlap
+    algorithm_overlap_norm = algorithm_overlap / (sloth_overlap + 1)
 
-    max_table_overlap_size = len(table1) * (len(table1[0]) - sum(numeric_columns1))
-    try:    
-        difference_overlap_norm = difference_overlap / max_table_overlap_size
-    except ZeroDivisionError:
-        return query_id, result_id, algorithm, mode, -1, -1, rank, algorithm_overlap, sloth_overlap, difference_overlap, difference_overlap_norm
-    return query_id, result_id, algorithm, mode, query_size, max_table_overlap_size, rank, algorithm_overlap, sloth_overlap, difference_overlap, difference_overlap_norm
+    return query_id, result_id, algorithm, mode, table_set_intersection_size, table_set_union_size, query_size, rank, algorithm_overlap, sloth_overlap, difference_overlap, algorithm_overlap_norm
 
 
 
@@ -128,15 +132,13 @@ if __name__ == '__main__':
         'algorithm',
         'mode',
         'query_size',
-        'max_table_overlap_size',
         'rank', 
         'algorithm_overlap', 
         'sloth_overlap', 
         'difference_overlap',
-        'difference_overlap_norm'
         ]
     
-    pd.DataFrame(res, columns=columns) \
+    pl.DataFrame(res, columns=columns) \
         .convert_dtypes() \
         .to_csv(extracted_results_file, index=False)
 

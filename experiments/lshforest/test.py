@@ -1,11 +1,14 @@
 from datasketch import MinHashLSHForest, MinHash
 
 
-with open('experiments/lshforest/mining_massive_datasets_rows.txt') as freader:
+with open('/data4/nanni/tesi-magistrale/experiments/lshforest/mining_massive_datasets_rows.txt') as freader:
     data = [line.split() for line in freader.readlines()]
 
 
-num_perm = 256
+num_perm = 32
+l = 4
+
+
 def _create_minhash(d):
     m = MinHash(num_perm)
     m.update_batch([w.encode('utf-8') for w in d])
@@ -14,7 +17,7 @@ def _create_minhash(d):
 minhashes = [(i, _create_minhash(d)) for i, d in enumerate(data, start=1)]
 
 # Create a MinHash LSH Forest with the same num_perm parameter
-forest = MinHashLSHForest(num_perm=num_perm, l=16)
+forest = MinHashLSHForest(num_perm=num_perm, l=l)
 
 for i, m in minhashes:
     forest.add(i, m)
