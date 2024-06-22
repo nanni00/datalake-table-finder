@@ -5,6 +5,7 @@ from time import time
 
 import mmh3
 import pandas as pd
+import polars as pl
 import numpy as np
 
 import psycopg.rows
@@ -40,7 +41,7 @@ class JosieDB:
     def is_open(self):
         return not self._dbconn._closed
 
-    @print_info(msg_before='Closing connection...')
+    @print_info(msg_before='Closing PostgreSQL database connection...')
     def close(self):
         self._dbconn.close()
 
@@ -54,7 +55,7 @@ class JosieDB:
         return inner
 
     @_commit_decorator
-    @print_info(msg_before='Dropping tables...')
+    @print_info(msg_before='Dropping PostgreSQL database tables...')
     def drop_tables(self):    
         self._dbconn.execute(
             f"""
@@ -68,7 +69,7 @@ class JosieDB:
         )
 
     @_commit_decorator
-    @print_info(msg_before='Creating database tables...')
+    @print_info(msg_before='Creating PostgreSQL database tables...')
     def create_tables(self):
         self._dbconn.execute(
             f"""              
@@ -98,7 +99,7 @@ class JosieDB:
         )
 
     @_commit_decorator
-    @print_info(msg_before='Clearing query table...')
+    @print_info(msg_before='Clearing PostgreSQL query table...')
     def clear_query_table(self):
         self._dbconn.execute(
             f"""
@@ -107,7 +108,7 @@ class JosieDB:
         )
             
     @_commit_decorator
-    @print_info(msg_before='Inserting queries...')
+    @print_info(msg_before='Inserting queries into PostgreSQL table...')
     def insert_data_into_query_table(self, table_ids:list[int]):
         self._dbconn.execute(
             f"""
@@ -166,7 +167,7 @@ class JOSIETester(AlgorithmTester):
         print("Status PostgreSQL connection: ", self.josiedb.is_open())
 
 
-    @print_info(msg_before='Creating integer sets and inverted index...', msg_after='Completed.')
+    @print_info(msg_before='Creating PostegreSQL integer sets and inverted index tables...', msg_after='Completed.')
     def data_preparation(self):
 
         start = time()
@@ -187,7 +188,7 @@ class JOSIETester(AlgorithmTester):
             'org.mongodb.spark:mongo-spark-connector_2.12:10.3.0'
         ]
         
-        spark, initial_rdd = get_initial_spark_rdd(self.small, self.num_cpu, spark_jars_packages, self.tables_thresholds)
+        spark, initial_rdd = get_initial_spark_rdd(self.small, self.num_cpu, self.tables_thresholds, spark_jars_packages)
 
         mode = self.mode
 
@@ -376,7 +377,9 @@ class JOSIETester(AlgorithmTester):
     def query(self, results_file, k, query_ids, **kwargs):
         start_query = time()
         results_directory = kwargs['results_directory']
-        
+        sample_costs = kwargs['sample_costs']
+        token_table_on_memory = kwargs['token_table_on_memory']
+
         self.josiedb.clear_query_table()
         self.josiedb.insert_data_into_query_table(query_ids)
         self.josiedb.close()
@@ -385,21 +388,25 @@ class JOSIETester(AlgorithmTester):
         josie_cmd_dir = f'{GOPATH}/src/github.com/ekzhu/josie/cmd'
         os.chdir(josie_cmd_dir)
 
-        os.system(f'go run {josie_cmd_dir}/sample_costs/main.go \
-                    --pg-database={self.dbname} \
-                    --test_tag={self.tables_prefix} \
-                    --pg-table-queries={self.tables_prefix}_queries')
+        if sample_costs:
+            print('Sampling costs...')
+            os.system(f'go run {josie_cmd_dir}/sample_costs/main.go \
+                        --pg-database={self.dbname} \
+                        --test_tag={self.tables_prefix} \
+                        --pg-table-queries={self.tables_prefix}_queries')
 
+        print('Running top-K...')
+        x = 'true' if token_table_on_memory else 'false'
         os.system(f'go run {josie_cmd_dir}/topk/main.go \
                     --pg-database={self.dbname} \
                     --test_tag={self.tables_prefix} \
                     --outputDir={results_directory} \
                     --resultsFile={results_file} \
+                    --useMemTokenTable={x} \
                     --k={k}')
 
         # preparing output for next analyses
 
-        import polars as pl
 
         results_df = pl.read_csv(results_file).select(['query_id', 'duration', 'results'])
         results_df

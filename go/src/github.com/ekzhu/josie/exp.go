@@ -219,7 +219,7 @@ func NanniExperiments(db *sql.DB, k_value int, test_tag string, outputDir string
 	k := []int {k_value}
 
 	resetCostFunctionParameters(db, readListCostSampleTable, readSetCostSampleTable)
-	NanniRunExperiments(db, listTable, setTable, queryTable, k, outputDir, resultsFile, cpuProfile, true, true)
+	NanniRunExperiments(db, listTable, setTable, queryTable, k, outputDir, resultsFile, cpuProfile, useMemTokenTable, true)
 }
 
 func NanniRunExperiments(db *sql.DB, listTable string, setTable string, queryTable string, ks []int, outputDir string, resultsFile string, cpuProfile bool, useMemTokenTable bool, queryIgnoreSelf bool) {

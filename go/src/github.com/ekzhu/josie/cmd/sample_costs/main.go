@@ -34,7 +34,7 @@ func main() {
 	flag.StringVar(&pgTableReadSetCostSamples, "pg-table-read-set-cost-samples", 	"n45673_mset_read_set_cost_samples", "Postgres table for samples for read set cost estimation")
 	flag.StringVar(&pgTableReadListCostSamples, "pg-table-read-list-cost-samples", 	"n45673_mset_read_list_cost_samples", "Postgres table for samples for read list cost estimation")
 	flag.IntVar(&minListLength, "cost-min-list-size", 0, "Minimum list length for cost estimation")
-	flag.IntVar(&maxListLength, "cost-max-list-size", 20000, "Maximum list length for cost estimation")
+	flag.IntVar(&maxListLength, "cost-max-list-size", 5000, "Maximum list length for cost estimation")
 	flag.IntVar(&listLengthStep, "cost-list-size-step", 100, "Step size for cost estimation")
 	flag.IntVar(&samplePerStep, "cost-sample-per-size", 10, "Number of samples per each step")
 	flag.Parse()

@@ -4,6 +4,7 @@ import shutil
 import argparse
 
 import pandas as pd
+from numerize_denumerize.numerize import numerize
 
 from tools.utils.settings import DefaultPath as defpath
 from tools.utils.utils import (
@@ -13,12 +14,11 @@ from tools.utils.utils import (
     sample_queries
 )
 
-from tools import josie, lshforest #, embeddings #, neo4j_graph
+from tools import josie, lshforest #, neo4j_graph, embeddings
 
 
 
 if __name__ == '__main__':
-    # TODO ok argparse and CLI, maybe better a file .py with variables and import them? 
     parser = argparse.ArgumentParser()
     parser.add_argument('--test-name', 
                         type=str, required=True)
@@ -50,6 +50,10 @@ if __name__ == '__main__':
     parser.add_argument('-d', '--dbname', 
                         required=False, default='user',
                         help='the PostgreSQL database where will be uploaded the data used by JOSIE. It must be already running on the machine')
+    parser.add_argument('--sample-costs',
+                        required=False, action='store_true')
+    parser.add_argument('--token-table-on-memory',
+                        required=False, action='store_true')
 
     # LSH Forest specific arguments
     parser.add_argument('--forest-file', 
@@ -90,15 +94,23 @@ if __name__ == '__main__':
     mode =              args.mode
     tasks =             args.tasks if args.tasks else []
     k =                 args.k
+
+    # JOSIE
     user_dbname =       args.dbname
+    sample_costs =      args.sample_costs
+    toktable_on_mem =  args.token_table_on_memory
+
+    # LSHForest
     num_perm =          args.num_perm
     l =                 args.l
+    
     small =             args.small
     nsamples =          args.num_query_samples
     user_interaction =  args.user_interaction
     neo4j_user =        args.neo4j_user
     neo4j_passwd =      args.neo4j_password
     num_cpu =           min(os.cpu_count(), 64)
+
 
     # check configuration
     if (algorithm, mode) not in {
@@ -111,10 +123,11 @@ if __name__ == '__main__':
         }:
         sys.exit(0)
 
+    # filtering only those tables that have very few cells (<10)
     tables_thresholds = {
         'min_row':      5,
         'min_column':   2,
-        'min_area':     50,
+        'min_area':     0,
         'max_row':      999999,
         'max_column':   999999,
         'max_area':     999999,
@@ -127,8 +140,8 @@ if __name__ == '__main__':
     CLEAN =             args.clean
 
     # output files and directories
-    ROOT_TEST_DIR =             defpath.data_path.base + f'/josie-tests/{test_name}'
-    query_file =                ROOT_TEST_DIR + '/query.json' if not args.query_file else args.query_file
+    ROOT_TEST_DIR =             defpath.data_path.tests + f'/{test_name}'
+    query_file =                ROOT_TEST_DIR + f'/query_{numerize(nsamples, asint=True)}.json' if not args.query_file else args.query_file
 
     forest_dir =                ROOT_TEST_DIR + f'/lshforest' 
     forest_file =               forest_dir + f'/forest_m{mode}.json' if not args.forest_file else args.forest_file
@@ -140,7 +153,7 @@ if __name__ == '__main__':
     # results stuff
     results_base_dir =          ROOT_TEST_DIR + '/results/base'
     results_extr_dir =          ROOT_TEST_DIR + '/results/extracted'
-    topk_results_file =         results_base_dir + f'/a{algorithm}_m{mode}_k{k}.csv'
+    topk_results_file =         results_base_dir + f'/a{algorithm}_m{mode}_k{k}_q{numerize(nsamples, asint=True)}.csv'
 
     # statistics stuff
     statistics_dir =            ROOT_TEST_DIR  + '/statistics'
@@ -156,6 +169,7 @@ if __name__ == '__main__':
 
     tester = None
 
+    # selecting the right tester accordingly to the specified algorithm and mode
     if algorithm == 'josie':
         tester = josie.JOSIETester(mode, small, tables_thresholds, num_cpu, user_dbname, table_prefix, db_stat_file)
     elif algorithm == 'lshforest':
@@ -164,7 +178,7 @@ if __name__ == '__main__':
     #     tester = embeddings.EmbeddingTester(mode, small, tables_thresholds, num_cpu, defpath.model_path.fasttext + '/cc.en.300.bin', clut_file, cidx_file)
     # elif algorithm == 'graph':
     #     if mode == 'neo4j':
-    #         tester = neo4j_graph.Neo4jTester(mode, small, tables_thresholds, num_cpu, neo4j_user, neo4j_passwd, os.environ["NEO4J_HOME"] + "/data/databases/neo4j/")
+    #         tester = neo4j_graph.Neo4jTester(mode, small, tables_thresholds, num_cpu, neo4j_user, neo4j_passwd, os.environ["NEO4J_HOME"] + "/data/databases/neo4j/", collections)
 
 
     if DATA_PREPARATION or QUERY or SAMPLE_QUERIES:
@@ -195,8 +209,8 @@ if __name__ == '__main__':
 
     if QUERY:
         query_ids = get_query_ids_from_query_file(query_file)
-        exec_time = tester.query(topk_results_file, k, query_ids, results_directory=results_base_dir)
-        runtime_metrics.append(('query', exec_time, get_local_time()))
+        exec_time = tester.query(topk_results_file, k, query_ids, results_directory=results_base_dir, sample_costs=sample_costs, token_table_on_memory=toktable_on_mem)
+        runtime_metrics.append((f'query_{numerize(len(query_ids), asint=True)}', exec_time, get_local_time()))
 
 
     if DATA_PREPARATION or QUERY or SAMPLE_QUERIES:

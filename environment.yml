@@ -13,6 +13,10 @@ dependencies:
   - psycopg
   - jsonlines
   - pymongo
-  # - timeout_decorator
-  # - bitarray
-  # - datasketch
+  -pip:
+    - timeout_decorator
+    - bitarray
+    - datasketch
+    - fasttext
+    - compress-fasttext
+    - faiss

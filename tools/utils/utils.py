@@ -7,7 +7,7 @@ import numpy as np
 import pandas as pd
 import pymongo
 
-import pyspark.rdd
+import pyspark
 from pyspark.sql import SparkSession
 
 from tools.sloth.sloth import sloth
@@ -141,11 +141,18 @@ class AlgorithmTester(ABC):
 
 
 def get_tables_thresholds_from(tables_thresholds):
-    return tables_thresholds['min_row'], tables_thresholds['max_row'], tables_thresholds['min_column'], \
-        tables_thresholds['max_column'], tables_thresholds['min_area'], tables_thresholds['max_area']
+    return (
+        0 if 'min_row' not in tables_thresholds else tables_thresholds['min_row'], 
+        999999 if 'max_row' not in tables_thresholds else tables_thresholds['max_row'], 
+        0 if 'min_column' not in tables_thresholds else tables_thresholds['min_column'],
+        999999 if 'max_column' not in tables_thresholds else tables_thresholds['max_column'], 
+        0 if 'min_area' not in tables_thresholds else tables_thresholds['min_area'], 
+        999999 if 'max_area' not in tables_thresholds else tables_thresholds['max_area']
+    )
 
 
-def get_initial_spark_rdd(small, num_cpu, spark_jars_packages, tables_thresholds):
+def get_initial_spark_rdd(small, num_cpu, tables_thresholds, spark_jars_packages=['org.mongodb.spark:mongo-spark-connector_2.12:10.3.0']) \
+    -> tuple[SparkSession, pyspark.rdd.RDD]:
         MIN_ROW, MAX_ROW, MIN_COLUMN, MAX_COLUMN, MIN_AREA, MAX_AREA = get_tables_thresholds_from(tables_thresholds)
 
         # fine tune of executor/driver.memory?
@@ -266,14 +273,6 @@ def sample_queries(
                 s.add(t['_id_numeric'])
                 if len(s) >= nsamples:
                     break            
-            
-        # s = [
-        #         t['_id_numeric']
-        #         for s in samples for t in list(s)
-        #         if  \
-        #         and not all(t['numeric_columns'])
-        #     ]
-        
 
     samples = {
         '_id_numeric': list(s)[:nsamples]

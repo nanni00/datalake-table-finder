@@ -6,7 +6,7 @@ root_project_path = os.environ['THESIS_PATH']
 
 class _DataPath:
     base =                  root_project_path + '/data'
-    josie_tests =           root_project_path + '/data/josie-tests'
+    tests =                 root_project_path + '/data/tests'
 
 
 class _ModelPath:

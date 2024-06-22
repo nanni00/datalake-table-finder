@@ -27,7 +27,7 @@ def _worker(input):
     tables_thresholds, mode, num_perm, document = input
     _id_numeric, content, numeric_columns = document['_id_numeric'], document['content'], document['numeric_columns']
 
-    if check_table_is_in_thresholds(content, tables_thresholds):
+    if check_table_is_in_thresholds(content, tables_thresholds) and not all(numeric_columns):
         token_set = _create_token_set(content, mode, numeric_columns, 'utf-8')
         m = MinHash(num_perm, hashfunc=_mmh3_hashfunc)
         m.update_batch(token_set)
@@ -84,14 +84,14 @@ class LSHForestTester(AlgorithmTester):
 
 
     def __data_preparation(self):
-        # TODO why spark is so slow compared to the multiprocessing version? ~20min vs ~5min???
+        # TODO why is spark so slow compared to the multiprocessing version? ~20min vs ~5min???
         start = time()
 
         spark_jars_packages = [
             'org.mongodb.spark:mongo-spark-connector_2.12:10.3.0'
         ]
 
-        _, initial_rdd = get_initial_spark_rdd(self.small, self.num_cpu, spark_jars_packages, self.tables_thresholds)
+        _, initial_rdd = get_initial_spark_rdd(self.small, self.num_cpu, self.tables_thresholds, spark_jars_packages)
 
         self.forest = MinHashLSHForest(self.num_perm, self.l)
 
@@ -123,14 +123,18 @@ class LSHForestTester(AlgorithmTester):
             self._forest_handler('load')
 
         for query_id in tqdm(query_ids):
-            docq = get_one_document_from_mongodb_by_key('_id_numeric', query_id, *self.collections)
-            
-            numeric_columns_q, content_q = docq['numeric_columns'], docq['content']
-            token_set_q = _create_token_set(content_q, self.mode, numeric_columns_q)
+            try:
+                hashvalues_q = self.forest.get_minhash_hashvalues(query_id)
+                minhash_q = MinHash(num_perm=self.num_perm, hashfunc=_mmh3_hashfunc, hashvalues=hashvalues_q)
+            except KeyError:
+                docq = get_one_document_from_mongodb_by_key('_id_numeric', query_id, *self.collections)
+                
+                numeric_columns_q, content_q = docq['numeric_columns'], docq['content']
+                token_set_q = _create_token_set(content_q, self.mode, numeric_columns_q)
 
-            minhash_q = MinHash(num_perm=self.num_perm, hashfunc=_mmh3_hashfunc)
-            minhash_q.update_batch(token_set_q)
-            
+                minhash_q = MinHash(num_perm=self.num_perm, hashfunc=_mmh3_hashfunc)
+                minhash_q.update_batch(token_set_q)
+                
             start_query = time()
             topk_res = self.forest.query(minhash_q, k + 1) # the "k+1" because often LSHForest returns the query table itself if it's already in the index
             end_query = time()

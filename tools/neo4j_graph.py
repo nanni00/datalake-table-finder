@@ -1,4 +1,3 @@
-from functools import reduce
 import os
 from time import time
 from collections import Counter
@@ -7,7 +6,7 @@ import mmh3
 import pandas as pd
 from neo4j import GraphDatabase
 
-from tools.utils.utils import AlgorithmTester, get_initial_spark_rdd
+from tools.utils.utils import AlgorithmTester, get_initial_spark_rdd, get_local_time
 
 
 def get_table_tokens_counter(table, numeric_columns):
@@ -24,7 +23,7 @@ class Neo4jTester(AlgorithmTester):
     def __init__(self, mode, small, tables_thresholds, num_cpu, *args) -> None:
         super().__init__(mode, small, tables_thresholds, num_cpu)
         
-        self.user, self.password, self.neo4j_db_dir = args
+        self.user, self.password, self.neo4j_db_dir, self.collections = args
 
     def data_preparation(self):
         start_data_prep = time()
@@ -39,20 +38,20 @@ class Neo4jTester(AlgorithmTester):
 
         with GraphDatabase.driver(uri=URI, auth=AUTH) as driver:
             with driver.session(database=DATABASE) as session:
-                session.run("CREATE INDEX table_id_range_index IF NOT EXISTS FOR (tab:Table) ON (tab.table_id)")
-                session.run("CREATE INDEX token_id_range_index IF NOT EXISTS FOR (tok:Token) ON (tok.token_id)")
+                session.run("CREATE CONSTRAINT tab_id_constraint IF NOT EXISTS FOR (tab:Table) REQUIRE tab.table_id IS KEY") # KEY only with Enterprise edition
+                session.run("CREATE CONSTRAINT tab_id_constraint IF NOT EXISTS FOR (tok:Token) REQUIRE tok.token_id IS KEY") # KEY only with Enterprise edition
 
-        spark, initial_rdd = get_initial_spark_rdd(self.small, self.num_cpu, spark_jars_packages, self.tables_thresholds, 
-                        {'neo4j.authentication.basic.username': self.user,
-                         'neo4j.authentication.basic.password': self.password,
-                         'neo4j.url': URI})
+        spark, initial_rdd = get_initial_spark_rdd(self.small, self.num_cpu, self.tables_thresholds, spark_jars_packages)
+                         
+        spark.conf.set('neo4j.authentication.basic.username', self.user)
+        spark.conf.set('neo4j.authentication.basic.password', self.password)
+        spark.conf.set('neo4j.url', URI)
 
         def prepare_tuple(t):
             # t = (_id_numeric, content, numeric_columns)
             _id_numeric, content, numeric_columns = t
             token_cnt = get_table_tokens_counter(content, numeric_columns)
             return _id_numeric, [(token, cnt) for token, cnt in token_cnt.items()]
-
 
         table_token_cnt = (
             initial_rdd
@@ -69,9 +68,9 @@ class Neo4jTester(AlgorithmTester):
                         ]
                 )
 
-        # drop those tokens that have just one link to a table, since they won't give any
-        # information about possible overlap (obv in future updates of the graph this
-        # may be a relevant information loss)
+                # drop those tokens that have just one link to a table, since they won't give any
+                # information about possible overlap (obv in future updates of the graph this
+                # may be a relevant information loss)
                 # .groupBy(lambda x: x[1])
                 # .filter(lambda x: len(x[1]) > 1)
                 # .flatMap(
@@ -87,7 +86,7 @@ class Neo4jTester(AlgorithmTester):
         # pprint(table_token_cnt.head(n=5))
         batch_size = 100000
         
-        print('saving tables...')
+        print(get_local_time(), ' Saving tables...')
         start = time()
         (
             table_token_cnt 
@@ -101,9 +100,9 @@ class Neo4jTester(AlgorithmTester):
             .option("node.keys", "table_id")
             .save()
         )
-        print(time() - start)
+        print(get_local_time(), 'Completed. ', round(time() - start, 3))
 
-        print('saving tokens...')
+        print(get_local_time(), ' Saving tokens...')
         start = time()
         (
             table_token_cnt 
@@ -117,7 +116,7 @@ class Neo4jTester(AlgorithmTester):
             .option("node.keys", "token_id")
             .save()
         )
-        print(time() - start)
+        print(get_local_time(), 'Completed. ', round(time() - start, 3))
 
         # to avoid deadlocks (but this results into a very long, long time consuming task with zero parallelism...)
         # see https://neo4j.com/docs/spark/current/write/relationship/
@@ -149,8 +148,7 @@ class Neo4jTester(AlgorithmTester):
                 .option("relationship.properties", "token_count")
                 .save()
         )
-
-        print(f"Completed in {round(time() - start, 3)}s")
+        print(get_local_time(), 'Completed. ', round(time() - start, 3))
 
         return round(time() - start_data_prep, 5), sum(os.path.getsize(self.neo4j_db_dir + dbfile) for dbfile in os.listdir(self.neo4j_db_dir)) / (1024 ** 3)
 
@@ -162,7 +160,6 @@ class Neo4jTester(AlgorithmTester):
         URI = f"bolt://localhost:7687"
             
         query = """
-            CYPHER runtime = parallel
             UNWIND $query_ids AS _query_id
             CALL {
                 WITH _query_id
