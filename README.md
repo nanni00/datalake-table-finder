@@ -44,8 +44,7 @@ I risultati iniziali vengono raccolti nella cartella data/tests/\<test-name\>/re
 
 Nel notebook analysis.ipynb ci sono i passaggi per fare alcune operazioni, come il calcolo della precision@p e del ndcg@p, oltre che per valutare quanto ci impiegano i vari metodi come query time per singola query.
 
-
-Tips: per JOSIE, se è già stato
+Tips: per JOSIE, se è già stato fatto il sampling dei costi, questa è un'operazione che si può evitare nelle ricerce successive, a meno che non ci siano modifiche ai dati. Se necessario, aggiungere "--sample-cost" chiamando il main_tester.py. Inoltre, si può fare la ricerca senza ricreare una token table in memoria, ma lavorando direttamente sul database. Se si vuole caricare roba in memoria, aggiungere --token-table-on-memory sempre nella chiamata allo script main_tester.py.
 
 
 
