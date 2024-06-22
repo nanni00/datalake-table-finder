@@ -35,6 +35,9 @@ CLEAN=0
 # used for tasks, in order to have the same queries for all the algorithms and modes
 i=0
 
+# La prima volta che si fanno i test con JOSIE serve aggiungere il parametro --sample-cost, altrimenti non ci sono 
+# le tabelle di appoggio
+
 for ALGORITHM in josie lshforest
 do
     for MODE in set bag
