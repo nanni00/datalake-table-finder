@@ -32,8 +32,8 @@ SAMPLE_QUERIES=0
 QUERY=0
 
 # query sizes in term of number of queries
-QUERY_SIZES="1000" 
-# QUERY_SIZES="1000 10000 100000"
+# QUERY_SIZES="1000" 
+QUERY_SIZES="1000 10000 100000"
 
 # extract more information from initial results (like SLOTH overlap for each table pair)
 EXTRACT=0
@@ -43,9 +43,6 @@ ANALYSE=1
 
 # remove database tables and big files
 CLEAN=0
-
-# La prima volta che si fanno i test con JOSIE serve aggiungere il parametro --sample-cost, altrimenti non ci sono 
-# le tabelle di appoggio
 
 for ALGORITHM in $ALGORITHMS
 do

@@ -38,9 +38,9 @@ python detect_numeric_columns.py --task set --mode naive
 
 anche qui ci sono alcune opzioni accessibili (e.g. nella modalità spacy le colonne vengono selezionate con un modo un po' più fine, ma forse non è così necessario e inoltre è computazionalmente più pesante). Anche questa azione è reversibile (--task unset).
 
-Per eseguire i test c'è lo script experiments/main/test_runner.sh, che può essere configurato in vari modi.
+Per eseguire i test c'è lo script experiments/main/test_runner.sh, che può essere configurato in vari modi. Principalmente vanno specificati il nome del test e le operazioni effettuare (data preparation, query...). 
 
-I risultati iniziali vengono raccolti nella cartella data/tests/\<test-name\>/results/base; una volta che questi vengono analizzati (cioè viene calcolato l'overlap reale con SLOTH e si raccolgono altre informazioni) i risultati finali vengono portati nel file data/tests/\<test-name\>/results/extracted. Per eseguire le analisi c'è il parametro ANALYSE nello script test_runner.sh.
+In caso di operazione di query, i risultati iniziali vengono raccolti nella cartella data/tests/\<test-name\>/results/base; una volta che questi vengono analizzati (cioè viene calcolato l'overlap reale con SLOTH e si raccolgono altre informazioni, parametro EXTRACT in test_runner.sh) i risultati finali vengono portati nel file data/tests/\<test-name\>/results/extracted. Per eseguire le analisi finali che danno le informazioni effettive c'è il parametro ANALYSE nello script test_runner.sh, e i relativi risultati sono raccolti nella cartella data/tests/\<test-name\>/results/analyses/\<query-sample-size\>, dove \<query-sample-size\> è la dimensione del query set specificata nella configurazione.
 
 Nel notebook analysis.ipynb ci sono i passaggi per fare alcune operazioni, come il calcolo della precision@p e del ndcg@p, oltre che per valutare quanto ci impiegano i vari metodi come query time per singola query.
 
