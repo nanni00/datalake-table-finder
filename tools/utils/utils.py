@@ -204,6 +204,9 @@ def get_initial_spark_rdd(small, num_cpu, tables_thresholds, spark_jars_packages
 
 _TOKEN_TAG_SEPARATOR = '@#'
 
+def prepare_token(token):
+    return str(token).replace('|', ' ').replace('\n', ' ')
+
 
 def _create_token_set(table, mode, numeric_columns, encode=None):
     """ Create the token set for the given table 
@@ -213,8 +216,6 @@ def _create_token_set(table, mode, numeric_columns, encode=None):
                             ith column is numeric and its elements are skipped while creating the token set
     :param encode: if set, tokens will be encoded as specified (e.g. 'utf-8')
     """
-    def prepare_token(token):
-        return str(token).replace('|', ' ').replace('\n', ' ')
 
     if mode == 'set':
         tokens = list({prepare_token(token) for row in table for icol, token in enumerate(row) 
@@ -235,11 +236,12 @@ def _create_token_set(table, mode, numeric_columns, encode=None):
 
 
 
-def apply_sloth(table1, table2, numeric_columns1, numeric_columns2):
+def apply_sloth(table1, table2, numeric_columns1, numeric_columns2, verbose=False):
     num_null = 0
 
     def format_value_for_excluding_nan(t):
-        nonlocal num_null 
+        nonlocal num_null
+        t = prepare_token(t)
         if not t or pd.isna(t):
             num_null += 1
             return f'{t}@{num_null}'
@@ -249,7 +251,7 @@ def apply_sloth(table1, table2, numeric_columns1, numeric_columns2):
     table2 = [[format_value_for_excluding_nan(row[i]) for row in table2] for i in range(len(table2[0])) if numeric_columns2[i] == 0]
 
     metrics = []
-    _, metrics = sloth(table1, table2, verbose=False, metrics=metrics)
+    _, metrics = sloth(table1, table2, metrics=metrics, verbose=verbose)
     largest_ov_sloth = metrics[-2]
     return largest_ov_sloth
 

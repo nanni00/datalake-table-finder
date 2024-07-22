@@ -47,9 +47,7 @@ class JosieDB:
 
     def _commit_decorator(f):
         def inner(self, *args, **kwargs):
-            # self._dbcur = self._dbconn.cursor(row_factory=psycopg.rows.dict_row)
             res = f(self, *args, **kwargs)
-            # self._dbcur.close()
             self._dbconn.commit()
             return res
         return inner
@@ -152,6 +150,18 @@ class JosieDB:
             """
         with self._dbconn.cursor(row_factory=psycopg.rows.dict_row) as cur:
             return cur.execute(q).fetchall()
+
+    def cost_tables_exist(self):
+        q = f"""
+            SELECT EXISTS (
+               SELECT FROM information_schema.tables 
+               WHERE table_name   = '{self._READ_LIST_COST_SAMPLES_TABLE_NAME}'
+               OR table_name = '{self._READ_SET_COST_SAMPLES_TABLE_NAME}'
+            );
+        """
+
+        with self._dbconn.cursor(row_factory=psycopg.rows.dict_row) as cur:
+            return cur.execute(q).fetchall()[0]['exists'] == True
 
 
 
@@ -375,26 +385,31 @@ class JOSIETester(AlgorithmTester):
 
     @print_info(msg_before='Starting JOSIE tests...', msg_after='Completed.')
     def query(self, results_file, k, query_ids, **kwargs):
-        start_query = time()
         results_directory = kwargs['results_directory']
-        sample_costs = kwargs['sample_costs']
         token_table_on_memory = kwargs['token_table_on_memory']
 
         self.josiedb.clear_query_table()
         self.josiedb.insert_data_into_query_table(query_ids)
-        self.josiedb.close()
 
         GOPATH = os.environ['GOPATH']
         josie_cmd_dir = f'{GOPATH}/src/github.com/ekzhu/josie/cmd'
         os.chdir(josie_cmd_dir)
 
-        if sample_costs:
+        # if cost sampling tables already exist we assume they are correct and won't recreate them
+        sample_costs_tables_exist = self.josiedb.cost_tables_exist()
+        print(f'Sample costs: {sample_costs_tables_exist}')
+        self.josiedb.close()
+
+        if not sample_costs_tables_exist:
             print('Sampling costs...')
             os.system(f'go run {josie_cmd_dir}/sample_costs/main.go \
                         --pg-database={self.dbname} \
                         --test_tag={self.tables_prefix} \
                         --pg-table-queries={self.tables_prefix}_queries')
 
+        # we are not considering the query preparation steps, since in some cases this will 
+        # include also the cost sampling phase and in other cases it won't
+        start_query = time()
         print('Running top-K...')
         x = 'true' if token_table_on_memory else 'false'
         os.system(f'go run {josie_cmd_dir}/topk/main.go \
@@ -406,7 +421,6 @@ class JOSIETester(AlgorithmTester):
                     --k={k}')
 
         # preparing output for next analyses
-
 
         results_df = pl.read_csv(results_file).select(['query_id', 'duration', 'results'])
         results_df
@@ -434,5 +448,5 @@ class JOSIETester(AlgorithmTester):
     def clean(self):
         if not self.josiedb.is_open():
             self.josiedb.open()
-        self.josiedb.drop_tables(all=True)
+        self.josiedb.drop_tables()
         self.josiedb.close()

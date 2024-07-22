@@ -4,7 +4,8 @@ TEST_NAME=main_test
 
 # python scripts
 PY_TESTER=$THESIS_PATH/experiments/main/main_tester.py
-PY_RESULTS_ANALYSIS=$THESIS_PATH/experiments/main/extract_results.py
+PY_RESULTS_EXTRACTION=$THESIS_PATH/experiments/main/extract_results.py
+PY_RESULTS_ANALYSIS=$THESIS_PATH/experiments/main/analysis.py
 
 # query generic parameters
 K=10
@@ -20,37 +21,51 @@ L=32
 NEO4J_USER=neo4j
 NEO4J_PASSWORD=12345678
 
+NUM_CPU=72
+
+ALGORITHMS="josie lshforest"
+MODES="set bag"
 
 # tasks
 DATA_PREPRATION=0
 SAMPLE_QUERIES=0
 QUERY=0
 
+# query sizes in term of number of queries
+QUERY_SIZES="1000" 
+# QUERY_SIZES="1000 10000 100000"
+
 # extract more information from initial results (like SLOTH overlap for each table pair)
+EXTRACT=0
+
+# do the concrete analyses
 ANALYSE=1
 
 # remove database tables and big files
 CLEAN=0
 
-# used for tasks, in order to have the same queries for all the algorithms and modes
-i=0
-
 # La prima volta che si fanno i test con JOSIE serve aggiungere il parametro --sample-cost, altrimenti non ci sono 
 # le tabelle di appoggio
 
-for ALGORITHM in josie lshforest
+for ALGORITHM in $ALGORITHMS
 do
-    for MODE in set bag
+    for MODE in $MODES
     do
-        for NUM_QUERY_SAMPLES in 10 # 1000 10000 100000
+        i=0
+
+        for NUM_QUERY_SAMPLES in $QUERY_SIZES
         do
             TASKS=''
 
-            if [[ $DATA_PREPRATION -eq 1 ]]; then
+            # if there are multiple query size (e.g. 10, 100, 1000...)
+            # do the data preparation step only in the first run
+            if [[ $i -eq 0 && $DATA_PREPRATION -eq 1 ]]; then
                 TASKS="data-preparation"
             fi
 
-            if [[ $i -eq 0 && $SAMPLE_QUERIES -eq 1 ]]; then
+            i=$((i+1))
+
+            if [[ $SAMPLE_QUERIES -eq 1 ]]; then
                 TASKS="${TASKS} sample-queries"
             fi
 
@@ -58,8 +73,7 @@ do
                 TASKS="${TASKS} query"
             fi
 
-            i=$(( i + 1 ))
-
+            # run the program with all the parameters
             if [[ $DATA_PREPRATION -eq 1 || $SAMPLE_QUERIES -eq 1 || $QUERY -eq 1 ]]; then
                 echo "######################### TESTING $ALGORITHM $MODE $TASKS $K ##################################"
                 python $PY_TESTER \
@@ -73,31 +87,51 @@ do
                     -l $L \
                     --neo4j-user $NEO4J_USER \
                     --neo4j-password $NEO4J_PASSWORD \
-                    --num-perm $NUM_PERM                 
-            fi
-
-
-            if [[ $CLEAN -eq 1 ]]; then
-                echo "######################### CLEANING $ALGORITHM $MODE ##################################"
-                python $PY_TESTER \
-                    --test-name $TEST_NAME \
-                    --algorithm $ALGORITHM \
-                    --mode $MODE \
-                    --dbname $DBNAME \
-                    --clean
+                    --num-perm $NUM_PERM \
+                    --num-cpu $NUM_CPU
             fi
         done
     done
 done
 
 
+if [[ $CLEAN -eq 1 ]]; then
+    for ALGORITHM in $ALGORITHMS
+    do
+        for MODE in $MODES
+        do
+            echo "######################### CLEANING $ALGORITHM $MODE ##################################"
+            python $PY_TESTER \
+                --test-name $TEST_NAME \
+                --algorithm $ALGORITHM \
+                --mode $MODE \
+                --dbname $DBNAME \
+                --clean
+        done
+    done
+fi
 
-for NUM_QUERY_SAMPLES in 10 #1000 10000 100000
-do        
-    if [[ $ANALYSE -eq 1 ]]; then
+
+if [[ $EXTRACT -eq 1 ]]; then
+    for NUM_QUERY_SAMPLES in $QUERY_SIZES
+    do        
+        echo "######################### EXTRACTION $NUM_QUERY_SAMPLES ##################################"
+        python $PY_RESULTS_EXTRACTION \
+            --test-name $TEST_NAME \
+            --num-query-samples $NUM_QUERY_SAMPLES \
+            --num-cpu $NUM_CPU
+    done
+fi
+
+
+
+if [[ $ANALYSE -eq 1 ]]; then
+    for NUM_QUERY_SAMPLES in $QUERY_SIZES
+    do        
         echo "######################### ANALYSIS $NUM_QUERY_SAMPLES ##################################"
         python $PY_RESULTS_ANALYSIS \
             --test-name $TEST_NAME \
-            --num-query-samples $NUM_QUERY_SAMPLES
-    fi
-done
+            --num-query-samples $NUM_QUERY_SAMPLES \
+            --num-cpu $NUM_CPU
+    done
+fi

@@ -54,6 +54,7 @@ def spacy_detect_table_numeric_columns(table: list[list], nlp, nsamples: int) ->
         for column in parse_table(table, len(table[0]), 0)
     ]
 
+
 def is_number_tryexcept(s):
     try: 
         float(s)
@@ -62,16 +63,24 @@ def is_number_tryexcept(s):
         return False
     
 
-def naive_detect_table_numeric_columns(table: list[list]) -> list[int]:
+def naive_detect_table_numeric_columns(table: list[list], any_int:bool=False) -> list[int]:
     """ 
-    given a table as a list of list (rows), returns a list where if the ith element is 1
-    then the ith column is numeric, i.e. it has at least one element that's numeric inside,
-    0 otherwise.
+    :param table: a list of lists representing a table in row view
+    :param any_int: if set to True, a column is detected as an int column wheter any of its values is 
+        a numeric value, else if the majority (i.e. #numeric_cells >= #column_size / 2 + 1) of its values are numerics
+    :return a list of int, where the i-th element is set to 1 if the i-th column is detected as numeric, 
+        0 otherwise
     """
-    return [
-        int(any(is_number_tryexcept(cell) for cell in column))
-        for column in parse_table(table, len(table[0]), 0)
-    ]
+    if any_int:
+        return [
+            int(any(is_number_tryexcept(cell) for cell in column))
+            for column in parse_table(table, len(table[0]), 0)
+        ]
+    else:
+        return [
+            int(sum(is_number_tryexcept(cell) for cell in column) >= len(column) // 2 + 1)
+            for column in parse_table(table, len(table[0]), 0)
+        ]
 
 
 def worker(t: tuple[str, list[list]]):

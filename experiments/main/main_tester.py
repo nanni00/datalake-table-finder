@@ -42,16 +42,17 @@ if __name__ == '__main__':
                                 ], 
                         help='the tasks to do')
     parser.add_argument('--num-query-samples', 
-                        type=int, required=False, default=100,
+                        type=int, required=False, default=1000,
                         help='the number of tables that will be sampled from the collections and that will be used as query id for JOSIE (the actual number) \
                             may be less than the specified one due to thresholds tables parameter')
+    parser.add_argument('--num-cpu', 
+                        type=int, required=False, default=min(os.cpu_count(), 96),
+                        help='number of CPUs that will be used in the experiment')
     
     # JOSIE specific arguments
     parser.add_argument('-d', '--dbname', 
                         required=False, default='user',
                         help='the PostgreSQL database where will be uploaded the data used by JOSIE. It must be already running on the machine')
-    parser.add_argument('--sample-costs',
-                        required=False, action='store_true')
     parser.add_argument('--token-table-on-memory',
                         required=False, action='store_true')
 
@@ -97,8 +98,7 @@ if __name__ == '__main__':
 
     # JOSIE
     user_dbname =       args.dbname
-    sample_costs =      args.sample_costs
-    toktable_on_mem =  args.token_table_on_memory
+    toktable_on_mem =   args.token_table_on_memory
 
     # LSHForest
     num_perm =          args.num_perm
@@ -109,7 +109,7 @@ if __name__ == '__main__':
     user_interaction =  args.user_interaction
     neo4j_user =        args.neo4j_user
     neo4j_passwd =      args.neo4j_password
-    num_cpu =           min(os.cpu_count(), 64)
+    num_cpu =           args.num_cpu
 
 
     # check configuration
@@ -137,7 +137,7 @@ if __name__ == '__main__':
     SAMPLE_QUERIES =        'sample-queries' in tasks or 'all' in tasks
     QUERY =                 'query' in tasks or 'all' in tasks
 
-    CLEAN =             args.clean
+    CLEAN =                 args.clean
 
     # output files and directories
     ROOT_TEST_DIR =             defpath.data_path.tests + f'/{test_name}'
@@ -146,9 +146,9 @@ if __name__ == '__main__':
     forest_dir =                ROOT_TEST_DIR + f'/lshforest' 
     forest_file =               forest_dir + f'/forest_m{mode}.json' if not args.forest_file else args.forest_file
     
-    embeddings_dir =            ROOT_TEST_DIR + '/embeddings'
-    clut_file =                 embeddings_dir + '/clut.json'
-    cidx_file =                 embeddings_dir + '/cidx.index'
+    # embeddings_dir =            ROOT_TEST_DIR + '/embeddings'
+    # clut_file =                 embeddings_dir + '/clut.json'
+    # cidx_file =                 embeddings_dir + '/cidx.index'
 
     # results stuff
     results_base_dir =          ROOT_TEST_DIR + '/results/base'
@@ -186,7 +186,7 @@ if __name__ == '__main__':
             if input(f'Directory {ROOT_TEST_DIR} already exists: delete it (old data will be lost)? (yes/no) ') in ('y', 'yes'):
                 shutil.rmtree(ROOT_TEST_DIR)
 
-        for directory in [ROOT_TEST_DIR, statistics_dir, results_base_dir, results_extr_dir, forest_dir, embeddings_dir]:
+        for directory in [ROOT_TEST_DIR, statistics_dir, results_base_dir, results_extr_dir, forest_dir]: # embeddings_dir]:
             if not os.path.exists(directory): 
                 print(f'Creating directory {directory}...')
                 os.makedirs(directory)
@@ -203,13 +203,14 @@ if __name__ == '__main__':
 
             
     if SAMPLE_QUERIES:
-        num_samples = sample_queries(query_file, nsamples, tables_thresholds, *collections)
-        print(f'Sampled {num_samples} query tables.')
+        if not os.path.exists(query_file):
+            num_samples = sample_queries(query_file, nsamples, tables_thresholds, *collections)
+            print(f'Sampled {num_samples} query tables.')
 
 
     if QUERY:
         query_ids = get_query_ids_from_query_file(query_file)
-        exec_time = tester.query(topk_results_file, k, query_ids, results_directory=results_base_dir, sample_costs=sample_costs, token_table_on_memory=toktable_on_mem)
+        exec_time = tester.query(topk_results_file, k, query_ids, results_directory=results_base_dir, token_table_on_memory=toktable_on_mem)
         runtime_metrics.append((f'query_{numerize(len(query_ids), asint=True)}', exec_time, get_local_time()))
 
 
@@ -217,7 +218,7 @@ if __name__ == '__main__':
         add_header = not os.path.exists(runtime_stat_file)
         with open(runtime_stat_file, 'a') as rfw:
             if add_header:
-                rfw.write("local_time,algorithm,mode,task,time\n")
+                rfw.write("local_time,algorithm,mode,task,time(s)\n")
 
             for (t_name, t_time, t_loctime) in runtime_metrics:
                 rfw.write(f"{t_loctime},{algorithm},{mode},{t_name},{t_time}\n")
