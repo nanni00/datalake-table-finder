@@ -10,7 +10,6 @@ import psycopg
 import psycopg.rows
 from tqdm import tqdm
 
-
 from tools.utils.settings import DefaultPath as defpath
 from tools.utils.utils import (
     apply_sloth,
@@ -19,6 +18,7 @@ from tools.utils.utils import (
     get_one_document_from_mongodb_by_key, 
     _create_token_set
 )
+
 
 
 class ResultDatabase:
@@ -86,9 +86,9 @@ class ResultDatabase:
 
 
 
-
 def _worker_result_extractor(inp):
-    resultsdb = ResultDatabase('nanni')
+    global dbname
+    resultsdb = ResultDatabase(dbname)
     algorithm, mode, (query_id, _, result_ids, algorithm_overlaps) = inp
 
     if not result_ids:
@@ -118,8 +118,8 @@ def _worker_result_extractor(inp):
         if algorithm_overlaps:
             algorithm_overlap = algorithm_overlaps[i]
         else:
-            set_q = _create_token_set(table_q, mode, numeric_columns_q)
-            set_r = _create_token_set(table_r, mode, numeric_columns_r)
+            set_q = _create_token_set(table_q, mode if mode != 'fasttext' else 'set', numeric_columns_q)
+            set_r = _create_token_set(table_r, mode if mode != 'fasttext' else 'set', numeric_columns_r)
             algorithm_overlap = len(set(set_q).intersection(set_r))
         
         # if already exists a couple with these ID, take its computed SLOTH overlap
@@ -158,13 +158,16 @@ parser.add_argument('--num-cpu',
 parser.add_argument('--num-query-samples',
                     type=int, required=False, default=1000,
                     help='extract results only for the given result set size (e.g. 1000)')
-
+parser.add_argument('--dbname', 
+                    type=str, required=True, default='user',
+                    help='The database in which will be stored the computed SLOTH overlap for future analyses')
 
 args = parser.parse_args()
-test_name = args.test_name
-small =     args.small
-nworkers =  args.num_cpu
+test_name =         args.test_name
+small =             args.small
+nworkers =          args.num_cpu
 num_query_samples = args.num_query_samples
+dbname =            args.dbname
 
 num_query_samples = numerize(num_query_samples, asint=True)
 
@@ -194,7 +197,7 @@ else:
     )
 
 start_analysis = time()
-resultsdb = ResultDatabase('nanni')
+resultsdb = ResultDatabase(dbname)
 
 # clear the result table (occhio a farlo che poi si perdono i dati già salvati...)
 # resultsdb.clear()

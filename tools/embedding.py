@@ -66,24 +66,34 @@ class FastTextTableEmbedder:
 
     def embedding_table(self, table, numeric_columns):
         """ Return columns embeddings as a np.array """
+
+        # for fastText.get_sentence_vector() see the github repo at src/fasttext.cc, lines 490-521
+        # it takes a sentence, splits it on blank spaces and for each work compute and normalise its 
+        # embedding; then gets their average
         table = [column for i, column in enumerate(parse_table(table, len(table[0]), 0)) if numeric_columns[i] == 0]
         return np.array([self.model.get_sentence_vector(' '.join(column).replace('\n', ' ')) for column in table])
 
+    def get_dimension(self):
+        return self.model.get_dimension()
 
 
 class EmbeddingTester(AlgorithmTester):
     def __init__(self, mode, small, tables_thresholds, num_cpu, *args) -> None:
         super().__init__(mode, small, tables_thresholds, num_cpu)
-        self.model_path, self.clut_file, self.cidx_file = args
+        self.model_path, self.clut_file, self.cidx_file, collections = args
         
         self.model = FastTextTableEmbedder(self.model_path)
         self.clut = None
         self.cidx = None
 
+        self.collections = collections
+
     def data_preparation(self):
         start = time()
-        self.cidx = faiss.IndexFlatL2(self.model.get_dimension())
-        self.clut = LUT()
+        # self.cidx = faiss.IndexFlatL2(self.model.get_dimension())
+        # self.clut = LUT()
+
+        self.cidx = faiss.index_factory(self.model.get_dimension(), "Flat,IDMap2")
 
         for collection in self.collections:
             print(f'Starting pool working on {collection.database.name}.{collection.name}...')
@@ -94,29 +104,38 @@ class EmbeddingTester(AlgorithmTester):
                     column_embeddings = self.model.embedding_table(content, numeric_columns)
                     
                     if column_embeddings.shape[0] > 0:
-                        self.cidx.add(column_embeddings)
-                        self.clut.insert_index(column_embeddings.shape[0], _id_numeric)
-
-        self.clut.save(self.clut_file)
+                        # self.cidx.add(column_embeddings)
+                        # self.clut.insert_index(column_embeddings.shape[0], _id_numeric)
+                        self.cidx.add_with_ids(column_embeddings, np.array([_id_numeric] * len(column_embeddings), dtype=np.int64))
+        # self.clut.save(self.clut_file)
+        
         faiss.write_index(self.cidx, self.cidx_file)
+        # return round(time() - start, 5), os.path.getsize(self.clut_file) / (1024 ** 3) + os.path.getsize(self.cidx_file) / (1024 ** 3)
+        return round(time() - start, 5), os.path.getsize(self.cidx_file) / (1024 ** 3)
 
-        return round(time() - start, 5), os.path.getsize(self.clut_file) / (1024 ** 3) + os.path.getsize(self.cidx_file) / (1024 ** 3)
 
     def query(self, results_file, k, query_ids, **kwargs):
         start = time()
+        if not self.cidx and os.path.exists(self.cidx_file):
+            self.cidx = faiss.read_index(self.cidx_file)
+            
         results = []
         for query_id in tqdm(query_ids):
             doc = get_one_document_from_mongodb_by_key('_id_numeric', query_id, *self.collections)
             content, numeric_columns = doc['content'], doc['numeric_columns']
             cembeddings = self.model.embedding_table(content, numeric_columns)
             if cembeddings.shape[0] > 0:
+                start_s = time()
                 _, ids = self.cidx.search(cembeddings, k)
-                ccnt = np.unique(np.vectorize(self.clut.lookup)(ids), return_counts=True)
+                end_s = time()
+                # ccnt = np.unique(np.vectorize(self.clut.lookup)(ids), return_counts=True)
+                ccnt = np.unique(ids, return_counts=True)
+
                 ctopk = sorted(zip(ccnt[0], ccnt[1]), key=lambda x: x[1], reverse=True)
-                results.append([query_id, [x[0] for x in ctopk[:k] if x[0] != query_id]])
+                results.append([query_id, round(end_s - start_s, 3), [x[0] for x in ctopk[:k] if x[0] != query_id], []])
             else:
-                results.append([query_id, []])
-        pd.DataFrame(results, columns=['query_id', 'results']).to_csv(results_file, index=False)    
+                results.append([query_id, 0, [], []])
+        pd.DataFrame(results, columns=['query_id', 'duration', 'results', 'results_overlap']).to_csv(results_file, index=False)    
         return round(time() - start, 5)
     
     def clean(self):

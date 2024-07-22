@@ -14,7 +14,7 @@ from tools.utils.utils import (
     sample_queries
 )
 
-from tools import josie, lshforest #, neo4j_graph, embeddings
+from tools import josie, lshforest, embedding #, neo4j_graph
 
 
 
@@ -146,9 +146,9 @@ if __name__ == '__main__':
     forest_dir =                ROOT_TEST_DIR + f'/lshforest' 
     forest_file =               forest_dir + f'/forest_m{mode}.json' if not args.forest_file else args.forest_file
     
-    # embeddings_dir =            ROOT_TEST_DIR + '/embeddings'
-    # clut_file =                 embeddings_dir + '/clut.json'
-    # cidx_file =                 embeddings_dir + '/cidx.index'
+    embedding_dir =             ROOT_TEST_DIR + '/embedding'
+    clut_file =                 embedding_dir + '/clut.json'
+    cidx_file =                 embedding_dir + '/cidx.index'
 
     # results stuff
     results_base_dir =          ROOT_TEST_DIR + '/results/base'
@@ -174,8 +174,8 @@ if __name__ == '__main__':
         tester = josie.JOSIETester(mode, small, tables_thresholds, num_cpu, user_dbname, table_prefix, db_stat_file)
     elif algorithm == 'lshforest':
         tester = lshforest.LSHForestTester(mode, small, tables_thresholds, num_cpu, forest_file, num_perm, l, collections)
-    # elif algorithm == 'embedding':
-    #     tester = embeddings.EmbeddingTester(mode, small, tables_thresholds, num_cpu, defpath.model_path.fasttext + '/cc.en.300.bin', clut_file, cidx_file)
+    elif algorithm == 'embedding':
+        tester = embedding.EmbeddingTester(mode, small, tables_thresholds, num_cpu, defpath.model_path.fasttext + '/cc.en.300.bin', clut_file, cidx_file, collections)
     # elif algorithm == 'graph':
     #     if mode == 'neo4j':
     #         tester = neo4j_graph.Neo4jTester(mode, small, tables_thresholds, num_cpu, neo4j_user, neo4j_passwd, os.environ["NEO4J_HOME"] + "/data/databases/neo4j/", collections)
@@ -186,7 +186,7 @@ if __name__ == '__main__':
             if input(f'Directory {ROOT_TEST_DIR} already exists: delete it (old data will be lost)? (yes/no) ') in ('y', 'yes'):
                 shutil.rmtree(ROOT_TEST_DIR)
 
-        for directory in [ROOT_TEST_DIR, statistics_dir, results_base_dir, results_extr_dir, forest_dir]: # embeddings_dir]:
+        for directory in [ROOT_TEST_DIR, statistics_dir, results_base_dir, results_extr_dir, forest_dir, embedding_dir]: # ]:
             if not os.path.exists(directory): 
                 print(f'Creating directory {directory}...')
                 os.makedirs(directory)

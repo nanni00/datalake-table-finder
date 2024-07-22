@@ -42,7 +42,8 @@ if __name__ == '__main__':
 
     ROOT_TEST_DIR =         defpath.data_path.tests + '/' + test_name
     results_extr_dir =      ROOT_TEST_DIR + '/results/extracted'
-    analyses_dir =          ROOT_TEST_DIR + '/results/analyses/' + q
+    analyses_dir =          ROOT_TEST_DIR + '/results/analyses'
+    analyses_query_dir =    analyses_dir + f'/{q}'
     statistics_dir =        ROOT_TEST_DIR  + '/statistics'
 
     runtime_stat_file =     statistics_dir + '/runtime.csv'     
@@ -51,9 +52,13 @@ if __name__ == '__main__':
 
     if not os.path.exists(analyses_dir):
         os.mkdir(analyses_dir)
+    
+    if not os.path.exists(analyses_query_dir):
+        os.mkdir(analyses_query_dir)
+    
+    analyses_dir = analyses_query_dir
 
-
-    solvers = [('josie', 'set'), ('josie', 'bag'), ('lshforest', 'set'), ('lshforest', 'bag')]
+    solvers = [('josie', 'set'), ('josie', 'bag'), ('lshforest', 'set'), ('lshforest', 'bag'), ('embedding', 'fasttext')]
 
     results = pd.read_csv(f'{results_extr_dir}/final_results_q{q}.csv')
     results = results.dropna()
@@ -69,7 +74,7 @@ if __name__ == '__main__':
     start_zr = time()
     for am, am_group in results.groupby(by=["algorithm", "mode"]):
         for query_id, q_group in am_group.groupby(by=["query_id"]):
-            cnt = ((q_group['sloth_overlap'] == 0) & (q_group['algorithm_overlap'] != 0)).sum()
+            cnt = ((q_group['sloth_overlap'] == 0)).sum()
             num_query_results = q_group.count().values.tolist()[0]
             x.append([am[0], am[1], query_id[0], num_query_results, cnt, cnt / num_query_results])
     end_zr = time()

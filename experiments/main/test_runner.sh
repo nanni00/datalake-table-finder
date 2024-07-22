@@ -1,6 +1,6 @@
 #!/bin/bash
 
-TEST_NAME=main_test
+TEST_NAME=test_embedding
 
 # python scripts
 PY_TESTER=$THESIS_PATH/experiments/main/main_tester.py
@@ -23,8 +23,11 @@ NEO4J_PASSWORD=12345678
 
 NUM_CPU=72
 
-ALGORITHMS="josie lshforest"
-MODES="set bag"
+# ALGORITHMS="josie lshforest"
+# MODES="set bag"
+
+ALGORITHMS="embedding"
+MODES="fasttext"
 
 # tasks
 DATA_PREPRATION=0
@@ -33,7 +36,7 @@ QUERY=0
 
 # query sizes in term of number of queries
 # QUERY_SIZES="1000" 
-QUERY_SIZES="1000 10000 100000"
+QUERY_SIZES="1000"
 
 # extract more information from initial results (like SLOTH overlap for each table pair)
 EXTRACT=0
@@ -72,7 +75,7 @@ do
 
             # run the program with all the parameters
             if [[ $DATA_PREPRATION -eq 1 || $SAMPLE_QUERIES -eq 1 || $QUERY -eq 1 ]]; then
-                echo "######################### TESTING $ALGORITHM $MODE $TASKS $K ##################################"
+                echo "######################### TESTING $ALGORITHM $MODE TASK=$TASKS K=$K ##################################"
                 python $PY_TESTER \
                     --test-name $TEST_NAME \
                     --algorithm $ALGORITHM \
@@ -85,7 +88,8 @@ do
                     --neo4j-user $NEO4J_USER \
                     --neo4j-password $NEO4J_PASSWORD \
                     --num-perm $NUM_PERM \
-                    --num-cpu $NUM_CPU
+                    --num-cpu $NUM_CPU \
+                    --small
             fi
         done
     done
@@ -116,7 +120,8 @@ if [[ $EXTRACT -eq 1 ]]; then
         python $PY_RESULTS_EXTRACTION \
             --test-name $TEST_NAME \
             --num-query-samples $NUM_QUERY_SAMPLES \
-            --num-cpu $NUM_CPU
+            --num-cpu $NUM_CPU \
+            --dbname $DBNAME
     done
 fi
 
