@@ -4,12 +4,11 @@ from time import time
 import multiprocessing as mp
 
 import mmh3
-import pandas as pd
 import polars as pl
 from tqdm import tqdm
 from datasketch import MinHashLSHForest, MinHash
 
-from tools.utils.utils import _create_token_set, check_table_is_in_thresholds, get_initial_spark_rdd, AlgorithmTester, get_one_document_from_mongodb_by_key
+from tools.utils.utils import _create_token_set, check_table_is_in_thresholds, get_initial_spark_rdd, AlgorithmTester, get_local_time, get_one_document_from_mongodb_by_key
 
 
 def _mmh3_hashfunc(d):
@@ -73,10 +72,10 @@ class LSHForestTester(AlgorithmTester):
                     continue
                 self.forest.add(result[0], result[1])
         print(end='\r')
-        print("Indexing forest...")
+        print(get_local_time(), " Indexing forest...")
         self.forest.index()
 
-        print("Saving forest...")
+        print(get_local_time(), " Saving forest...")
         self._forest_handler('save')
         
         return round(time() - start, 5), os.path.getsize(self.forest_file) / (1024 ** 3)
@@ -119,9 +118,9 @@ class LSHForestTester(AlgorithmTester):
         results = []
 
         if not self.forest:
-            print('Loading forest...')
+            print(get_local_time(), ' Loading forest...')
             self._forest_handler('load')
-
+            print(get_local_time(), ' Forest loaded.')
         for query_id in tqdm(query_ids):
             try:
                 hashvalues_q = self.forest.get_minhash_hashvalues(query_id)
@@ -144,7 +143,7 @@ class LSHForestTester(AlgorithmTester):
             
             results.append([query_id, round(end_query - start_query, 3), str(topk_res[:k]), str([])])
 
-        print(f'Saving results to {results_file}...')
+        print(get_local_time(), f' Saving results to {results_file}...')
         pl.DataFrame(results, schema=['query_id', 'duration', 'results_id', 'results_overlap']).write_csv(results_file)
         return round(time() - start, 5)
 

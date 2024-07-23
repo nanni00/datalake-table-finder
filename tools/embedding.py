@@ -23,6 +23,10 @@ from tools.utils.utils import (
 class LUT:
     """
     LookUp Table used for keep the ids of indexed vectors on FAISS index
+    --- Deprecated: FAISS indexes allow to use non-unique IDs for vectors, in
+    this way the column vectors of a table can share the same ID, so when doing the
+    top-K it's no longer needed a LUT to retrieve for each specifc vector ID its 
+    table ID.
     """
     def __init__(self, json_lut_file=None) -> None:
         self.idxs = []
@@ -65,11 +69,13 @@ class FastTextTableEmbedder:
         self.model = fasttext.load_model(model_path)
 
     def embedding_table(self, table, numeric_columns):
-        """ Return columns embeddings as a np.array """
+        """ 
+        Return columns embeddings as a np.array of shape (#table_columns, #model_vector_size)
 
-        # for fastText.get_sentence_vector() see the github repo at src/fasttext.cc, lines 490-521
-        # it takes a sentence, splits it on blank spaces and for each work compute and normalise its 
-        # embedding; then gets their average
+        For fastText.get_sentence_vector() see the github repo at src/fasttext.cc, lines 490-521
+        it takes a sentence, splits it on blank spaces and for each work compute and normalise its 
+        embedding; then gets their average
+        """
         table = [column for i, column in enumerate(parse_table(table, len(table[0]), 0)) if numeric_columns[i] == 0]
         return np.array([self.model.get_sentence_vector(' '.join(column).replace('\n', ' ')) for column in table])
 
@@ -80,10 +86,10 @@ class FastTextTableEmbedder:
 class EmbeddingTester(AlgorithmTester):
     def __init__(self, mode, small, tables_thresholds, num_cpu, *args) -> None:
         super().__init__(mode, small, tables_thresholds, num_cpu)
-        self.model_path, self.clut_file, self.cidx_file, collections = args
+        self.model_path, self.cidx_file, collections = args
         
         self.model = FastTextTableEmbedder(self.model_path)
-        self.clut = None
+        # self.clut = None
         self.cidx = None
 
         self.collections = collections
@@ -142,6 +148,6 @@ class EmbeddingTester(AlgorithmTester):
         if os.path.exists(self.cidx_file):
             os.remove(self.cidx_file)
         
-        if os.path.exists(self.clut_file):
-            os.remove(self.clut_file)
+        # if os.path.exists(self.clut_file):
+        #     os.remove(self.clut_file)
     
