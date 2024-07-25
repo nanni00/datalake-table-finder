@@ -87,8 +87,8 @@ class ResultDatabase:
 
 
 def _worker_result_extractor(inp):
-    global dbname
-    resultsdb = ResultDatabase(dbname)
+    global dbname, table_name, small
+    resultsdb = ResultDatabase(dbname, table_name)
     algorithm, mode, (query_id, _, result_ids, algorithm_overlaps) = inp
 
     if not result_ids:
@@ -97,7 +97,7 @@ def _worker_result_extractor(inp):
     # here we need eval because on csv values are stored as strings
     result_ids, algorithm_overlaps = eval(result_ids), eval(algorithm_overlaps)
     
-    mongoclient, collections = get_mongodb_collections(small=False)
+    mongoclient, collections = get_mongodb_collections(small=small)
     
     # retrieve the query information from MongoDB
     doc_table_q = get_one_document_from_mongodb_by_key('_id_numeric', query_id, *collections)
@@ -118,8 +118,8 @@ def _worker_result_extractor(inp):
         if algorithm_overlaps:
             algorithm_overlap = algorithm_overlaps[i]
         else:
-            set_q = _create_token_set(table_q, mode if mode != 'fasttext' else 'set', numeric_columns_q)
-            set_r = _create_token_set(table_r, mode if mode != 'fasttext' else 'set', numeric_columns_r)
+            set_q = _create_token_set(table_q, 'set' if mode in ['fasttext', 'tabert'] else mode, numeric_columns_q)
+            set_r = _create_token_set(table_r, 'set' if mode in ['fasttext', 'tabert'] else mode, numeric_columns_r)
             algorithm_overlap = len(set(set_q).intersection(set_r))
         
         # if already exists a couple with these ID, take its computed SLOTH overlap
@@ -169,12 +169,14 @@ nworkers =          args.num_cpu
 num_query_samples = args.num_query_samples
 dbname =            args.dbname
 
+table_name='results_table' if not small else 'results_table_small'
+
 num_query_samples = numerize(num_query_samples, asint=True)
 
 ROOT_TEST_DIR =             defpath.data_path.tests + f'/{test_name}'
 results_base_directory =    ROOT_TEST_DIR + '/results/base'
 results_extr_directory =    ROOT_TEST_DIR + '/results/extracted'
-final_results_file =       results_extr_directory + f'/final_results_q{num_query_samples}.csv'
+final_results_file =        results_extr_directory + f'/final_results_q{num_query_samples}.csv'
 
 statistics_dir =            ROOT_TEST_DIR  + '/statistics'
 runtime_stat_file =         statistics_dir + '/runtime.csv'     
@@ -197,7 +199,8 @@ else:
     )
 
 start_analysis = time()
-resultsdb = ResultDatabase(dbname)
+resultsdb = ResultDatabase(dbname, table_name)
+resultsdb.create_table()
 
 # clear the result table (occhio a farlo che poi si perdono i dati già salvati...)
 # resultsdb.clear()

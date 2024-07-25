@@ -27,7 +27,7 @@ if __name__ == '__main__':
                         choices=['josie', 'lshforest', 'embedding', 'graph'])
     parser.add_argument('-m', '--mode', 
                         required=False, default='set',
-                        choices=['set', 'bag', 'fasttext', 'neo4j'],
+                        choices=['set', 'bag', 'fasttext', 'tabert', 'neo4j'],
                         help='the specific version of the algorithm. Note that an algorithm doesn\'t support all the available modes: for example, \
                             if "algorithm"="embedding", the only accepted mode is "fasttext"')
     parser.add_argument('-k', 
@@ -111,13 +111,16 @@ if __name__ == '__main__':
     num_perm =          args.num_perm
     l =                 args.l
 
+    nsamples = [int(nsamples)] if type(nsamples) == int else [int(n) for n in nsamples]
+
     # check configuration
     if (algorithm, mode) not in {
         ('josie', 'set'),       
         ('josie', 'bag'), 
         ('lshforest', 'set'),       
         ('lshforest', 'bag'),
-        ('embedding', 'fasttext'), 
+        ('embedding', 'fasttext'),
+        ('embedding', 'tabert'),
         ('graph', 'neo4j')
         }:
         sys.exit(1)
@@ -150,7 +153,7 @@ if __name__ == '__main__':
     
     # embedding stuff
     embedding_dir =             ROOT_TEST_DIR + '/embedding'
-    cidx_file =                 embedding_dir + '/cidx.index'
+    cidx_file =                 embedding_dir + f'/col_idx_m{mode}.index'
 
     # results stuff
     results_base_dir =          ROOT_TEST_DIR + '/results/base'
@@ -180,7 +183,8 @@ if __name__ == '__main__':
     elif algorithm == 'lshforest':
         tester = lshforest.LSHForestTester(mode, small, tables_thresholds, num_cpu, forest_file, num_perm, l, collections)
     elif algorithm == 'embedding':
-        tester = embedding.EmbeddingTester(mode, small, tables_thresholds, num_cpu, defpath.model_path.fasttext + '/cc.en.300.bin', cidx_file, collections)
+        model_path = defpath.model_path.fasttext + '/cc.en.300.bin' if mode == 'fasttext' else defpath.model_path.tabert + '/tabert_base_k3/model.bin'
+        tester = embedding.EmbeddingTester(mode, small, tables_thresholds, num_cpu, model_path, cidx_file, collections)
     # elif algorithm == 'graph':
     #     if mode == 'neo4j':
     #         tester = neo4j_graph.Neo4jTester(mode, small, tables_thresholds, num_cpu, neo4j_user, neo4j_passwd, os.environ["NEO4J_HOME"] + "/data/databases/neo4j/", collections)

@@ -33,7 +33,7 @@ if __name__ == '__main__':
     test_name =         args.test_name
     nsamples =          args.num_query_samples
     num_cpu =           args.num_cpu
-    small =             args.small # not implemented
+    small =             args.small
     q = numerize(nsamples, asint=True)
 
     small = False
@@ -247,7 +247,7 @@ if __name__ == '__main__':
         idcg = sum(rel / log2(i + 1) for i, rel in enumerate(true_relevances[:p], start=1))
         dcg = sum(rel / log2(i + 1) for i, rel in enumerate(scores[:p], start=1))
         if idcg < dcg:
-            raise Exception()
+            raise ZeroDivisionError()
 
         return dcg / idcg, p
 

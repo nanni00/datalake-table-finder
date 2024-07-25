@@ -1,6 +1,6 @@
 #!/bin/bash
 
-TEST_NAME=test_lshforest
+TEST_NAME=small_test
 
 # python scripts
 PY_TESTER=$THESIS_PATH/experiments/main/main_tester.py
@@ -26,13 +26,15 @@ NUM_CPU=72
 # ALGORITHMS="josie lshforest embedding"
 # MODES="set bag fasttext"
 
-ALGORITHMS="lshforest embedding"
-MODES="set bag fasttext"
+# ALGORITHMS="josie lshforest embedding"
+# MODES="set fasttext tabert"
+ALGORITHMS="embedding"
+MODES="tabert"
 
 # tasks
-DATA_PREPRATION=1
+DATA_PREPRATION=0
 SAMPLE_QUERIES=0
-QUERY=1
+QUERY=0
 
 # query sizes in term of number of queries
 QUERY_SIZES="1000"
@@ -42,7 +44,7 @@ QUERY_SIZES="1000"
 EXTRACT=0
 
 # do the concrete analyses
-ANALYSE=0
+ANALYSE=1
 
 # remove database tables and big files
 CLEAN=0
@@ -117,10 +119,10 @@ if [[ $EXTRACT -eq 1 ]]; then
             --test-name $TEST_NAME \
             --num-query-samples $NUM_QUERY_SAMPLES \
             --num-cpu $NUM_CPU \
-            --dbname $DBNAME
+            --dbname $DBNAME \
+            --small
     done
 fi
-
 
 
 if [[ $ANALYSE -eq 1 ]]; then
@@ -130,6 +132,7 @@ if [[ $ANALYSE -eq 1 ]]; then
         python $PY_RESULTS_ANALYSIS \
             --test-name $TEST_NAME \
             --num-query-samples $NUM_QUERY_SAMPLES \
-            --num-cpu $NUM_CPU
+            --num-cpu $NUM_CPU \
+            --small
     done
 fi

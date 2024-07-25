@@ -12,7 +12,7 @@ class _DataPath:
 class _ModelPath:
     base =                  root_project_path + '/models'
     fasttext =              root_project_path + '/models/fasttext'
-    pre_trained_TaBERT =    root_project_path + '/models/pre-trained-TaBERT'
+    tabert =                root_project_path + '/models/TaBERT'
 
 
 class _DBPath:
