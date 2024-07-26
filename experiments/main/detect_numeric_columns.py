@@ -3,6 +3,9 @@ import random
 import argparse
 import multiprocessing as mp
 
+import pymongo
+from tqdm import tqdm
+
 from tools.sloth.utils import parse_table
 from tools.utils.utils import get_mongodb_collections
 
@@ -138,20 +141,25 @@ if __name__ == '__main__':
         if mode == 'spacy':
             import spacy
             print('Loading spacy models...')
-            nlp = [spacy.load('en_core_web_sm') for _ in range(ncpu)]
+            nlp = [spacy.load('en_core_web_sm') for _ in range(ncpu)] # perhaps not the best way
         else:
             nlp = []
 
         with mp.Pool(processes=ncpu, initializer=init_pool, initargs=(nlp, ncpu, nsamples, mode)) as pool:
-            
             for collection in collections:
                 collsize = collection.count_documents({})
+                batch_update = []
+                batch_size = 5000
 
                 print(f'Starting pool working on {collection.database.name}.{collection.name}...')
-                for i, res in enumerate(pool.imap(worker, ((t['_id'], t['content'], mode) for t in collection.find({}, projection={"_id": 1, "content": 1})), chunksize=100)):
-                    if i % 1000 == 0:
-                        print(round(100 * i / collsize, 3), '%', end='\r')
-                    collection.update_one({"_id": res[0]}, {"$set": {"numeric_columns": res[1]}})
+                for res in tqdm(pool.imap(
+                    worker, ((t['_id_numeric'], t['content'], mode) for t in collection.find({}, projection={"_id_numeric": 1, "content": 1})), chunksize=100)):
+                    batch_update.append(pymongo.UpdateOne({"_id_numeric": res[0]}, {"$set": {"numeric_columns": res[1]}}))
+                    if len(batch_update) == batch_size:
+                        collection.bulk_write(batch_update, ordered=False)
+                        batch_update = []
+                
+                collection.bulk_write(batch_update, ordered=False)
                 print(f'{collection.database.name}.{collection.name} updated.')
     else:
         for collection in collections:

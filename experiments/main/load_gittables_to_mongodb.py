@@ -16,12 +16,13 @@ gittables_csv_folder = '/data3/zecca/projects/sloth/armadillo/gittables/dataset/
 mongoclient, collections = get_mongodb_collections(dataset='gittables', small=False)
 gittables_coll = collections[0]
 
-batch_size = 1000
+batch_size = 5000
 batch_tables = []
 
 for table_id in tqdm(os.listdir(gittables_csv_folder)):    
     table_df = pd.read_csv(gittables_csv_folder + '/' + table_id, lineterminator="\n")
     table_obj = dict()
+    table_obj["_id"] = table_id
     table_obj["content"] = table_df.values.tolist()
     table_obj["headers"] = list(table_df.columns)
     table_obj["num_header_rows"] = 0
@@ -33,10 +34,11 @@ for table_id in tqdm(os.listdir(gittables_csv_folder)):
         try:
             gittables_coll.bulk_write(batch_tables, ordered=False)
         except OverflowError:
+            batch_tables = []
             pass
         batch_tables = []
-
-gittables_coll.insert_many(batch_tables)
+        
+gittables_coll.bulk_write(batch_tables, ordered=False)
 batch_tables = []
 
 mongoclient.close()

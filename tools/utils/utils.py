@@ -90,7 +90,7 @@ def convert_to_giga(x):
 
 
 
-def get_mongodb_collections(dataset:str='wikipedia', small:bool=True) -> tuple[pymongo.MongoClient, pymongo.collection.Collection]:
+def get_mongodb_collections(dataset:str='wikipedia', small:bool=True) -> tuple[pymongo.MongoClient, list[pymongo.collection.Collection]]:
     mongoclient = pymongo.MongoClient()
     collections = []
 
