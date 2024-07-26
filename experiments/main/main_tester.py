@@ -56,6 +56,10 @@ if __name__ == '__main__':
     parser.add_argument('--small', 
                         required=False, action='store_true',
                         help='works on small collection versions (only for testing)')
+    parser.add_argument('--dataset', 
+                        required=True, choices=['wikipedia', 'gittables'])
+
+    # clean task
     parser.add_argument('--clean', 
                         required=False, action='store_true', 
                         help='remove PostgreSQL database tables and other big files, such as the LSH Forest index file')
@@ -88,7 +92,6 @@ if __name__ == '__main__':
     parser.add_argument('--neo4j-password', 
                         required=False, type=str, default='12345678')
 
-    
     args = parser.parse_args()
     test_name =         args.test_name
     algorithm =         args.algorithm
@@ -96,12 +99,13 @@ if __name__ == '__main__':
     tasks =             args.tasks if args.tasks else []
     k =                 args.k
     
-    small =             args.small
     nsamples =          args.num_query_samples
     user_interaction =  args.user_interaction
     neo4j_user =        args.neo4j_user
     neo4j_passwd =      args.neo4j_password
     num_cpu =           args.num_cpu
+    small =             args.small
+    dataset =           args.dataset
 
     # JOSIE
     user_dbname =       args.dbname
@@ -143,25 +147,24 @@ if __name__ == '__main__':
 
     # output files and directories
     ROOT_TEST_DIR =             defpath.data_path.tests + f'/{test_name}'
-    # if args.query_file:
-    #     query_file = args.query_file
-    query_files =               {n: ROOT_TEST_DIR + f'/query_{numerize(n, asint=True)}.json' for n in nsamples}
+    TEST_DATASET_DIR =          ROOT_TEST_DIR + f'/{dataset}'
+    query_files =               {n: TEST_DATASET_DIR + f'/query_{numerize(n, asint=True)}.json' for n in nsamples}
 
     # LSH-Forest stuff
-    forest_dir =                ROOT_TEST_DIR + f'/lshforest' 
+    forest_dir =                TEST_DATASET_DIR + f'/lshforest' 
     forest_file =               forest_dir + f'/forest_m{mode}.json' if not args.forest_file else args.forest_file
     
     # embedding stuff
-    embedding_dir =             ROOT_TEST_DIR + '/embedding'
+    embedding_dir =             TEST_DATASET_DIR + '/embedding'
     cidx_file =                 embedding_dir + f'/col_idx_m{mode}.index'
 
     # results stuff
-    results_base_dir =          ROOT_TEST_DIR + '/results/base'
-    results_extr_dir =          ROOT_TEST_DIR + '/results/extracted'
+    results_base_dir =          TEST_DATASET_DIR + '/results/base'
+    results_extr_dir =          TEST_DATASET_DIR + '/results/extracted'
     topk_results_files =        {n: results_base_dir + f'/a{algorithm}_m{mode}_k{k}_q{numerize(n, asint=True)}.csv' for n in nsamples}
 
     # statistics stuff
-    statistics_dir =            ROOT_TEST_DIR  + '/statistics'
+    statistics_dir =            TEST_DATASET_DIR  + '/statistics'
     runtime_stat_file =         statistics_dir + '/runtime.csv'     
     db_stat_file =              statistics_dir + '/db.csv'
     storage_stat_file =         statistics_dir + '/storage.csv'
@@ -171,10 +174,10 @@ if __name__ == '__main__':
     runtime_metrics = []
 
     # the MongoDB collections where initial tables are stored
-    mongoclient, collections = get_mongodb_collections(small)
+    mongoclient, collections = get_mongodb_collections(dataset=dataset, small=small)
 
     # the prefix used in the PostgreSQL database tables (mainly for JOSIE)
-    table_prefix = f'{test_name}_m{mode}'
+    table_prefix = f'{test_name}_d{dataset}_m{mode}'
 
     # selecting the right tester accordingly to the specified algorithm and mode
     tester = None
@@ -191,10 +194,10 @@ if __name__ == '__main__':
 
 
     if DATA_PREPARATION or QUERY or SAMPLE_QUERIES:
-        if os.path.exists(ROOT_TEST_DIR) and user_interaction:
-            if input(get_local_time(), f' Directory {ROOT_TEST_DIR} already exists: delete it (old data will be lost)? (yes/no) ') in ('y', 'yes'):
-                shutil.rmtree(ROOT_TEST_DIR)
-        for directory in [ROOT_TEST_DIR, statistics_dir, results_base_dir, results_extr_dir, forest_dir, embedding_dir]: # ]:
+        if os.path.exists(TEST_DATASET_DIR) and user_interaction:
+            if input(get_local_time(), f' Directory {TEST_DATASET_DIR} already exists: delete it (old data will be lost)? (yes/no) ') in ('y', 'yes'):
+                shutil.rmtree(TEST_DATASET_DIR)
+        for directory in [TEST_DATASET_DIR, statistics_dir, results_base_dir, results_extr_dir, forest_dir, embedding_dir]: # ]:
             if not os.path.exists(directory): 
                 print(get_local_time(), f' Creating directory {directory}...')
                 os.makedirs(directory)

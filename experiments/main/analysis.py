@@ -25,6 +25,8 @@ if __name__ == '__main__':
     parser.add_argument('--num-query-samples',
                         type=int, required=False, default=1000,
                         help='extract results only for the given result set size (e.g. 1000)')
+    parser.add_argument('--dataset', 
+                        required=True, choices=['wikipedia', 'gittables'])
     parser.add_argument('--small', 
                         required=False, action='store_true',
                         help='works on small collection versions (only for testing)')
@@ -33,19 +35,20 @@ if __name__ == '__main__':
     test_name =         args.test_name
     nsamples =          args.num_query_samples
     num_cpu =           args.num_cpu
+    dataset =           args.dataset
     small =             args.small
     q = numerize(nsamples, asint=True)
 
-    small = False
-    mongoclient, collections = get_mongodb_collections(small)
+    mongoclient, collections = get_mongodb_collections(dataset=dataset, small=small)
 
-
-    ROOT_TEST_DIR =         defpath.data_path.tests + '/' + test_name
+    ROOT_TEST_DIR =         defpath.data_path.tests + f'/{test_name}'
+    TEST_DATASET_DIR =      ROOT_TEST_DIR + f'/{dataset}'
     results_extr_dir =      ROOT_TEST_DIR + '/results/extracted'
+    
     analyses_dir =          ROOT_TEST_DIR + '/results/analyses'
     analyses_query_dir =    analyses_dir + f'/{q}'
+    
     statistics_dir =        ROOT_TEST_DIR  + '/statistics'
-
     runtime_stat_file =     statistics_dir + '/runtime.csv'     
 
     runtime_metrics = []
@@ -105,6 +108,7 @@ if __name__ == '__main__':
     ax.grid()
     ax.set_xlabel('ALGORITHM overlap - SLOTH overlap')
     ax.set_ylabel('frequency')
+    fig.suptitle(f'Algorithm and Real Overlap comparison for dataset {dataset}')
 
     plt.legend()
     plt.savefig(analyses_dir + '/graph_difference.png')
@@ -132,6 +136,7 @@ if __name__ == '__main__':
     ax.set_ylabel('frequency')
     ax.set_yscale('log')
     ax.tick_params(axis='x', rotation=45)
+    fig.suptitle(f'Algorithm and Real Overlap Normalizes comparison for dataset {dataset}')
 
     plt.legend()
     plt.savefig(analyses_dir + '/graph_difference_norm.png')
@@ -217,7 +222,7 @@ if __name__ == '__main__':
     plt.xticks([1, 3, 5, 10], [1, 3, 5, 10])
     plt.xlabel('p')
     plt.ylabel('mean precision@p')
-
+    plt.title(f"Precision@p graph for dataset {dataset}")
     plt.legend()
     plt.savefig(analyses_dir + f'/graph_precision@p_q{q}.png')
     plt.close()
@@ -231,7 +236,8 @@ if __name__ == '__main__':
     plt.xticks([1, 3, 5, 10], [1, 3, 5, 10])
     plt.xlabel('p')
     plt.ylabel('mean precision@p normalised')
-
+    
+    plt.title(f"Precision@p normalised graph for dataset {dataset}")
     plt.legend()
     plt.savefig(analyses_dir + f'/graph_precision@p_norm_q{q}.png')
     plt.close()
@@ -293,6 +299,7 @@ if __name__ == '__main__':
     plt.xlabel("p")
     plt.ylabel("mean nDCG@p")
 
+    plt.title(f"nDCG@p graph for dataset {dataset}")
     plt.legend()
     plt.grid()
     plt.savefig(analyses_dir + f'/graph_ndcg@p_q{q}.png')

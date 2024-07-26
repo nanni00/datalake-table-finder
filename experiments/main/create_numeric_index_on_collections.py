@@ -12,14 +12,18 @@ if __name__ == '__main__':
                         help='if "set", add a new field "_id_numeric" to each document, i.e.  \
                             a numeric identifier to each document (in addition to the string _id already present). \
                             If "unset", delete the field "_id_numeric".')
-    parser.add_argument('--small', required=False, action='store_true',
+    parser.add_argument('--dataset', 
+                        required=True, choices=['wikipedia', 'gittables'])
+    parser.add_argument('--small', 
+                        required=False, action='store_true',
                         help='works on small collection versions (only for testing)')
 
     args = parser.parse_args()
     task = args.task
+    dataset = args.dataset
     small = args.small
 
-    mongoclient, collections = get_mongodb_collections(small)
+    mongoclient, collections = get_mongodb_collections(dataset=dataset, small=small)
     
     if task == 'set':
         _id_numeric = 0

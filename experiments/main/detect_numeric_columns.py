@@ -111,13 +111,15 @@ if __name__ == '__main__':
     parser.add_argument('-m', '--mode', 
                         required=False, choices=['naive', 'spacy'], default='naive',
                         help='defines how to detect numeric columns')
-    parser.add_argument('-w', '--num-workers', 
+    parser.add_argument('-w', '--num-cpu', 
                         type=int, required=False, default=min(os.cpu_count(), 64),
                         help='number of CPU(s) to use for processing, default is the minimum between computer CPUs and 64.')
     parser.add_argument('-s', '--sample-size', 
                         type=int, required=False, default=3,
                         help='defines how many cell(s) must be sampled in spacy mode from each column to detect wheter or not the column is numeric, \
                             default is 3. If set to -1 analyses the whole column.')
+    parser.add_argument('--dataset', 
+                        required=True, choices=['wikipedia', 'gittables'])
     parser.add_argument('--small',
                          required=False, action='store_true',
                         help='works on small collection versions (only for testing)')
@@ -125,11 +127,12 @@ if __name__ == '__main__':
     args = parser.parse_args()
     mode = args.mode
     task = args.task
-    ncpu = args.num_workers
+    ncpu = args.num_cpu
     nsamples = args.sample_size
+    dataset = args.dataset
     small = args.small
 
-    mongoclient, collections = get_mongodb_collections(small)
+    mongoclient, collections = get_mongodb_collections(dataset=dataset, small=small)
 
     if task == 'set':
         if mode == 'spacy':

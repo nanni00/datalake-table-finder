@@ -7,6 +7,8 @@ import numpy as np
 import pandas as pd
 import pymongo
 
+import pymongo.collation
+import pymongo.collection
 import pyspark
 from pyspark.sql import SparkSession
 
@@ -88,17 +90,26 @@ def convert_to_giga(x):
 
 
 
-def get_mongodb_collections(small=True):
+def get_mongodb_collections(dataset:str='wikipedia', small:bool=True) -> tuple[pymongo.MongoClient, pymongo.collection.Collection]:
     mongoclient = pymongo.MongoClient()
+    collections = []
 
-    if not small:
-        wikitables_coll = mongoclient.optitab.turl_training_set
-        snapshot_coll = mongoclient.sloth.latest_snapshot_tables
+    if dataset == 'wikipedia':
+        if small:
+            collections.append(mongoclient.optitab.turl_training_set_small)
+            collections.append(mongoclient.sloth.latest_snapshot_tables_small)
+        else:
+            collections.append(mongoclient.optitab.turl_training_set)
+            collections.append(mongoclient.sloth.latest_snapshot_tables)
+    elif dataset == 'gittables':
+        if small:
+            collections.append(mongoclient.sloth.gittables_small)
+        else:
+            collections.append(mongoclient.sloth.gittables)
     else:
-        wikitables_coll = mongoclient.optitab.turl_training_set_small
-        snapshot_coll = mongoclient.sloth.latest_snapshot_tables_small
+        raise ValueError('Unknown dataset: ' + str(dataset))
 
-    return mongoclient, [wikitables_coll, snapshot_coll]
+    return mongoclient, collections
 
 
 

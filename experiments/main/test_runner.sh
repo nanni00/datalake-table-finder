@@ -21,6 +21,7 @@ L=32
 NEO4J_USER=neo4j
 NEO4J_PASSWORD=12345678
 
+# number of cores used in parallel tasks
 NUM_CPU=72
 
 # ALGORITHMS="josie lshforest embedding"
@@ -30,6 +31,9 @@ NUM_CPU=72
 # MODES="set fasttext tabert"
 ALGORITHMS="embedding"
 MODES="tabert"
+
+# dataset
+DATASET="gittables"
 
 # tasks
 DATA_PREPRATION=0
@@ -88,6 +92,7 @@ do
                 --neo4j-password $NEO4J_PASSWORD \
                 --num-perm $NUM_PERM \
                 --num-cpu $NUM_CPU \
+                --dataset $DATASET \
                 --small
         fi
     done
@@ -105,6 +110,7 @@ if [[ $CLEAN -eq 1 ]]; then
                 --algorithm $ALGORITHM \
                 --mode $MODE \
                 --dbname $DBNAME \
+                --dataset $DATASET \
                 --clean
         done
     done
@@ -120,6 +126,7 @@ if [[ $EXTRACT -eq 1 ]]; then
             --num-query-samples $NUM_QUERY_SAMPLES \
             --num-cpu $NUM_CPU \
             --dbname $DBNAME \
+            --dataset $DATASET \
             --small
     done
 fi
@@ -133,6 +140,7 @@ if [[ $ANALYSE -eq 1 ]]; then
             --test-name $TEST_NAME \
             --num-query-samples $NUM_QUERY_SAMPLES \
             --num-cpu $NUM_CPU \
+            --dataset $DATASET \
             --small
     done
 fi

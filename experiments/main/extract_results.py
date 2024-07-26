@@ -87,7 +87,7 @@ class ResultDatabase:
 
 
 def _worker_result_extractor(inp):
-    global dbname, table_name, small
+    global dbname, table_name, dataset, small
     resultsdb = ResultDatabase(dbname, table_name)
     algorithm, mode, (query_id, _, result_ids, algorithm_overlaps) = inp
 
@@ -97,7 +97,7 @@ def _worker_result_extractor(inp):
     # here we need eval because on csv values are stored as strings
     result_ids, algorithm_overlaps = eval(result_ids), eval(algorithm_overlaps)
     
-    mongoclient, collections = get_mongodb_collections(small=small)
+    mongoclient, collections = get_mongodb_collections(dataset=dataset, small=small)
     
     # retrieve the query information from MongoDB
     doc_table_q = get_one_document_from_mongodb_by_key('_id_numeric', query_id, *collections)
@@ -150,8 +150,6 @@ def _worker_result_extractor(inp):
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--test-name', required=True, type=str, help='a user defined test name, used instead of the default one m<mode>')
-parser.add_argument('--small', required=False, action='store_true',
-                    help='works on small collection versions (only for testing)')
 parser.add_argument('--num-cpu', 
                     type=int, required=False, default=min(os.cpu_count(), 96),
                     help='number of CPU(s) to use for processing, default is the minimum between computer CPUs and 64.')
@@ -161,24 +159,30 @@ parser.add_argument('--num-query-samples',
 parser.add_argument('--dbname', 
                     type=str, required=True, default='user',
                     help='The database in which will be stored the computed SLOTH overlap for future analyses')
+parser.add_argument('--dataset', 
+                    required=True, choices=['wikipedia', 'gittables'])
+parser.add_argument('--small', required=False, action='store_true',
+                    help='works on small collection versions (only for testing)')
 
 args = parser.parse_args()
 test_name =         args.test_name
-small =             args.small
 nworkers =          args.num_cpu
 num_query_samples = args.num_query_samples
 dbname =            args.dbname
+dataset =           args.dataset
+small =             args.small
 
 table_name='results_table' if not small else 'results_table_small'
 
 num_query_samples = numerize(num_query_samples, asint=True)
 
 ROOT_TEST_DIR =             defpath.data_path.tests + f'/{test_name}'
-results_base_directory =    ROOT_TEST_DIR + '/results/base'
-results_extr_directory =    ROOT_TEST_DIR + '/results/extracted'
+TEST_DATASET_DIR =          ROOT_TEST_DIR + f'/{dataset}'
+results_base_directory =    TEST_DATASET_DIR + '/results/base'
+results_extr_directory =    TEST_DATASET_DIR + '/results/extracted'
 final_results_file =        results_extr_directory + f'/final_results_q{num_query_samples}.csv'
 
-statistics_dir =            ROOT_TEST_DIR  + '/statistics'
+statistics_dir =            TEST_DATASET_DIR  + '/statistics'
 runtime_stat_file =         statistics_dir + '/runtime.csv'     
 storage_stat_file =         statistics_dir + '/storage.csv'
 
