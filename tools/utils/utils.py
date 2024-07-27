@@ -26,7 +26,7 @@ def print_info(**dec_kwargs):
             msg_after = msg_after if not on_line else f'{msg_before} {msg_after}' if msg_before else msg_after 
             
             if msg_before: 
-                print(msg_before, end=end_line)
+                print(get_local_time(), msg_before, end=end_line)
             start = time.time()
             result = func(*args, **kwargs)            
             end = time.time()
@@ -34,7 +34,7 @@ def print_info(**dec_kwargs):
             if 'time' in dec_kwargs: 
                 print(f'Elapsed time: {round(end - start, 3)}s')
             if msg_after:
-                print(msg_after)
+                print(get_local_time(), msg_after)
             return result
         return wrapper
     return decorator
@@ -162,7 +162,7 @@ def get_tables_thresholds_from(tables_thresholds):
     )
 
 
-def get_initial_spark_rdd(small, num_cpu, tables_thresholds, spark_jars_packages=['org.mongodb.spark:mongo-spark-connector_2.12:10.3.0']) \
+def get_initial_spark_rdd(dataset, small, num_cpu, tables_thresholds, spark_jars_packages=['org.mongodb.spark:mongo-spark-connector_2.12:10.3.0']) \
     -> tuple[SparkSession, pyspark.rdd.RDD]:
         MIN_ROW, MAX_ROW, MIN_COLUMN, MAX_COLUMN, MIN_AREA, MAX_AREA = get_tables_thresholds_from(tables_thresholds)
 
@@ -182,10 +182,13 @@ def get_initial_spark_rdd(small, num_cpu, tables_thresholds, spark_jars_packages
         # adjusting logging level to error, avoiding warnings
         spark.sparkContext.setLogLevel("ERROR")
 
-        db_collections = zip(['optitab', 'sloth'], 
-                             ["turl_training_set_small" if small else "turl_training_set", 
-                              "latest_snapshot_tables_small" if small else "latest_snapshot_tables"])
-
+        if dataset == 'wikipedia':
+            db_collections = zip(['optitab', 'sloth'], 
+                                ["turl_training_set_small" if small else "turl_training_set", 
+                                "latest_snapshot_tables_small" if small else "latest_snapshot_tables"])
+        else:
+            db_collections = zip(['sloth'], ['gittables_small' if small else 'gittables'])
+            
         initial_rdd = spark.sparkContext.emptyRDD()
 
         for database, collection_name in db_collections:
@@ -201,8 +204,7 @@ def get_initial_spark_rdd(small, num_cpu, tables_thresholds, spark_jars_packages
                 .filter(f"""
                     size(content) BETWEEN {MIN_ROW} AND {MAX_ROW}
                     AND size(content[0]) BETWEEN {MIN_COLUMN} AND {MAX_COLUMN}
-                    AND size(content) * size(content[0]) BETWEEN {MIN_AREA} AND {MAX_AREA}"""
-                )
+                    AND size(content) * size(content[0]) BETWEEN {MIN_AREA} AND {MAX_AREA}""")
                 .rdd
                 .map(list)
             )
@@ -230,7 +232,7 @@ def _create_token_set(table, mode, numeric_columns, encode=None):
 
     if mode == 'set':
         tokens = list({prepare_token(token) for row in table for icol, token in enumerate(row) 
-                     if not pd.isna(token) and token and numeric_columns[icol] == 0})
+                     if not pd.isna(token) and token and numeric_columns[icol] == 0 and token != '{"$numberDouble": "NaN"}'})
     elif mode == 'bag':
         counter = defaultdict(int) # is that better? More space but no sort operation            
         
@@ -242,7 +244,7 @@ def _create_token_set(table, mode, numeric_columns, encode=None):
                 if not pd.isna(token) and token and numeric_columns[icol] == 0]
     else:
         raise Exception('Unknown mode: ' + str(mode))
-    return tokens if not encode else [token.encode('utf-8') for token in tokens]
+    return tokens if not encode else [token.encode(encode) for token in tokens]
 
 
 

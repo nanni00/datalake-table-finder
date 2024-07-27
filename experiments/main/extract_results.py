@@ -172,7 +172,8 @@ dbname =            args.dbname
 dataset =           args.dataset
 small =             args.small
 
-table_name='results_table' if not small else 'results_table_small'
+table_name = 'results_table' if not small else 'results_table_small'
+table_name += f'd{dataset}'
 
 num_query_samples = numerize(num_query_samples, asint=True)
 

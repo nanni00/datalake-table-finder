@@ -12,10 +12,9 @@ import pandas as pd
 import orjson
 
 from tools.sloth.utils import parse_table
-from tools.table_bert.table import Table, Column
-from tools.table_bert.table_bert import TableBertModel
 from tools.utils.utils import ( 
     check_table_is_in_thresholds,
+    get_local_time,
     get_one_document_from_mongodb_by_key,
     prepare_token,
     AlgorithmTester
@@ -91,7 +90,7 @@ class FastTextTableEmbedder(TableEmbedder):
         embedding; then gets the average of the normalised embeddings
         """
         table = [column for i, column in enumerate(parse_table(table, len(table[0]), 0)) if numeric_columns[i] == 0]
-        return np.array([self.model.get_sentence_vector(' '.join(column).replace('\n', ' ')) for column in table])
+        return np.array([self.model.get_sentence_vector(' '.join(map(str, column)).replace('\n', ' ')) for column in table])
 
     def get_dimension(self):
         return self.model.get_dimension()
@@ -100,6 +99,8 @@ class FastTextTableEmbedder(TableEmbedder):
 
 class TaBERTTableEmbedder(TableEmbedder):
     def __init__(self, model_path) -> None:
+        from tools.table_bert.table import Table, Column
+        from tools.table_bert.table_bert import TableBertModel
         self.model = TableBertModel.from_pretrained(model_name_or_path=model_path)
 
     def get_dimension(self):
@@ -111,7 +112,6 @@ class TaBERTTableEmbedder(TableEmbedder):
             header=[Column(f'Column_{i}', type='text') for i, _ in enumerate(numeric_columns) if numeric_columns[i] == 0],
             data=[[prepare_token(cell) for i, cell in enumerate(row) if numeric_columns[i] == 0] for row in table]
         ).tokenize(self.model.tokenizer)
-
 
     def embedding_table(self, table, numeric_columns, context=""):
         _, column_embedding, _ = self.model.encode(
@@ -185,7 +185,7 @@ class EmbeddingTester(AlgorithmTester):
             self._tabert_data_preparation()
         else:
             for collection in self.collections:
-                print(f'Starting pool working on {collection.database.name}.{collection.name}...')
+                print(f'{get_local_time()} Starting pool working on {collection.database.name}.{collection.name}...')
                 for doc in tqdm(collection.find({}, projection={"_id_numeric": 1, "content": 1, "numeric_columns": 1}), total=collection.count_documents({})):
                     _id_numeric, content, numeric_columns = doc['_id_numeric'], doc['content'], doc['numeric_columns']
                     
@@ -213,7 +213,6 @@ class EmbeddingTester(AlgorithmTester):
                 start_s = time()
                 _, ids = self.cidx.search(cembeddings, k)
                 end_s = time()
-                # ccnt = np.unique(np.vectorize(self.clut.lookup)(ids), return_counts=True)
                 ccnt = np.unique(ids, return_counts=True)
 
                 ctopk = sorted(zip(ccnt[0], ccnt[1]), key=lambda x: x[1], reverse=True)
@@ -227,6 +226,3 @@ class EmbeddingTester(AlgorithmTester):
         if os.path.exists(self.cidx_file):
             os.remove(self.cidx_file)
         
-        # if os.path.exists(self.clut_file):
-        #     os.remove(self.clut_file)
-    

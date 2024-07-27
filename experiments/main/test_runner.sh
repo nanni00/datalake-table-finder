@@ -1,6 +1,6 @@
 #!/bin/bash
 
-TEST_NAME=small_test
+TEST_NAME=GitTest
 
 # python scripts
 PY_TESTER=$THESIS_PATH/experiments/main/main_tester.py
@@ -24,28 +24,25 @@ NEO4J_PASSWORD=12345678
 # number of cores used in parallel tasks
 NUM_CPU=72
 
-# ALGORITHMS="josie lshforest embedding"
-# MODES="set bag fasttext"
-
-# ALGORITHMS="josie lshforest embedding"
-# MODES="set fasttext tabert"
-ALGORITHMS="embedding"
-MODES="tabert"
+ALGORITHMS="josie lshforest embedding"
+MODES="set bag fasttext"
+# ALGORITHMS="embedding"
+# MODES="tabert"
 
 # dataset
 DATASET="gittables"
 
 # tasks
-DATA_PREPRATION=0
-SAMPLE_QUERIES=0
-QUERY=0
+DATA_PREPRATION=1
+SAMPLE_QUERIES=1
+QUERY=1
 
 # query sizes in term of number of queries
-QUERY_SIZES="1000"
+QUERY_SIZES="100000"
 # QUERY_SIZES="1000 10000 100000"
 
 # extract more information from initial results (like SLOTH overlap for each table pair)
-EXTRACT=0
+EXTRACT=1
 
 # do the concrete analyses
 ANALYSE=1
@@ -78,7 +75,7 @@ do
 
         # run the program with all the parameters
         if [[ $DATA_PREPRATION -eq 1 || $SAMPLE_QUERIES -eq 1 || $QUERY -eq 1 ]]; then
-            echo "######################### TESTING $ALGORITHM $MODE TASK=$TASKS K=$K ##################################"
+            echo "######################### TESTING $ALGORITHM $MODE TASK=$TASKS K=$K DATASET=$DATASET ##################################"
             python $PY_TESTER \
                 --test-name $TEST_NAME \
                 --algorithm $ALGORITHM \
@@ -92,8 +89,7 @@ do
                 --neo4j-password $NEO4J_PASSWORD \
                 --num-perm $NUM_PERM \
                 --num-cpu $NUM_CPU \
-                --dataset $DATASET \
-                --small
+                --dataset $DATASET
         fi
     done
 done
@@ -104,7 +100,7 @@ if [[ $CLEAN -eq 1 ]]; then
     do
         for MODE in $MODES
         do
-            echo "######################### CLEANING $ALGORITHM $MODE ##################################"
+            echo "######################### CLEANING $ALGORITHM $MODE DATASET=$DATASET ##################################"
             python $PY_TESTER \
                 --test-name $TEST_NAME \
                 --algorithm $ALGORITHM \
@@ -120,14 +116,13 @@ fi
 if [[ $EXTRACT -eq 1 ]]; then
     for NUM_QUERY_SAMPLES in $QUERY_SIZES
     do        
-        echo "######################### EXTRACTION $NUM_QUERY_SAMPLES ##################################"
+        echo "######################### EXTRACTION $NUM_QUERY_SAMPLES DATASET=$DATASET ##################################"
         python $PY_RESULTS_EXTRACTION \
             --test-name $TEST_NAME \
             --num-query-samples $NUM_QUERY_SAMPLES \
             --num-cpu $NUM_CPU \
             --dbname $DBNAME \
-            --dataset $DATASET \
-            --small
+            --dataset $DATASET
     done
 fi
 
@@ -135,12 +130,11 @@ fi
 if [[ $ANALYSE -eq 1 ]]; then
     for NUM_QUERY_SAMPLES in $QUERY_SIZES
     do        
-        echo "######################### ANALYSIS $NUM_QUERY_SAMPLES ##################################"
+        echo "######################### ANALYSIS $NUM_QUERY_SAMPLES DATASET=$DATASET ##################################"
         python $PY_RESULTS_ANALYSIS \
             --test-name $TEST_NAME \
             --num-query-samples $NUM_QUERY_SAMPLES \
             --num-cpu $NUM_CPU \
-            --dataset $DATASET \
-            --small
+            --dataset $DATASET
     done
 fi

@@ -149,11 +149,13 @@ if __name__ == '__main__':
             for collection in collections:
                 collsize = collection.count_documents({})
                 batch_update = []
-                batch_size = 5000
+                batch_size = 1000
 
                 print(f'Starting pool working on {collection.database.name}.{collection.name}...')
                 for res in tqdm(pool.imap(
-                    worker, ((t['_id_numeric'], t['content'], mode) for t in collection.find({}, projection={"_id_numeric": 1, "content": 1})), chunksize=100)):
+                    worker, ((t['_id_numeric'], t['content'], mode) for t in collection.find({}, projection={"_id_numeric": 1, "content": 1})), chunksize=100), 
+                    total=collsize
+                    ):
                     batch_update.append(pymongo.UpdateOne({"_id_numeric": res[0]}, {"$set": {"numeric_columns": res[1]}}))
                     if len(batch_update) == batch_size:
                         collection.bulk_write(batch_update, ordered=False)

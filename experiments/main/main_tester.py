@@ -182,7 +182,7 @@ if __name__ == '__main__':
     # selecting the right tester accordingly to the specified algorithm and mode
     tester = None
     if algorithm == 'josie':
-        tester = josie.JOSIETester(mode, small, tables_thresholds, num_cpu, user_dbname, table_prefix, db_stat_file)
+        tester = josie.JOSIETester(mode, small, tables_thresholds, num_cpu, user_dbname, table_prefix, db_stat_file, dataset)
     elif algorithm == 'lshforest':
         tester = lshforest.LSHForestTester(mode, small, tables_thresholds, num_cpu, forest_file, num_perm, l, collections)
     elif algorithm == 'embedding':
@@ -239,6 +239,7 @@ if __name__ == '__main__':
 
     if CLEAN:
         tester.clean()
+        
     if mongoclient:
         mongoclient.close()
 

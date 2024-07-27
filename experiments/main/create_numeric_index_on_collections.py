@@ -26,7 +26,7 @@ if __name__ == '__main__':
 
     mongoclient, collections = get_mongodb_collections(dataset=dataset, small=small)
     batch_update = []
-    batch_size = 5000
+    batch_size = 1000
 
     if task == 'set':
         _id_numeric = 0

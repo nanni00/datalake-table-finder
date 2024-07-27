@@ -13,7 +13,7 @@ import pyspark
 
 import psycopg
 
-from tools.utils.utils import _create_token_set, convert_to_giga, print_info, get_initial_spark_rdd, AlgorithmTester
+from tools.utils.utils import _create_token_set, convert_to_giga, get_local_time, print_info, get_initial_spark_rdd, AlgorithmTester
 
 
 
@@ -169,7 +169,7 @@ class JOSIETester(AlgorithmTester):
     def __init__(self, mode, small, tables_thresholds, num_cpu, *args) -> None:
         super().__init__(mode, small, tables_thresholds, num_cpu)        
         
-        self.dbname, self.tables_prefix, self.db_stat_file = args
+        self.dbname, self.tables_prefix, self.db_stat_file, self.dataset = args
 
         self.josiedb = JosieDB(self.dbname, self.tables_prefix)
         self.josiedb.open()
@@ -177,7 +177,7 @@ class JOSIETester(AlgorithmTester):
         print("Status PostgreSQL connection: ", self.josiedb.is_open())
 
 
-    @print_info(msg_before='Creating PostegreSQL integer sets and inverted index tables...', msg_after='Completed.')
+    @print_info(msg_before=f'{get_local_time()} Creating PostegreSQL integer sets and inverted index tables...', msg_after=f'{get_local_time()} Completed.')
     def data_preparation(self):
 
         start = time()
@@ -198,7 +198,7 @@ class JOSIETester(AlgorithmTester):
             'org.mongodb.spark:mongo-spark-connector_2.12:10.3.0'
         ]
         
-        spark, initial_rdd = get_initial_spark_rdd(self.small, self.num_cpu, self.tables_thresholds, spark_jars_packages)
+        spark, initial_rdd = get_initial_spark_rdd(self.dataset, self.small, self.num_cpu, self.tables_thresholds, spark_jars_packages)
 
         mode = self.mode
 
@@ -383,7 +383,7 @@ class JOSIETester(AlgorithmTester):
         
 
 
-    @print_info(msg_before='Starting JOSIE tests...', msg_after='Completed.')
+    @print_info(msg_before=f'{get_local_time()} Starting JOSIE tests...', msg_after=f'{get_local_time()} Completed.')
     def query(self, results_file, k, query_ids, **kwargs):
         results_directory = kwargs['results_directory']
         token_table_on_memory = kwargs['token_table_on_memory']
@@ -397,11 +397,11 @@ class JOSIETester(AlgorithmTester):
 
         # if cost sampling tables already exist we assume they are correct and won't recreate them
         sample_costs_tables_exist = self.josiedb.cost_tables_exist()
-        print(f'Sample costs: {sample_costs_tables_exist}')
+        print(f'Sample costs: {not sample_costs_tables_exist}')
         self.josiedb.close()
 
         if not sample_costs_tables_exist:
-            print('Sampling costs...')
+            print(f'{get_local_time()} Sampling costs...')
             os.system(f'go run {josie_cmd_dir}/sample_costs/main.go \
                         --pg-database={self.dbname} \
                         --test_tag={self.tables_prefix} \
@@ -410,7 +410,7 @@ class JOSIETester(AlgorithmTester):
         # we are not considering the query preparation steps, since in some cases this will 
         # include also the cost sampling phase and in other cases it won't
         start_query = time()
-        print('Running top-K...')
+        print(f'{get_local_time()} Running top-K...')
         x = 'true' if token_table_on_memory else 'false'
         os.system(f'go run {josie_cmd_dir}/topk/main.go \
                     --pg-database={self.dbname} \
