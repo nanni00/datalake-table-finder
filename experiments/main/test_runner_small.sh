@@ -1,6 +1,6 @@
 #!/bin/bash
 
-TEST_NAME=b_test
+TEST_NAME=a_test_small
 
 # python scripts
 PY_TESTER=$THESIS_PATH/experiments/main/main_tester.py
@@ -35,14 +35,14 @@ DATASETS="gittables"
 SIZE="standard"
 
 # query sizes in term of number of queries
-QUERY_SIZES="50000"
+QUERY_SIZES="100"
 # QUERY_SIZES="1000 10000 100000"
 
 # tasks
-DATA_PREPRATION=1
+DATA_PREPRATION=0
 SAMPLE_QUERIES=0
-QUERY=1
-EXTRACT=1   # extract more information from initial results (like SLOTH overlap for each table pair) 
+QUERY=0
+EXTRACT=0   # extract more information from initial results (like SLOTH overlap for each table pair) 
 ANALYSE=1   # do the concrete analyses
 CLEAN=0   # remove database tables and big files
 

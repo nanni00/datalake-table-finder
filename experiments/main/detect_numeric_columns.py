@@ -135,7 +135,7 @@ if __name__ == '__main__':
     dataset = args.dataset
     small = args.small
 
-    mongoclient, collections = get_mongodb_collections(dataset=dataset, small=small)
+    mongoclient, collections = get_mongodb_collections(dataset=dataset, size=small)
 
     if task == 'set':
         if mode == 'spacy':

@@ -1,3 +1,4 @@
+import logging
 import os
 import sys
 import shutil
@@ -11,7 +12,8 @@ from tools.utils.utils import (
     get_local_time,
     get_mongodb_collections, 
     get_query_ids_from_query_file, 
-    sample_queries
+    sample_queries,
+    logging_setup
 )
 
 from tools import josie, lshforest, embedding #, neo4j_graph
@@ -21,7 +23,8 @@ from tools import josie, lshforest, embedding #, neo4j_graph
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--test-name', 
-                        type=str, required=True)
+                        type=str, required=True,
+                        help='the test name. It will be always considered as a lower-case string')
     parser.add_argument('-a', '--algorithm',
                         required=False, default='josie',
                         choices=['josie', 'lshforest', 'embedding', 'graph'])
@@ -53,8 +56,9 @@ if __name__ == '__main__':
     # parser.add_argument('--query-file', 
     #                     required=False, type=str, 
     #                     help='an absolute path to an existing file containing the queries which will be used for JOSIE tests')
-    parser.add_argument('--small', 
-                        required=False, action='store_true',
+    parser.add_argument('--size', 
+                        type=str, choices=['standard', 'small'],
+                        required=False, default='standard',
                         help='works on small collection versions (only for testing)')
     parser.add_argument('--dataset', 
                         required=True, choices=['wikipedia', 'gittables'])
@@ -104,7 +108,7 @@ if __name__ == '__main__':
     neo4j_user =        args.neo4j_user
     neo4j_passwd =      args.neo4j_password
     num_cpu =           args.num_cpu
-    small =             args.small
+    size =             args.size
     dataset =           args.dataset
 
     # JOSIE
@@ -115,6 +119,7 @@ if __name__ == '__main__':
     num_perm =          args.num_perm
     l =                 args.l
 
+    test_name = test_name.lower()
     nsamples = [int(nsamples)] if type(nsamples) == int else [int(n) for n in nsamples]
 
     # check configuration
@@ -149,6 +154,7 @@ if __name__ == '__main__':
     ROOT_TEST_DIR =             defpath.data_path.tests + f'/{test_name}'
     TEST_DATASET_DIR =          ROOT_TEST_DIR + f'/{dataset}'
     query_files =               {n: TEST_DATASET_DIR + f'/query_{numerize(n, asint=True)}.json' for n in nsamples}
+    logfile =                   TEST_DATASET_DIR + '/logging.log'
 
     # LSH-Forest stuff
     forest_dir =                TEST_DATASET_DIR + f'/lshforest' 
@@ -170,11 +176,16 @@ if __name__ == '__main__':
     storage_stat_file =         statistics_dir + '/storage.csv'
 
 
+    # a set of tokens that will be discarded when working on a specific dataset
+    # 'comment' and 'story' are very frequent in GitTables, should they be removed? 
+    blacklist = {'{"$numberDouble": "NaN"}', 'comment', 'story'} if dataset == 'gittables' else set()
+    # blacklist = {'{"$numberDouble": "NaN"}'} if dataset == 'gittables' else set()
+
     # a list containing information about timing of each step
     runtime_metrics = []
 
     # the MongoDB collections where initial tables are stored
-    mongoclient, collections = get_mongodb_collections(dataset=dataset, small=small)
+    mongoclient, collections = get_mongodb_collections(dataset=dataset, size=size)
 
     # the prefix used in the PostgreSQL database tables (mainly for JOSIE)
     table_prefix = f'{test_name}_d{dataset}_m{mode}'
@@ -182,28 +193,32 @@ if __name__ == '__main__':
     # selecting the right tester accordingly to the specified algorithm and mode
     tester = None
     if algorithm == 'josie':
-        tester = josie.JOSIETester(mode, small, tables_thresholds, num_cpu, user_dbname, table_prefix, db_stat_file, dataset)
+        tester = josie.JOSIETester(mode, size, tables_thresholds, num_cpu, blacklist, user_dbname, table_prefix, db_stat_file, dataset)
     elif algorithm == 'lshforest':
-        tester = lshforest.LSHForestTester(mode, small, tables_thresholds, num_cpu, forest_file, num_perm, l, collections)
+        tester = lshforest.LSHForestTester(mode, size, tables_thresholds, num_cpu, blacklist, forest_file, num_perm, l, collections)
     elif algorithm == 'embedding':
         model_path = defpath.model_path.fasttext + '/cc.en.300.bin' if mode == 'fasttext' else defpath.model_path.tabert + '/tabert_base_k3/model.bin'
-        tester = embedding.EmbeddingTester(mode, small, tables_thresholds, num_cpu, model_path, cidx_file, collections)
+        tester = embedding.EmbeddingTester(mode, size, tables_thresholds, num_cpu, blacklist, model_path, cidx_file, collections)
     # elif algorithm == 'graph':
     #     if mode == 'neo4j':
     #         tester = neo4j_graph.Neo4jTester(mode, small, tables_thresholds, num_cpu, neo4j_user, neo4j_passwd, os.environ["NEO4J_HOME"] + "/data/databases/neo4j/", collections)
 
 
+
     if DATA_PREPARATION or QUERY or SAMPLE_QUERIES:
         if os.path.exists(TEST_DATASET_DIR) and user_interaction:
-            if input(get_local_time(), f' Directory {TEST_DATASET_DIR} already exists: delete it (old data will be lost)? (yes/no) ') in ('y', 'yes'):
+            if input(get_local_time(), f'Directory {TEST_DATASET_DIR} already exists: delete it (old data will be lost)? (yes/no) ') in ('y', 'yes'):
                 shutil.rmtree(TEST_DATASET_DIR)
         for directory in [TEST_DATASET_DIR, statistics_dir, results_base_dir, results_extr_dir, forest_dir, embedding_dir]: # ]:
             if not os.path.exists(directory): 
-                print(get_local_time(), f' Creating directory {directory}...')
+                logging.info(f'Creating directory {directory}...')
                 os.makedirs(directory)
-            
+    
+    logging_setup(logfile=logfile)
+    
         
     if DATA_PREPARATION:
+        logging.info(f'{"#" * 10} {test_name.upper()} - {algorithm.upper()} - {mode.upper()} - {k} - {dataset.upper()} - {size.upper()} - DATA PREPARATION {"#" * 10}')
         exec_time, storage_size = tester.data_preparation()
         runtime_metrics.append(('data_preparation', exec_time, get_local_time()))
         append = os.path.exists(storage_stat_file)
@@ -212,15 +227,17 @@ if __name__ == '__main__':
 
 
     if SAMPLE_QUERIES:
+        logging.info(f'{"#" * 10} {test_name.upper()} - {algorithm.upper()} - {mode.upper()} - {k} - {dataset.upper()} - {size.upper()} - SAMPLING QUERIES {"#" * 10}')
         for n, query_file in query_files.items():
             if not os.path.exists(query_file):
                 num_samples = sample_queries(query_file, n, tables_thresholds, *collections)
-                print(get_local_time(), f' Sampled {num_samples} query tables.')
+                logging.info(f'Sampled {num_samples} query tables.')
             else:
-                print(get_local_time(), f' Query file for {n} queries already present.')
+                logging.info(f'Query file for {n} queries already present.')
                 
 
     if QUERY:
+        logging.info(f'{"#" * 10} {test_name.upper()} - {algorithm.upper()} - {mode.upper()} - {k} - {dataset.upper()} - {size.upper()} - QUERY {"#" * 10}')
         for n, query_file in query_files.items():
             query_ids = get_query_ids_from_query_file(query_file)
             topk_results_file = topk_results_files[n]
@@ -238,10 +255,11 @@ if __name__ == '__main__':
 
 
     if CLEAN:
+        logging.info(f'{"#" * 10} {test_name.upper()} - {algorithm.upper()} - {mode.upper()} - {dataset.upper()} - {size.upper()} - CLEANING {"#" * 10}')
         tester.clean()
         
     if mongoclient:
         mongoclient.close()
 
 
-    print(get_local_time(), ' All tasks have been completed.')
+    logging.info('All tasks have been completed.')

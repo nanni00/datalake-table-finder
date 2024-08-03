@@ -41,7 +41,7 @@ class Neo4jTester(AlgorithmTester):
                 session.run("CREATE CONSTRAINT tab_id_constraint IF NOT EXISTS FOR (tab:Table) REQUIRE tab.table_id IS KEY") # KEY only with Enterprise edition
                 session.run("CREATE CONSTRAINT tab_id_constraint IF NOT EXISTS FOR (tok:Token) REQUIRE tok.token_id IS KEY") # KEY only with Enterprise edition
 
-        spark, initial_rdd = get_initial_spark_rdd(self.small, self.num_cpu, self.tables_thresholds, spark_jars_packages)
+        spark, initial_rdd = get_initial_spark_rdd(self.size, self.num_cpu, self.tables_thresholds, spark_jars_packages)
                          
         spark.conf.set('neo4j.authentication.basic.username', self.user)
         spark.conf.set('neo4j.authentication.basic.password', self.password)

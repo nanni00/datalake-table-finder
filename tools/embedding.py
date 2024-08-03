@@ -73,7 +73,7 @@ class TableEmbedder:
     def get_dimension(self) -> int:
         pass
 
-    def embedding_table(self, table, numeric_columns, **kwargs):
+    def embedding_table(self, table, numeric_columns, *args):
         pass
 
 
@@ -81,7 +81,7 @@ class FastTextTableEmbedder(TableEmbedder):
     def __init__(self, model_path):
         self.model = fasttext.load_model(model_path)
 
-    def embedding_table(self, table, numeric_columns, **kwargs):
+    def embedding_table(self, table, numeric_columns, *args):
         """ 
         Return columns embeddings as a np.array of shape (#table_columns, #model_vector_size)
 
@@ -89,8 +89,13 @@ class FastTextTableEmbedder(TableEmbedder):
         it takes a sentence, splits it on blank spaces and for each word computes and normalises its 
         embedding; then gets the average of the normalised embeddings
         """
+        blacklist = args
         table = [column for i, column in enumerate(parse_table(table, len(table[0]), 0)) if numeric_columns[i] == 0]
-        return np.array([self.model.get_sentence_vector(' '.join(map(str, column)).replace('\n', ' ')) for column in table])
+        return np.array([
+            self.model.get_sentence_vector(
+                ' '.join([str(token) for token in column if token not in blacklist]).replace('\n', ' ')
+                ) for column in table
+            ])
 
     def get_dimension(self):
         return self.model.get_dimension()
@@ -133,10 +138,9 @@ class TaBERTTableEmbedder(TableEmbedder):
 
 
 class EmbeddingTester(AlgorithmTester):
-    def __init__(self, mode, small, tables_thresholds, num_cpu, *args) -> None:
-        super().__init__(mode, small, tables_thresholds, num_cpu)
-        self.model_path, self.cidx_file, collections = args
-        self.collections = collections
+    def __init__(self, mode, small, tables_thresholds, num_cpu, blacklist, *args) -> None:
+        super().__init__(mode, small, tables_thresholds, num_cpu, blacklist)
+        self.model_path, self.cidx_file, self.collections = args
         self.cidx = None
         
         if mode == 'fasttext':
@@ -176,7 +180,9 @@ class EmbeddingTester(AlgorithmTester):
 
     def data_preparation(self):
         start = time()
-        self.cidx = faiss.index_factory(self.model.get_dimension(), "Flat,IDMap2")
+        # index "Flat,IDMap2" no good for this case, since we have to deal with more
+        # than 10M vectors the search time is not acceptable
+        self.cidx = faiss.index_factory(self.model.get_dimension(), "IVF65536_HNSW32,Flat,IDMap2")
         
         if self.mode == 'tabert':
             # since TaBERT can compute encodings for batch of tables, use it
@@ -190,11 +196,11 @@ class EmbeddingTester(AlgorithmTester):
                     _id_numeric, content, numeric_columns = doc['_id_numeric'], doc['content'], doc['numeric_columns']
                     
                     if check_table_is_in_thresholds(content, self.tables_thresholds):
-                        column_embeddings = self.model.embedding_table(content, numeric_columns)
+                        column_embeddings = self.model.embedding_table(content, numeric_columns, self.blacklist)
             
                         if column_embeddings.shape[0] > 0:
                             self.cidx.add_with_ids(column_embeddings, np.array([_id_numeric] * len(column_embeddings), dtype=np.int64))
-            
+        faiss.IndexFlat().get_xb
         faiss.write_index(self.cidx, self.cidx_file)
         return round(time() - start, 5), os.path.getsize(self.cidx_file) / (1024 ** 3)
 

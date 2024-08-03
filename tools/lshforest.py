@@ -1,3 +1,4 @@
+import logging
 import os
 import pickle
 from time import time
@@ -8,26 +9,26 @@ import polars as pl
 from tqdm import tqdm
 from datasketch import MinHashLSHForest, MinHash
 
-from tools.utils.utils import _create_token_set, check_table_is_in_thresholds, get_initial_spark_rdd, AlgorithmTester, get_local_time, get_one_document_from_mongodb_by_key
+from tools.utils.utils import create_token_set, check_table_is_in_thresholds, get_initial_spark_rdd, AlgorithmTester, get_local_time, get_one_document_from_mongodb_by_key
 
 
 def _mmh3_hashfunc(d):
     return mmh3.hash(d, signed=False)
 
 
-def create_table_minhash(table, mode, numeric_columns, num_perm):
+def create_table_minhash(table, mode, numeric_columns, num_perm, blacklist):
     m = MinHash(num_perm=num_perm, hashfunc=_mmh3_hashfunc)
-    token_set = _create_token_set(table, mode, numeric_columns, encode='utf-8')
+    token_set = create_token_set(table, mode, numeric_columns, encode='utf-8', blacklist=blacklist)
     m.update_batch(token_set)
     return m
 
 
 def _worker(input):
-    tables_thresholds, mode, num_perm, document = input
+    tables_thresholds, mode, num_perm, document, blacklist = input
     _id_numeric, content, numeric_columns = document['_id_numeric'], document['content'], document['numeric_columns']
 
     if check_table_is_in_thresholds(content, tables_thresholds) and not all(numeric_columns):
-        token_set = _create_token_set(content, mode, numeric_columns, 'utf-8')
+        token_set = create_token_set(content, mode, numeric_columns, 'utf-8', blacklist)
         m = MinHash(num_perm, hashfunc=_mmh3_hashfunc)
         m.update_batch(token_set)
         return _id_numeric, m
@@ -35,8 +36,8 @@ def _worker(input):
 
 
 class LSHForestTester(AlgorithmTester):
-    def __init__(self, mode, small, tables_thresholds, num_cpu, *args) -> None:
-        super().__init__(mode, small, tables_thresholds, num_cpu)
+    def __init__(self, mode, size, tables_thresholds, num_cpu, blacklist, *args) -> None:
+        super().__init__(mode, size, tables_thresholds, num_cpu, blacklist)
         self.forest_file, self.num_perm, self.l, self.collections = args
 
         self.forest = None
@@ -61,7 +62,7 @@ class LSHForestTester(AlgorithmTester):
         with mp.Pool(processes=self.num_cpu) as pool:
             for i, result in enumerate(pool.imap(_worker, 
                                             (
-                                                (self.tables_thresholds, self.mode, self.num_perm, document)
+                                                (self.tables_thresholds, self.mode, self.num_perm, document, self.blacklist)
                                                 for collection in self.collections
                                                 for document in collection.find({}, projection={"_id_numeric": 1, "content": 1, "numeric_columns": 1})
                                             ), chunksize=500)):
@@ -72,12 +73,13 @@ class LSHForestTester(AlgorithmTester):
                     continue
                 self.forest.add(result[0], result[1])
         print(end='\r')
-        print(get_local_time(), " Indexing forest...")
+        logging.info("Indexing forest...")
         self.forest.index()
 
-        print(get_local_time(), " Saving forest...")
+        logging.info("Saving forest...")
         self._forest_handler('save')
         
+        logging.info("Completed LSH-Forest data preparation.")
         return round(time() - start, 5), os.path.getsize(self.forest_file) / (1024 ** 3)
 
 
@@ -90,7 +92,7 @@ class LSHForestTester(AlgorithmTester):
             'org.mongodb.spark:mongo-spark-connector_2.12:10.3.0'
         ]
 
-        _, initial_rdd = get_initial_spark_rdd(self.small, self.num_cpu, self.tables_thresholds, spark_jars_packages)
+        _, initial_rdd = get_initial_spark_rdd(self.size, self.num_cpu, self.tables_thresholds, spark_jars_packages)
 
         self.forest = MinHashLSHForest(self.num_perm, self.l)
 
@@ -118,9 +120,9 @@ class LSHForestTester(AlgorithmTester):
         results = []
 
         if not self.forest:
-            print(get_local_time(), ' Loading forest...')
+            logging.info('Loading forest...')
             self._forest_handler('load')
-            print(get_local_time(), ' Forest loaded.')
+            logging.info('Forest loaded.')
         for query_id in tqdm(query_ids):
             try:
                 hashvalues_q = self.forest.get_minhash_hashvalues(query_id)
@@ -129,7 +131,7 @@ class LSHForestTester(AlgorithmTester):
                 docq = get_one_document_from_mongodb_by_key('_id_numeric', query_id, *self.collections)
                 
                 numeric_columns_q, content_q = docq['numeric_columns'], docq['content']
-                token_set_q = _create_token_set(content_q, self.mode, numeric_columns_q)
+                token_set_q = create_token_set(content_q, self.mode, numeric_columns_q, blacklist=self.blacklist)
 
                 minhash_q = MinHash(num_perm=self.num_perm, hashfunc=_mmh3_hashfunc)
                 minhash_q.update_batch(token_set_q)
@@ -143,7 +145,7 @@ class LSHForestTester(AlgorithmTester):
             
             results.append([query_id, round(end_query - start_query, 3), str(topk_res[:k]), str([])])
 
-        print(get_local_time(), f' Saving results to {results_file}...')
+        logging.info(f' Saving results to {results_file}...')
         pl.DataFrame(results, schema=['query_id', 'duration', 'results_id', 'results_overlap']).write_csv(results_file)
         return round(time() - start, 5)
 

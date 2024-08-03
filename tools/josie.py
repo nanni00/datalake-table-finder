@@ -1,3 +1,4 @@
+import logging
 import os
 import binascii
 import re
@@ -13,7 +14,7 @@ import pyspark
 
 import psycopg
 
-from tools.utils.utils import _create_token_set, convert_to_giga, get_local_time, print_info, get_initial_spark_rdd, AlgorithmTester
+from tools.utils.utils import create_token_set, convert_to_giga, get_local_time, print_info, get_initial_spark_rdd, AlgorithmTester
 
 
 
@@ -41,7 +42,7 @@ class JosieDB:
     def is_open(self):
         return not self._dbconn._closed
 
-    @print_info(msg_before='Closing PostgreSQL database connection...')
+    @print_info(msg_before='Closing PostgreSQL database connection...', msg_after='PostgreSQL connection closed.')
     def close(self):
         self._dbconn.close()
 
@@ -53,7 +54,7 @@ class JosieDB:
         return inner
 
     @_commit_decorator
-    @print_info(msg_before='Dropping PostgreSQL database tables...')
+    @print_info(msg_before='Dropping PostgreSQL database tables...', msg_after='PostgreSQL tables dropped.')
     def drop_tables(self):    
         self._dbconn.execute(
             f"""
@@ -67,7 +68,7 @@ class JosieDB:
         )
 
     @_commit_decorator
-    @print_info(msg_before='Creating PostgreSQL database tables...')
+    @print_info(msg_before='Creating PostgreSQL database tables...', msg_after='PostgreSQL tables created.')
     def create_tables(self):
         self._dbconn.execute(
             f"""              
@@ -97,7 +98,7 @@ class JosieDB:
         )
 
     @_commit_decorator
-    @print_info(msg_before='Clearing PostgreSQL query table...')
+    @print_info(msg_before='Clearing PostgreSQL query table...', msg_after='PostgreSQL query table cleaned')
     def clear_query_table(self):
         self._dbconn.execute(
             f"""
@@ -106,7 +107,7 @@ class JosieDB:
         )
             
     @_commit_decorator
-    @print_info(msg_before='Inserting queries into PostgreSQL table...')
+    @print_info(msg_before='Inserting queries into PostgreSQL table...', msg_after='Queries inserted into PostgreSQL table.')
     def insert_data_into_query_table(self, table_ids:list[int]):
         self._dbconn.execute(
             f"""
@@ -115,7 +116,7 @@ class JosieDB:
         )
 
     @_commit_decorator
-    @print_info(msg_before='Creating PostgreSQL table sets index...')
+    @print_info(msg_before='Creating PostgreSQL table sets index...', msg_after='Sets table index created.')
     def create_sets_index(self):
         self._dbconn.execute(
             f""" 
@@ -125,7 +126,7 @@ class JosieDB:
         )
 
     @_commit_decorator
-    @print_info(msg_before='Creating PostgreSQL table inverted list index...')
+    @print_info(msg_before='Creating PostgreSQL table inverted list index...', msg_after='Inverted list table index created')
     def create_inverted_list_index(self):
         self._dbconn.execute(
             f"""
@@ -166,20 +167,15 @@ class JosieDB:
 
 
 class JOSIETester(AlgorithmTester):
-    def __init__(self, mode, small, tables_thresholds, num_cpu, *args) -> None:
-        super().__init__(mode, small, tables_thresholds, num_cpu)        
-        
+    def __init__(self, mode, size, tables_thresholds, num_cpu, blacklist, *args) -> None:
+        super().__init__(mode, size, tables_thresholds, num_cpu, blacklist)        
         self.dbname, self.tables_prefix, self.db_stat_file, self.dataset = args
-
         self.josiedb = JosieDB(self.dbname, self.tables_prefix)
         self.josiedb.open()
-        
-        print("Status PostgreSQL connection: ", self.josiedb.is_open())
+        logging.info("Status PostgreSQL connection: ", self.josiedb.is_open())
 
-
-    @print_info(msg_before=f'{get_local_time()} Creating PostegreSQL integer sets and inverted index tables...', msg_after=f'{get_local_time()} Completed.')
+    @print_info(msg_before='Creating PostegreSQL integer sets and inverted index tables...', msg_after='Completed JOSIE data preparation.')
     def data_preparation(self):
-
         start = time()
         self.josiedb.drop_tables()
         self.josiedb.create_tables()
@@ -198,14 +194,14 @@ class JOSIETester(AlgorithmTester):
             'org.mongodb.spark:mongo-spark-connector_2.12:10.3.0'
         ]
         
-        spark, initial_rdd = get_initial_spark_rdd(self.dataset, self.small, self.num_cpu, self.tables_thresholds, spark_jars_packages)
+        spark, initial_rdd = get_initial_spark_rdd(self.dataset, self.size, self.num_cpu, self.tables_thresholds, spark_jars_packages)
 
-        mode = self.mode
+        mode, blacklist = self.mode, self.blacklist
 
         def prepare_tuple(t):
-            nonlocal mode
+            nonlocal mode, blacklist
             # t = (_id_numeric, content, numeric_columns)
-            return [t[0], _create_token_set(t[1], mode, t[2])]    
+            return [t[0], create_token_set(t[1], mode, t[2], blacklist=blacklist)]    
         
         token_sets = (
             initial_rdd
@@ -381,9 +377,7 @@ class JOSIETester(AlgorithmTester):
         
         return round(time() - start, 3), dbstat['total_size'].apply(convert_to_giga).sum()
         
-
-
-    @print_info(msg_before=f'{get_local_time()} Starting JOSIE tests...', msg_after=f'{get_local_time()} Completed.')
+    @print_info(msg_before='Starting JOSIE tests...', msg_after='Completed JOSIE tests.')
     def query(self, results_file, k, query_ids, **kwargs):
         results_directory = kwargs['results_directory']
         token_table_on_memory = kwargs['token_table_on_memory']
@@ -397,11 +391,11 @@ class JOSIETester(AlgorithmTester):
 
         # if cost sampling tables already exist we assume they are correct and won't recreate them
         sample_costs_tables_exist = self.josiedb.cost_tables_exist()
-        print(f'Sample costs: {not sample_costs_tables_exist}')
+        logging.info(f'Sample costs: {not sample_costs_tables_exist}')
         self.josiedb.close()
 
         if not sample_costs_tables_exist:
-            print(f'{get_local_time()} Sampling costs...')
+            logging.info('Sampling costs...')
             os.system(f'go run {josie_cmd_dir}/sample_costs/main.go \
                         --pg-database={self.dbname} \
                         --test_tag={self.tables_prefix} \
@@ -410,7 +404,7 @@ class JOSIETester(AlgorithmTester):
         # we are not considering the query preparation steps, since in some cases this will 
         # include also the cost sampling phase and in other cases it won't
         start_query = time()
-        print(f'{get_local_time()} Running top-K...')
+        logging.info('Running top-K...')
         x = 'true' if token_table_on_memory else 'false'
         os.system(f'go run {josie_cmd_dir}/topk/main.go \
                     --pg-database={self.dbname} \
@@ -421,9 +415,7 @@ class JOSIETester(AlgorithmTester):
                     --k={k}')
 
         # preparing output for next analyses
-
         results_df = pl.read_csv(results_file).select(['query_id', 'duration', 'results'])
-        results_df
         os.rename(results_file, results_file + '.raw')
         
         def get_result_ids(s):

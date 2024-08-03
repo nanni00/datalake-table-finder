@@ -508,15 +508,14 @@ def sloth(r_tab, s_tab, min_a=0, min_w=0, max_w=math.inf, min_h=0, max_h=math.in
                                            min_h, max_h, results, res_h, complete, verbose, metrics)
     except Exception as exc:
         if verbose:
-            print(exc)
+            print('Exact failed', exc)
         if True or var.run_approximate:
             try:
                 results, metrics = approximate_algorithm(bw, r_tab, s_tab, seeds, num_seeds, top_lev, theta, min_w,
                                                          max_w, min_h, max_h, results, res_h, complete, verbose,
                                                          metrics)
             except Exception as exc:
-                print('Approximate failed')
-                print(exc)
+                print('Approximate failed', exc)
 
     tot_time = time.time() - start_time
     if verbose:

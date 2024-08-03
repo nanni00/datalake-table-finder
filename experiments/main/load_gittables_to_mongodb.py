@@ -13,7 +13,7 @@ from tools.utils.utils import get_mongodb_collections
 
 gittables_csv_folder = '/data3/zecca/projects/sloth/armadillo/gittables/dataset/tables_csv'
 
-mongoclient, collections = get_mongodb_collections(dataset='gittables', small=False)
+mongoclient, collections = get_mongodb_collections(dataset='gittables', size=False)
 gittables_coll = collections[0]
 
 batch_size = 1000
