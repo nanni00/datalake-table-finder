@@ -133,8 +133,9 @@ logging_setup(logfile)
 logging.info(f'{"#" * 10} {test_name.upper()} - {dataset.upper()} - {size.upper()} - EXTRACTION {"#" * 10}')
 
 blacklist = {'{"$numberDouble": "NaN"}', 'comment', 'story'} if dataset == 'gittables' else set()
-table_name = f'results_table_d{dataset}_s{size}_blacklist' 
 # blacklist = {'{"$numberDouble": "NaN"}'} if dataset == 'gittables' else set()
+
+table_name = f'results_table_d{dataset}_s{size}_blacklist' 
 
 if os.path.exists(final_results_file):
     final_results = pl.read_csv(final_results_file)

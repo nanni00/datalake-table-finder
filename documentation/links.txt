@@ -1,0 +1,4 @@
+
+- LSH-Forest good info
+https://towardsdatascience.com/similarity-search-part-6-random-projections-with-lsh-forest-f2e9b31dcc47
+

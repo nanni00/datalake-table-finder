@@ -219,31 +219,37 @@ if __name__ == '__main__':
         
     if DATA_PREPARATION:
         logging.info(f'{"#" * 10} {test_name.upper()} - {algorithm.upper()} - {mode.upper()} - {k} - {dataset.upper()} - {size.upper()} - DATA PREPARATION {"#" * 10}')
-        exec_time, storage_size = tester.data_preparation()
-        runtime_metrics.append(('data_preparation', exec_time, get_local_time()))
-        append = os.path.exists(storage_stat_file)
-        dbsize = pd.DataFrame([[algorithm, mode, storage_size]], columns=['algorithm', 'mode', 'size(GB)'])
-        dbsize.to_csv(storage_stat_file, index=False, mode='a' if append else 'w', header=False if append else True)
-
+        try:    
+            exec_time, storage_size = tester.data_preparation()
+            runtime_metrics.append(('data_preparation', exec_time, get_local_time()))
+            append = os.path.exists(storage_stat_file)
+            dbsize = pd.DataFrame([[algorithm, mode, storage_size]], columns=['algorithm', 'mode', 'size(GB)'])
+            dbsize.to_csv(storage_stat_file, index=False, mode='a' if append else 'w', header=False if append else True)
+        except Exception as e:
+            logging.error(f"Error on data preparation: exception message {e.args}")
 
     if SAMPLE_QUERIES:
         logging.info(f'{"#" * 10} {test_name.upper()} - {algorithm.upper()} - {mode.upper()} - {k} - {dataset.upper()} - {size.upper()} - SAMPLING QUERIES {"#" * 10}')
         for n, query_file in query_files.items():
-            if not os.path.exists(query_file):
-                num_samples = sample_queries(query_file, n, tables_thresholds, *collections)
-                logging.info(f'Sampled {num_samples} query tables.')
-            else:
-                logging.info(f'Query file for {n} queries already present.')
-                
+            try:
+                if not os.path.exists(query_file):
+                    num_samples = sample_queries(query_file, n, tables_thresholds, *collections)
+                    logging.info(f'Sampled {num_samples} query tables (required {n}).')
+                else:
+                    logging.info(f'Query file for {n} queries already present.')
+            except Exception as e:
+                logging.error(f"Error on sampling queries: n={n}, query_file={query_file}, exception message {e.args}")
 
     if QUERY:
         logging.info(f'{"#" * 10} {test_name.upper()} - {algorithm.upper()} - {mode.upper()} - {k} - {dataset.upper()} - {size.upper()} - QUERY {"#" * 10}')
         for n, query_file in query_files.items():
-            query_ids = get_query_ids_from_query_file(query_file)
-            topk_results_file = topk_results_files[n]
-            exec_time = tester.query(topk_results_file, k, query_ids, results_directory=results_base_dir, token_table_on_memory=toktable_on_mem)
-            runtime_metrics.append((f'query_{numerize(len(query_ids), asint=True)}', exec_time, get_local_time()))
-
+            try:
+                query_ids = get_query_ids_from_query_file(query_file)
+                topk_results_file = topk_results_files[n]
+                exec_time = tester.query(topk_results_file, k, query_ids, results_directory=results_base_dir, token_table_on_memory=toktable_on_mem)
+                runtime_metrics.append((f'query_{numerize(len(query_ids), asint=True)}', exec_time, get_local_time()))
+            except Exception as e:
+                logging.error(f"Error on query: n={n}, query_file={query_file}, exception message {e.args}")
 
     if DATA_PREPARATION or QUERY or SAMPLE_QUERIES:
         add_header = not os.path.exists(runtime_stat_file)
