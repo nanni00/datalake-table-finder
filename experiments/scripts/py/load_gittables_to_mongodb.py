@@ -8,12 +8,12 @@ import pymongo
 import pandas as pd
 from tqdm import tqdm
 
-from tools.utils.utils import get_mongodb_collections
+from tools.utils.mongodb_utils import get_mongodb_collections
 
 
 gittables_csv_folder = '/data3/zecca/projects/sloth/armadillo/gittables/dataset/tables_csv'
 
-mongoclient, collections = get_mongodb_collections(dataset='gittables', size=False)
+mongoclient, collections = get_mongodb_collections(dataset='gittables', size='standard')
 gittables_coll = collections[0]
 
 batch_size = 1000

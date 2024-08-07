@@ -7,7 +7,7 @@ import pymongo
 from tqdm import tqdm
 
 from tools.sloth.utils import parse_table
-from tools.utils.utils import get_mongodb_collections
+from tools.utils.mongodb_utils import get_mongodb_collections
 
 
 NUMERICAL_NER_TAGS = {
@@ -123,8 +123,8 @@ if __name__ == '__main__':
                             default is 3. If set to -1 analyses the whole column.')
     parser.add_argument('--dataset', 
                         required=True, choices=['wikipedia', 'gittables'])
-    parser.add_argument('--small',
-                         required=False, action='store_true',
+    parser.add_argument('--size',
+                         required=False, default='standard',
                         help='works on small collection versions (only for testing)')
 
     args = parser.parse_args()
@@ -133,9 +133,9 @@ if __name__ == '__main__':
     ncpu = args.num_cpu
     nsamples = args.sample_size
     dataset = args.dataset
-    small = args.small
+    size = args.size
 
-    mongoclient, collections = get_mongodb_collections(dataset=dataset, size=small)
+    mongoclient, collections = get_mongodb_collections(dataset=dataset, size=size)
 
     if task == 'set':
         if mode == 'spacy':

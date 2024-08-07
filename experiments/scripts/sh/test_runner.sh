@@ -1,11 +1,13 @@
 #!/bin/bash
 
-TEST_NAME=b_test
+TEST_NAME=a_test
+
+PY_SCRIPTS_PATH=$THESIS_PATH/experiments/scripts/py
 
 # python scripts
-PY_TESTER=$THESIS_PATH/experiments/main/main_tester.py
-PY_RESULTS_EXTRACTION=$THESIS_PATH/experiments/main/extract_results.py
-PY_RESULTS_ANALYSIS=$THESIS_PATH/experiments/main/analysis.py
+PY_TESTER=$PY_SCRIPTS_PATH/main_tester.py
+PY_RESULTS_EXTRACTION=$PY_SCRIPTS_PATH/extract_results.py
+PY_RESULTS_ANALYSIS=$PY_SCRIPTS_PATH/analysis_pl.py
 
 
 # query generic parameters
@@ -25,24 +27,24 @@ NEO4J_PASSWORD=12345678
 # number of cores used in parallel tasks
 NUM_CPU=72
 
-ALGORITHMS="josie lshforest"
-MODES="set bag"
-# ALGORITHMS="embedding"
-# MODES="fasttext"
+# ALGORITHMS="josie lshforest"
+# MODES="set bag"
+ALGORITHMS="embedding"
+MODES="fasttext"
 
 # dataset
-DATASETS="gittables"
+DATASETS="wikipedia"
 SIZE="standard"
 
 # query sizes in term of number of queries
-QUERY_SIZES="50000"
+QUERY_SIZES="100000"
 # QUERY_SIZES="1000 10000 100000"
 
 # tasks
-DATA_PREPRATION=1
+DATA_PREPRATION=0
 SAMPLE_QUERIES=0
-QUERY=1
-EXTRACT=1   # extract more information from initial results (like SLOTH overlap for each table pair) 
+QUERY=0
+EXTRACT=0   # extract more information from initial results (like SLOTH overlap for each table pair) 
 ANALYSE=1   # do the concrete analyses
 CLEAN=0   # remove database tables and big files
 

@@ -14,7 +14,8 @@ import pyspark
 
 import psycopg
 
-from tools.utils.utils import create_token_set, convert_to_giga, get_local_time, print_info, get_initial_spark_rdd, AlgorithmTester
+from tools.utils.classes import AlgorithmTester
+from tools.utils.utils import create_token_set, convert_to_giga, print_info, get_initial_spark_rdd
 
 
 
@@ -167,9 +168,10 @@ class JosieDB:
 
 
 class JOSIETester(AlgorithmTester):
-    def __init__(self, mode, size, tables_thresholds, num_cpu, blacklist, *args) -> None:
-        super().__init__(mode, size, tables_thresholds, num_cpu, blacklist)        
-        self.dbname, self.tables_prefix, self.db_stat_file, self.dataset = args
+    def __init__(self, mode, dataset, size, tables_thresholds, num_cpu, blacklist, *args) -> None:
+        super().__init__(mode, dataset, size, tables_thresholds, num_cpu, blacklist)        
+        self.dbname, self.tables_prefix, self.db_stat_file = args
+        
         self.josiedb = JosieDB(self.dbname, self.tables_prefix)
         self.josiedb.open()
         logging.info("Status PostgreSQL connection: ", self.josiedb.is_open())

@@ -9,7 +9,10 @@ import polars as pl
 from tqdm import tqdm
 from datasketch import MinHashLSHForest, MinHash
 
-from tools.utils.utils import create_token_set, check_table_is_in_thresholds, get_initial_spark_rdd, AlgorithmTester, get_local_time, get_one_document_from_mongodb_by_key
+from tools.utils.classes import AlgorithmTester
+from tools.utils.utils import create_token_set, check_table_is_in_thresholds, get_initial_spark_rdd
+from tools.utils.mongodb_utils import get_one_document_from_mongodb_by_key
+
 
 
 def _mmh3_hashfunc(d):
@@ -36,8 +39,8 @@ def _worker(input):
 
 
 class LSHForestTester(AlgorithmTester):
-    def __init__(self, mode, size, tables_thresholds, num_cpu, blacklist, *args) -> None:
-        super().__init__(mode, size, tables_thresholds, num_cpu, blacklist)
+    def __init__(self, mode, dataset, size, tables_thresholds, num_cpu, blacklist, *args) -> None:
+        super().__init__(mode, dataset, size, tables_thresholds, num_cpu, blacklist)
         self.forest_file, self.num_perm, self.l, self.collections = args
 
         self.forest = None

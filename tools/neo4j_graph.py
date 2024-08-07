@@ -1,3 +1,4 @@
+import logging
 import os
 from time import time
 from collections import Counter
@@ -6,7 +7,8 @@ import mmh3
 import pandas as pd
 from neo4j import GraphDatabase
 
-from tools.utils.utils import AlgorithmTester, get_initial_spark_rdd, get_local_time
+from tools.utils.classes import AlgorithmTester
+from tools.utils.utils import get_initial_spark_rdd
 
 
 def get_table_tokens_counter(table, numeric_columns):
@@ -20,8 +22,8 @@ def get_table_tokens_counter(table, numeric_columns):
 
 
 class Neo4jTester(AlgorithmTester):
-    def __init__(self, mode, small, tables_thresholds, num_cpu, *args) -> None:
-        super().__init__(mode, small, tables_thresholds, num_cpu)
+    def __init__(self, mode, dataset, size, tables_thresholds, num_cpu, *args) -> None:
+        super().__init__(mode, dataset, size, tables_thresholds, num_cpu)
         
         self.user, self.password, self.neo4j_db_dir, self.collections = args
 
@@ -81,12 +83,12 @@ class Neo4jTester(AlgorithmTester):
                 )
         )
 
-        print("Total relationships: ", table_token_cnt.count())
+        logging.info("Total relationships: ", table_token_cnt.count())
         table_token_cnt = table_token_cnt.toDF(schema=['table_id', 'token_id', 'token_count'])
-        # pprint(table_token_cnt.head(n=5))
+        # plogging.info(table_token_cnt.head(n=5))
         batch_size = 100000
         
-        print(get_local_time(), ' Saving tables...')
+        logging.info('Saving tables...')
         start = time()
         (
             table_token_cnt 
@@ -100,9 +102,9 @@ class Neo4jTester(AlgorithmTester):
             .option("node.keys", "table_id")
             .save()
         )
-        print(get_local_time(), 'Completed. ', round(time() - start, 3))
+        logging.info('Completed. ', round(time() - start, 3))
 
-        print(get_local_time(), ' Saving tokens...')
+        logging.info('Saving tokens...')
         start = time()
         (
             table_token_cnt 
@@ -116,14 +118,14 @@ class Neo4jTester(AlgorithmTester):
             .option("node.keys", "token_id")
             .save()
         )
-        print(get_local_time(), 'Completed. ', round(time() - start, 3))
+        logging.info('Completed. ', round(time() - start, 3))
 
         # to avoid deadlocks (but this results into a very long, long time consuming task with zero parallelism...)
         # see https://neo4j.com/docs/spark/current/write/relationship/
         table_token_cnt = table_token_cnt.coalesce(1)
 
         # Here is assumed that Table and Token nodes are already created
-        print('saving relationships...')
+        logging.info('Saving relationships...')
         start = time()
         (
             table_token_cnt
@@ -148,7 +150,7 @@ class Neo4jTester(AlgorithmTester):
                 .option("relationship.properties", "token_count")
                 .save()
         )
-        print(get_local_time(), 'Completed. ', round(time() - start, 3))
+        logging.info('Completed. ', round(time() - start, 3))
 
         return round(time() - start_data_prep, 5), sum(os.path.getsize(self.neo4j_db_dir + dbfile) for dbfile in os.listdir(self.neo4j_db_dir)) / (1024 ** 3)
 
@@ -201,6 +203,6 @@ class Neo4jTester(AlgorithmTester):
     
 
     def clean(self):
-        print("Not implemented yet")
+        logging.info("Not implemented yet")
 
 

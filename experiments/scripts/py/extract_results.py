@@ -1,4 +1,5 @@
 import logging
+import logging.handlers
 import warnings
 warnings.filterwarnings('ignore')
 import os
@@ -11,14 +12,13 @@ import polars as pl
 from numerize_denumerize.numerize import numerize
 from tqdm import tqdm
 
+from tools.utils.mongodb_utils import get_mongodb_collections, get_one_document_from_mongodb_by_key
+from tools.utils.classes import ResultDatabase
 from tools.utils.settings import DefaultPath as defpath
 from tools.utils.utils import (
     apply_sloth,
     get_local_time,
-    get_mongodb_collections, 
-    get_one_document_from_mongodb_by_key, 
     create_token_set,
-    ResultDatabase,
     logging_setup
 )
 
@@ -30,10 +30,11 @@ def _worker_result_extractor(chunk):
     mongoclient, collections = get_mongodb_collections(dataset=dataset, size=size)
 
     rv = []
+    hit = 0
 
-    for (algorithm, mode, (query_id, _, result_ids, algorithm_overlaps)) in chunk:
+    for (algorithm, mode, (query_id, _, result_ids, algorithm_overlaps)) in tqdm(chunk, total=len(chunk), disable=False if os.getpid() % 72 == 0 else True):
         if not result_ids:
-            rv.append([query_id, None, algorithm, mode, None, None, None, None, None])
+            rv.append([query_id, None, algorithm, mode, None, None, None, None, None, None])
             continue
         
         # here we need eval because on the csv file values are stored as strings
@@ -65,9 +66,13 @@ def _worker_result_extractor(chunk):
             
             # if already exists a couple with these ID, take its computed SLOTH overlap
             r_id, s_id = (query_id, _id_r) if query_id <= _id_r else (_id_r, query_id)
-            x = resultsdb.lookup_result_table(r_id, s_id)
-            sloth_overlap = x if x else apply_sloth(table_q, table_r, numeric_columns_q, numeric_columns_r)
-            
+            x = resultsdb.lookup_result_table(r_id, s_id), 0
+            if x[0]:
+                hit += 1
+            sloth_overlap, sloth_time = x if x[0] else apply_sloth(table_q, table_r, numeric_columns_q, numeric_columns_r, blacklist=blacklist)
+            if sloth_overlap == -1 and not x[0]:
+                logging.warning(f"Pair {query_id} - {_id_r} SLOTH failed")
+
             # the intersection size is used for computing Jaccard Similarity or other metrics like containment, 
             # so compute using the set semantic, since it considers the intersection of the table "basic" values
             set_q = create_token_set(table_q, 'set', numeric_columns_q, blacklist=blacklist)
@@ -76,11 +81,11 @@ def _worker_result_extractor(chunk):
 
             size_q, size_r = len(set_q), len(set_r)
 
-            rv.append([query_id, _id_r, algorithm, mode, algorithm_overlap, sloth_overlap, size_q, size_r, intersection_size])
+            rv.append([query_id, _id_r, algorithm, mode, algorithm_overlap, sloth_overlap, size_q, size_r, intersection_size, sloth_time])
         
     mongoclient.close()
     resultsdb.close()
-    return rv
+    return hit, rv
 
 
 def chunks(sequence, chunk_size):
@@ -112,7 +117,7 @@ nworkers =          args.num_cpu
 num_query_samples = args.num_query_samples
 dbname =            args.dbname
 dataset =           args.dataset
-size =             args.size
+size =              args.size
 
 test_name = test_name.lower()
 
@@ -138,6 +143,7 @@ blacklist = {'{"$numberDouble": "NaN"}', 'comment', 'story'} if dataset == 'gitt
 table_name = f'results_table_d{dataset}_s{size}_blacklist' 
 
 if os.path.exists(final_results_file):
+    logging.info(f"Extracted results file already exists at {final_results_file}, appending new results to it")
     final_results = pl.read_csv(final_results_file)
 else:
     final_results = pl.DataFrame(schema={
@@ -149,17 +155,19 @@ else:
         'sloth_overlap': pl.Int64, 
         'query_size': pl.Int64, 
         'res_tab_size': pl.Int64, 
-        'intersection_mode_size': pl.Int64
+        'intersection_mode_size': pl.Int64,
+        'sloth_time(s)': pl.Float64
         }
     )
 
 start_analysis = time()
 resultsdb = ResultDatabase(dbname, table_name)
-# resultsdb.clear()
+# clear the result table (occhio a farlo che poi si perdono i dati già salvati...)
+resultsdb.clear()
 resultsdb.create_table()
 
-# clear the result table (occhio a farlo che poi si perdono i dati già salvati...)
-# resultsdb.clear()
+# just to know if the results database is actually useful
+hit_rates = []
 
 with mp.Pool(processes=nworkers) as pool:
     for result_file in os.listdir(results_base_directory):
@@ -172,19 +180,31 @@ with mp.Pool(processes=nworkers) as pool:
         logging.info(f'Extracting results from {result_file} ({algorithm}-{mode})...')
         
         sss = time()
-        work = [(algorithm, mode, row) for row in results.iter_rows()]
+        # keeping the same order leads to longer time
+        # usually bad pairs where SLOTH fails in long time are adjacents, so 
+        # a shuffle whould be better, even if it need ~x2 memory peak
+        work = [(algorithm, mode, row) for row in results.sample(fraction=1.0, shuffle=True).iter_rows()]
         data = []
-
-        chunksize = max(min(len(work) // nworkers, 50), 1) # in order to (hopefully) use multiple pairs...
-        logging.info(f'Total work length: {len(work)}. Total workers: {nworkers}. Chunksize: {chunksize}. Starting extraction...')
-        for r in tqdm(pool.imap(_worker_result_extractor, chunks(work, chunksize), chunksize=chunksize), total=len(work)):
+        
+        # smaller chunk-size offer the possibility to better parallelization, because
+        # SLOTH often takes time and some processes finish while others still have many computations to do 
+        chunksize = max(min(len(work) // nworkers, 1000) // 4, 1)
+        logging.info(f'Total work length: {len(work)}, total workers: {nworkers}, chunk-size: {chunksize}. Starting extraction...')
+        extr_res = pool.map(_worker_result_extractor, chunks(work, chunksize))
+        logging.info(f"Completed extraction in {round(time() - sss)}s")
+        
+        hit = 0
+        for h, r in extr_res:
+            hit += h
             data += r
-            resultsdb.insert_results([[x[0], x[1], x[5]] if x[0] < x[1] else [x[1], x[0], x[5]] for x in r if x[1] != None])
+            resultsdb.insert_results([[x[0], x[1], x[5]] if x[0] < x[1] else [x[1], x[0], x[5]] for x in r if x[5] != None])
 
+        logging.info(f'hit = {hit} ({round(100 * hit / len(data), 3)}%)')
+        hit_rates.append(hit / len(data))
         final_results = pl.concat([final_results, pl.DataFrame(data, schema=final_results.schema, infer_schema_length=10)])
-        logging.info(f"Completed: {round(time() - sss)}s")
 
 final_results.write_csv(final_results_file)
+logging.info(f"Hit rates: {hit_rates}")
 
 # save the statistics about the analysis time
 add_header = not os.path.exists(runtime_stat_file)

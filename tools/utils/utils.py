@@ -1,20 +1,14 @@
-from abc import ABC, abstractmethod
-from collections import defaultdict
-import json
-import logging
-import logging.handlers
 import re
 import sys
 import time
+import json
 import logging
+import logging.handlers
+from collections import defaultdict
 
+import pyspark
 import numpy as np
 import pandas as pd
-import psycopg
-import psycopg.rows
-import pymongo
-import pymongo.collection
-import pyspark
 from pyspark.sql import SparkSession
 
 from tools.sloth.sloth import sloth
@@ -22,13 +16,10 @@ from tools.sloth.sloth import sloth
 
 def print_info(**dec_kwargs):
     def decorator(func):
-        def wrapper(*args, **kwargs):            
-            msg_before = dec_kwargs['msg_before'] if 'msg_before' in dec_kwargs else '' 
-            msg_after = dec_kwargs['msg_after'] if 'msg_after' in dec_kwargs else ''
-            
-            logging.info(msg_before)
-            result = func(*args, **kwargs)            
-            logging.info(msg_after)
+        def wrapper(*args, **kwargs):
+            if 'msg_before' in dec_kwargs: logging.info(dec_kwargs['msg_before'])
+            result = func(*args, **kwargs)
+            if 'msg_after' in dec_kwargs: logging.info(dec_kwargs['msg_after'])
             return result
         return wrapper
     return decorator
@@ -67,7 +58,8 @@ def cosine_similarity(arr1:np.array, arr2:np.array):
     return np.dot(arr1, arr2) / (np.linalg.norm(arr1) * np.linalg.norm(arr2))
 
 
-def get_int_from_(s: str):
+def get_int_from_(s: str) -> list[int]:
+    """Returns all the integer found in the given string"""
     return [int(x) for x in re.findall(r'\d+', s)]
     
 
@@ -84,66 +76,10 @@ def convert_to_giga(x):
 
 
 
-def get_mongodb_collections(dataset:str='wikipedia', size:str='standard') -> tuple[pymongo.MongoClient, list[pymongo.collection.Collection]]:
-    mongoclient = pymongo.MongoClient(directConnection=True)
-    collections = []
-    if size not in ['small', 'standard']:
-        logging.error('Unknown size: ' + str(size))
-        raise ValueError('Unknown size: ' + str(size))
-
-    if dataset == 'wikipedia':
-        if size == 'small':
-            collections.append(mongoclient.optitab.turl_training_set_small)
-            collections.append(mongoclient.sloth.latest_snapshot_tables_small)
-        else:
-            collections.append(mongoclient.optitab.turl_training_set)
-            collections.append(mongoclient.sloth.latest_snapshot_tables)
-    elif dataset == 'gittables':
-        if size == 'small':
-            collections.append(mongoclient.sloth.gittables_small)
-        else:
-            collections.append(mongoclient.sloth.gittables)
-    else:
-        logging.error('Unknown dataset: ' + str(dataset))
-        raise ValueError('Unknown dataset: ' + str(dataset))
-
-    return mongoclient, collections
-
-
-
-def get_one_document_from_mongodb_by_key(key, value, *collections:tuple[pymongo.collection.Collection]):
-    for collection in collections:
-        document = collection.find_one({key: value})
-        if document:
-            return document
-
-
 def check_table_is_in_thresholds(content, table_thresholds):
     return table_thresholds['min_row'] <= len(content) <= table_thresholds['max_row'] and \
         table_thresholds['min_column'] <= len(content[0]) <= table_thresholds['max_column'] and \
         table_thresholds['min_area'] <= len(content) * len(content[0]) <= table_thresholds['max_area']
-
-
-class AlgorithmTester(ABC):
-    def __init__(self, mode, size, tables_thresholds, num_cpu, blacklist) -> None:
-        self.mode = mode
-        self.size = size
-        self.num_cpu = num_cpu
-        self.tables_thresholds = tables_thresholds
-        self.blacklist = blacklist
-
-    @abstractmethod
-    def data_preparation(self) -> None:
-        pass
-    
-    @abstractmethod
-    def query(self, results_file, k, query_ids, *args) -> None:
-        pass
-
-    @abstractmethod
-    def clean(self) -> None:
-        pass
-
 
 
 
@@ -245,12 +181,12 @@ def create_token_set(table, mode, numeric_columns, encode=None, blacklist:set=se
 
 
 # TODO insert tokens blacklist here
-def apply_sloth(table1, table2, numeric_columns1, numeric_columns2, verbose=False) -> int:
+def apply_sloth(table1, table2, numeric_columns1, numeric_columns2, verbose=False, blacklist=[]) -> tuple[int, float]:
     num_null = 0
 
     def format_value_for_excluding_nan(t):
         nonlocal num_null
-        if not t or pd.isna(t):
+        if not t or pd.isna(t) or t in blacklist:
             num_null += 1
             return f'{t}@{num_null}'
         t = prepare_token(t)
@@ -260,10 +196,14 @@ def apply_sloth(table1, table2, numeric_columns1, numeric_columns2, verbose=Fals
     table2 = [[format_value_for_excluding_nan(row[i]) for row in table2] for i in range(len(table2[0])) if numeric_columns2[i] == 0]
 
     metrics = []
-    _, metrics = sloth(table1, table2, metrics=metrics, verbose=verbose)
-    largest_ov_sloth = metrics[-2]
-    return largest_ov_sloth
-
+    start_sloth = time.time()
+    try:
+        _, metrics = sloth(table1, table2, metrics=metrics, verbose=verbose)
+        tot_sloth_time = round(time.time() - start_sloth, 3)
+        largest_ov_sloth = metrics[-2]
+        return largest_ov_sloth, tot_sloth_time
+    except TimeoutError:
+        return -1, round(time.time() - start_sloth, 3)
 
 
 
@@ -304,81 +244,6 @@ def get_query_ids_from_query_file(query_file):
 
 
 
-class ResultDatabase:
-    """ Used only for testing, in order to avoid computing each time the SLOTH overlap """
-    def __init__(self, dbname, table_name='results_table'):
-        self.dbname = dbname
-        self.table_name = table_name
-        self._dbconn = psycopg.connect(f"port=5442 host=/tmp dbname={self.dbname}", row_factory=psycopg.rows.dict_row)
-
-    def create_table(self):
-        q = f"""
-            SELECT EXISTS (
-                SELECT FROM information_schema.tables 
-                WHERE table_name = '{self.table_name}'
-            );
-        """
-        exists = self._dbconn.execute(q).fetchone()['exists'] == True
-        if not exists:
-            self._dbconn.execute(
-                f"""
-                CREATE TABLE {self.table_name} (
-                    r_id integer NOT NULL,
-                    s_id integer NOT NULL,
-                    sloth_overlap integer NOT NULL,
-                    PRIMARY KEY (r_id, s_id)
-                );
-
-                CREATE INDEX {self.table_name}_r_id_index ON {self.table_name}(r_id, s_id);
-                """
-            )
-        else:
-            print('Results table already exists')
-        self._dbconn.commit()
-
-    def insert_results(self, values:list[list[int,int,int]]):
-        """
-        Inserts a list of computed overlap, where each entry is a list of three elements:
-        (r_id, s_id, sloth_overlap), assuming r_id < s_id
-        """
-        self._dbconn \
-            .cursor() \
-                .executemany(f"INSERT INTO {self.table_name} VALUES(%s, %s, %s) ON CONFLICT (r_id, s_id) DO NOTHING RETURNING (r_id);", values)
-        self._dbconn.commit()
-
-    def lookup_result_table(self, r_id, s_id) -> int|None:
-        """ Where the r_id < s_id """
-
-        result = self._dbconn.execute(
-            f"""
-            SELECT sloth_overlap FROM {self.table_name}
-            WHERE r_id = {r_id} AND s_id = {s_id}
-            """
-        )
-
-        try:
-            result = result.fetchone()
-        except psycopg.ProgrammingError:
-            raise Exception()
-
-        return None if result == None else result['sloth_overlap']
-        
-    def clear(self):
-        q = f"""
-            SELECT EXISTS (
-                SELECT FROM information_schema.tables 
-                WHERE table_name = {self.table_name}
-            );
-        """
-        exists = self._dbconn.execute(q).fetchone()['exists'] == True
-        if exists:
-            self._dbconn.execute(f"TRUNCATE {self.table_name} ;")
-            self._dbconn.commit()
-
-    def close(self):
-        self._dbconn.close()
-
-
 def logging_setup(logfile):
     logging.root.handlers = []
     logging.basicConfig(
@@ -395,4 +260,4 @@ def logging_setup(logfile):
         if name.startswith('pymongo'):
             logging.getLogger(name).setLevel(logging.WARN)
 
-    # print([logging.getLogger(name) for name in logging.root.manager.loggerDict])
+

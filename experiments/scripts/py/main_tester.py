@@ -10,11 +10,11 @@ from numerize_denumerize.numerize import numerize
 from tools.utils.settings import DefaultPath as defpath
 from tools.utils.utils import (
     get_local_time,
-    get_mongodb_collections, 
     get_query_ids_from_query_file, 
     sample_queries,
     logging_setup
 )
+from tools.utils.mongodb_utils import get_mongodb_collections
 
 from tools import josie, lshforest, embedding #, neo4j_graph
 
@@ -108,7 +108,7 @@ if __name__ == '__main__':
     neo4j_user =        args.neo4j_user
     neo4j_passwd =      args.neo4j_password
     num_cpu =           args.num_cpu
-    size =             args.size
+    size =              args.size
     dataset =           args.dataset
 
     # JOSIE
@@ -130,7 +130,7 @@ if __name__ == '__main__':
         ('lshforest', 'bag'),
         ('embedding', 'fasttext'),
         ('embedding', 'tabert'),
-        ('graph', 'neo4j')
+        # ('graph', 'neo4j')
         }:
         sys.exit(1)
 
@@ -192,16 +192,19 @@ if __name__ == '__main__':
 
     # selecting the right tester accordingly to the specified algorithm and mode
     tester = None
-    if algorithm == 'josie':
-        tester = josie.JOSIETester(mode, size, tables_thresholds, num_cpu, blacklist, user_dbname, table_prefix, db_stat_file, dataset)
-    elif algorithm == 'lshforest':
-        tester = lshforest.LSHForestTester(mode, size, tables_thresholds, num_cpu, blacklist, forest_file, num_perm, l, collections)
-    elif algorithm == 'embedding':
-        model_path = defpath.model_path.fasttext + '/cc.en.300.bin' if mode == 'fasttext' else defpath.model_path.tabert + '/tabert_base_k3/model.bin'
-        tester = embedding.EmbeddingTester(mode, size, tables_thresholds, num_cpu, blacklist, model_path, cidx_file, collections)
-    # elif algorithm == 'graph':
-    #     if mode == 'neo4j':
-    #         tester = neo4j_graph.Neo4jTester(mode, small, tables_thresholds, num_cpu, neo4j_user, neo4j_passwd, os.environ["NEO4J_HOME"] + "/data/databases/neo4j/", collections)
+    default_args = (mode, dataset, size, tables_thresholds, num_cpu, blacklist)
+    match algorithm:
+        case 'josie':
+            tester = josie.JOSIETester(*default_args, user_dbname, table_prefix, db_stat_file)
+        case 'lshforest':
+            tester = lshforest.LSHForestTester(*default_args, forest_file, num_perm, l, collections)
+        case 'embedding':
+            model_path = defpath.model_path.fasttext + '/cc.en.300.bin' if mode == 'fasttext' else defpath.model_path.tabert + '/tabert_base_k3/model.bin'
+            tester = embedding.EmbeddingTester(*default_args, model_path, cidx_file, collections)
+    
+        # case 'graph':
+        #     if mode == 'neo4j':
+        #         tester = neo4j_graph.Neo4jTester(mode, dataset, size, tables_thresholds, num_cpu, neo4j_user, neo4j_passwd, os.environ["NEO4J_HOME"] + "/data/databases/neo4j/", collections)
 
 
 
@@ -227,6 +230,7 @@ if __name__ == '__main__':
             dbsize.to_csv(storage_stat_file, index=False, mode='a' if append else 'w', header=False if append else True)
         except Exception as e:
             logging.error(f"Error on data preparation: exception message {e.args}")
+            
 
     if SAMPLE_QUERIES:
         logging.info(f'{"#" * 10} {test_name.upper()} - {algorithm.upper()} - {mode.upper()} - {k} - {dataset.upper()} - {size.upper()} - SAMPLING QUERIES {"#" * 10}')
@@ -250,7 +254,9 @@ if __name__ == '__main__':
                 runtime_metrics.append((f'query_{numerize(len(query_ids), asint=True)}', exec_time, get_local_time()))
             except Exception as e:
                 logging.error(f"Error on query: n={n}, query_file={query_file}, exception message {e.args}")
-
+                raise Exception()
+            
+            
     if DATA_PREPARATION or QUERY or SAMPLE_QUERIES:
         add_header = not os.path.exists(runtime_stat_file)
         with open(runtime_stat_file, 'a') as rfw:
