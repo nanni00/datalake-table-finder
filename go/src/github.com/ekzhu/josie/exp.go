@@ -227,10 +227,12 @@ func NanniRunExperiments(db *sql.DB, listTable string, setTable string, queryTab
 	log.Println("Counting total number of sets")
 	totalNumberOfSets = float64(countTotalNumberOfSets(db, setTable))
 	log.Printf("Total number of sets is %.0f", totalNumberOfSets)
-	log.Println("Creating token table...")
+	// log.Println("Creating token table...")
 	if useMemTokenTable {
+		log.Println("Creating token table on memory...")
 		tb = createTokenTableMem(db, listTable, queryIgnoreSelf)
 	} else {
+		log.Println("Creating token table on disk...")
 		tb = createTokenTableDisk(db, listTable, queryIgnoreSelf)
 	}
 
@@ -278,10 +280,11 @@ func runExperiments(db *sql.DB, listTable, setTable, minhashTable string, queryT
 	log.Println("Counting total number of sets")
 	totalNumberOfSets = float64(countTotalNumberOfSets(db, setTable))
 	log.Printf("Total number of sets is %.0f", totalNumberOfSets)
-	log.Println("Creating token table...")
 	if useMemTokenTable {
+		log.Println("Creating token table on memory...")
 		tb = createTokenTableMem(db, listTable, queryIgnoreSelf)
 	} else {
+		log.Println("Creating token table on disk...")
 		tb = createTokenTableDisk(db, listTable, queryIgnoreSelf)
 	}
 	for _, t := range queryTables {

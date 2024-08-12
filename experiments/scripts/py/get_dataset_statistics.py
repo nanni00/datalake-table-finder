@@ -31,10 +31,11 @@ for dataset in ['wikipedia', 'gittables']:
     thresh_tables = 0
 
     nrows = []
+    nrows_final = []
     ncols = []
-    ncols_nonum = []
+    ncols_final = []
     area = []
-    area_nonum = []
+    area_final = []
     nan = []
     num_cols = []
 
@@ -42,41 +43,59 @@ for dataset in ['wikipedia', 'gittables']:
         print(f'Scanning documents from {collection.database.name}.{collection.name}...')
         for doc in tqdm(collection.find({}), total=collection.count_documents({})):
             table = doc['content']
+            nrows.append(len(table))
             if check_table_is_in_thresholds(table, tables_thresholds) and not all(doc['numeric_columns']):
                 thresh_tables += 1
-                nrows.append(len(table))
+                nrows_final.append(len(table))
                 ncols.append(len(table[0]))
                 num_cols.append(sum(doc['numeric_columns']) / len(doc['numeric_columns']))
                 area.append(len(table) * len(table[0]))
                 t = [[row[i] for i, x in enumerate(doc['numeric_columns']) if x == 0] for row in doc['content']]
 
                 t = pd.DataFrame(t)
-                ncols_nonum.append(t.shape[1])
-                area_nonum.append(t.shape[0] * t.shape[1])
+                ncols_final.append(t.shape[1])
+                area_final.append(t.shape[0] * t.shape[1])
                 # because there are many values like '' in data, which are actually NaN but once encoded into MongoDB
                 # turn into empty string(?) 
-                nan.append(int(t.replace('', pd.NA).isna().sum().sum()) / area_nonum[-1])
+                nan.append(int(t.replace('', pd.NA).isna().sum().sum()) / area_final[-1])
 
     stat = {
         'dataset': dataset,
         'size': size,
         'tables': tables,
         'tables_in_thresholds': thresh_tables,
+        
         'rows_tot': np.sum(nrows),
+        'rows_max': np.amax(nrows),
         'rows_mean': np.mean(nrows),
         'rows_stdev': np.std(nrows),
+        
+        'final_rows_tot': np.sum(nrows_final),
+        'final_rows_max': np.amax(nrows_final),
+        'final_rows_mean': np.mean(nrows_final),
+        'final_rows_stdev': np.std(nrows_final),
+
         'columns_tot': np.sum(ncols),
+        'columns_max': np.amax(ncols),
         'columns_mean': np.mean(ncols),
         'columns_stdev': np.std(ncols),
-        'nonum_columns_tot': np.sum(ncols_nonum),
-        'nonum_columns_mean': np.mean(ncols_nonum),
-        'nonum_columns_stdev': np.std(ncols),
+        
+        'final_columns_tot': np.sum(ncols_final),
+        'final_columns_max': np.amax(ncols_final),
+        'final_columns_mean': np.mean(ncols_final),
+        'final_columns_stdev': np.std(ncols),
+        
         'area_mean': np.mean(area),
+        'area_max': np.amax(area),
         'area_stdev': np.std(area),
-        'nonum_area_mean': np.mean(area_nonum),
-        'nonum_area_stdev': np.std(area_nonum),
+        
+        'final_area_mean': np.mean(area_final),
+        'final_area_max': np.amax(area_final),
+        'final_area_stdev': np.std(area_final),
+
         '%numeric_columns_per_table_mean': np.mean(num_cols),
         '%numeric_columns_per_table_stdev': np.std(num_cols),
+        
         '%nan_per_table_mean': np.mean(nan),
         '%nan_per_table_stdev': np.std(nan),
     }

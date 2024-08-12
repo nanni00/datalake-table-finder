@@ -10,10 +10,9 @@ dependencies:
   - mmh3
   - tqdm
   - nltk
-  - psycopg
-  - jsonlines
-  - pymongo
   -pip:
+    - psycopg
+    - pymongo
     - timeout_decorator
     - bitarray
     - datasketch

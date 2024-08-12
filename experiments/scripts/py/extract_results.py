@@ -32,7 +32,7 @@ def _worker_result_extractor(chunk):
     rv = []
     hit = 0
 
-    for (algorithm, mode, (query_id, _, result_ids, algorithm_overlaps)) in tqdm(chunk, total=len(chunk), disable=False if os.getpid() % 72 == 0 else True):
+    for (algorithm, mode, (query_id, _, result_ids, algorithm_overlaps)) in tqdm(chunk, leave=False, total=len(chunk), disable=False if os.getpid() % 72 == 0 else True):
         if not result_ids:
             rv.append([query_id, None, algorithm, mode, None, None, None, None, None, None])
             continue
@@ -60,17 +60,17 @@ def _worker_result_extractor(chunk):
             if algorithm_overlaps:
                 algorithm_overlap = algorithm_overlaps[i]
             else:
-                set_q = create_token_set(table_q, 'set' if mode in ['fasttext', 'tabert'] else mode, numeric_columns_q, blacklist=blacklist)
-                set_r = create_token_set(table_r, 'set' if mode in ['fasttext', 'tabert'] else mode, numeric_columns_r, blacklist=blacklist)
+                set_q = create_token_set(table_q, 'set' if mode in ['fasttext', 'fasttextdist', 'tabert'] else mode, numeric_columns_q, blacklist=blacklist)
+                set_r = create_token_set(table_r, 'set' if mode in ['fasttext', 'fasttextdist', 'tabert'] else mode, numeric_columns_r, blacklist=blacklist)
                 algorithm_overlap = len(set(set_q).intersection(set_r))
             
             # if already exists a couple with these ID, take its computed SLOTH overlap
             r_id, s_id = (query_id, _id_r) if query_id <= _id_r else (_id_r, query_id)
             x = resultsdb.lookup_result_table(r_id, s_id), 0
-            if x[0]:
+            if x[0] != None:
                 hit += 1
-            sloth_overlap, sloth_time = x if x[0] else apply_sloth(table_q, table_r, numeric_columns_q, numeric_columns_r, blacklist=blacklist)
-            if sloth_overlap == -1 and not x[0]:
+            sloth_overlap, sloth_time = x if x[0] != None else apply_sloth(table_q, table_r, numeric_columns_q, numeric_columns_r, blacklist=blacklist)
+            if sloth_overlap == -1 and x[0] == None:
                 logging.warning(f"Pair {query_id} - {_id_r} SLOTH failed")
 
             # the intersection size is used for computing Jaccard Similarity or other metrics like containment, 
@@ -103,6 +103,9 @@ parser.add_argument('--num-cpu',
 parser.add_argument('--num-query-samples',
                     type=int, required=False, default=1000,
                     help='extract results only for the given result set size (e.g. 1000)')
+parser.add_argument('-k', 
+                    type=int, required=False, default=5,
+                    help='the K value for the top-K search')
 parser.add_argument('--dbname', 
                     type=str, required=True, default='user',
                     help='The database in which will be stored the computed SLOTH overlap for future analyses')
@@ -115,6 +118,7 @@ args = parser.parse_args()
 test_name =         args.test_name
 nworkers =          args.num_cpu
 num_query_samples = args.num_query_samples
+k =                 args.k
 dbname =            args.dbname
 dataset =           args.dataset
 size =              args.size
@@ -125,9 +129,9 @@ num_query_samples = numerize(num_query_samples, asint=True)
 
 ROOT_TEST_DIR =             defpath.data_path.tests + f'/{test_name}'
 TEST_DATASET_DIR =          ROOT_TEST_DIR + f'/{dataset}'
-results_base_directory =    TEST_DATASET_DIR + '/results/base'
+results_base_directory =    TEST_DATASET_DIR + f'/results/base/k{k}_q{num_query_samples}'
 results_extr_directory =    TEST_DATASET_DIR + '/results/extracted'
-final_results_file =        results_extr_directory + f'/final_results_q{num_query_samples}.csv'
+final_results_file =        results_extr_directory + f'/final_results_k{k}_q{num_query_samples}.csv'
 logfile =                   TEST_DATASET_DIR + '/logging.log'
 
 statistics_dir =            TEST_DATASET_DIR  + '/statistics'
@@ -142,28 +146,28 @@ blacklist = {'{"$numberDouble": "NaN"}', 'comment', 'story'} if dataset == 'gitt
 
 table_name = f'results_table_d{dataset}_s{size}_blacklist' 
 
-if os.path.exists(final_results_file):
-    logging.info(f"Extracted results file already exists at {final_results_file}, appending new results to it")
-    final_results = pl.read_csv(final_results_file)
-else:
-    final_results = pl.DataFrame(schema={
-        'query_id': pl.Int64, 
-        'result_id': pl.Int64, 
-        'algorithm': pl.String, 
-        'mode': pl.String, 
-        'algorithm_overlap': pl.Int64, 
-        'sloth_overlap': pl.Int64, 
-        'query_size': pl.Int64, 
-        'res_tab_size': pl.Int64, 
-        'intersection_mode_size': pl.Int64,
-        'sloth_time(s)': pl.Float64
-        }
-    )
+# if os.path.exists(final_results_file):
+#     logging.info(f"Extracted results file already exists at {final_results_file}, appending new results to it")
+#     final_results = pl.read_csv(final_results_file)
+# else:
+final_results = pl.DataFrame(schema={
+    'query_id': pl.Int64, 
+    'result_id': pl.Int64, 
+    'algorithm': pl.String, 
+    'mode': pl.String, 
+    'algorithm_overlap': pl.Int64, 
+    'sloth_overlap': pl.Int64, 
+    'query_size': pl.Int64, 
+    'res_tab_size': pl.Int64, 
+    'intersection_mode_size': pl.Int64,
+    'sloth_time(s)': pl.Float64
+    }
+)
 
 start_analysis = time()
 resultsdb = ResultDatabase(dbname, table_name)
 # clear the result table (occhio a farlo che poi si perdono i dati già salvati...)
-resultsdb.clear()
+# resultsdb.clear()
 resultsdb.create_table()
 
 # just to know if the results database is actually useful
@@ -172,10 +176,10 @@ hit_rates = []
 with mp.Pool(processes=nworkers) as pool:
     for result_file in os.listdir(results_base_directory):
         if result_file.endswith('.raw'): continue
-        if f"_q{num_query_samples}.csv" not in result_file: continue
+        # if f"_q{num_query_samples}.csv" not in result_file: continue
         
         results = pl.read_csv(results_base_directory + '/' + result_file)
-        algorithm, mode, nsamples, k = [x[1:] for x in result_file[:-4].split('_')]
+        algorithm, mode = [x[1:] for x in result_file[:-4].split('_')]
         
         logging.info(f'Extracting results from {result_file} ({algorithm}-{mode})...')
         
@@ -210,15 +214,15 @@ logging.info(f"Hit rates: {hit_rates}")
 add_header = not os.path.exists(runtime_stat_file)
 with open(runtime_stat_file, 'a') as rfw:
     if add_header:
-        rfw.write("local_time,algorithm,mode,task,time\n")
+        rfw.write("local_time,algorithm,mode,task,k,num_queriestime\n")
 
-    rfw.write(f"{get_local_time()},analysis,,extraction_q{num_query_samples},{round(time() - start_analysis, 3)}\n")
+    rfw.write(f"{get_local_time()},analysis,,extraction,{k},{num_query_samples},{round(time() - start_analysis, 3)}\n")
 
 # save statistics about analysis file size
 storage_size = os.path.getsize(final_results_file) / (1024 ** 3)
 
 append = os.path.exists(storage_stat_file)
-dbsize = pd.DataFrame([['analysis', f'extraction_q{num_query_samples}', storage_size]], columns=['algorithm', 'mode', 'size(GB)'])
+dbsize = pd.DataFrame([['analysis', f'extraction_k{k}_q{num_query_samples}', storage_size]], columns=['algorithm', 'mode', 'size(GB)'])
 dbsize.to_csv(storage_stat_file, index=False, mode='a' if append else 'w', header=False if append else True)
 
 resultsdb.close()

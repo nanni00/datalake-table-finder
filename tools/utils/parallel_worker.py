@@ -3,6 +3,7 @@ from math import log2
 import os
 from time import time
 from collections import defaultdict
+from collections import Counter as multiset
 
 import numpy as np
 import polars as pl
@@ -19,7 +20,7 @@ def worker_embedding_data_preparation(inp) -> tuple[np.ndarray, np.ndarray]:
     # print(dataset, size, mode, model_path)
     chunk, mode, dataset, size, model_path, tables_thresholds, blacklist = inp
     mongoclient, collections = get_mongodb_collections(dataset=dataset, size=size)
-    if mode == 'fasttext':
+    if mode in ['fasttext', 'fasttextdist']:
         model = FastTextTableEmbedder(model_path)
     print(f'Process {os.getpid()} (ppid={os.getppid()}) works on {chunk} total batch size {chunk.stop - chunk.start}')
     d = model.get_dimension()
@@ -31,7 +32,6 @@ def worker_embedding_data_preparation(inp) -> tuple[np.ndarray, np.ndarray]:
     batch_size = 1000
 
     start = time()
-    i = 0
     for i, qid in tqdm(enumerate(chunk), total=chunk.stop - chunk.start, disable=False if os.getpid() % 12 == 0 else True):
         doc = get_one_document_from_mongodb_by_key('_id_numeric', qid, *collections)
         _id_numeric, content, numeric_columns = doc['_id_numeric'], doc['content'], doc['numeric_columns']
@@ -39,13 +39,14 @@ def worker_embedding_data_preparation(inp) -> tuple[np.ndarray, np.ndarray]:
         if not check_table_is_in_thresholds(content, tables_thresholds) or all(numeric_columns):
             continue
 
-        i += 1
-        if i % batch_size == 0 and xb_batch.shape[0] > 0:
+        if xb_batch.shape[0] > batch_size:
             xb = np.concatenate((xb, xb_batch))
             xb_ids = np.concatenate((xb_ids, xb_ids_batch))
             xb_batch, xb_ids_batch = np.empty(shape=(0, d)), np.empty(shape=(0, 1))
         
         colemb = model.embedding_table(content, numeric_columns, blacklist)
+        if colemb.shape[0] == 0:
+            continue
         ids = np.expand_dims(np.repeat([_id_numeric], colemb.shape[0]), axis=0)
         xb_ids_batch = np.concatenate((xb_ids_batch, ids.T))
         xb_batch = np.concatenate((xb_batch, colemb), axis=0)
@@ -55,12 +56,6 @@ def worker_embedding_data_preparation(inp) -> tuple[np.ndarray, np.ndarray]:
     mongoclient.close()
     print(f'Process {os.getpid()} completed current batch of size {chunk.stop - chunk.start} in {round(time() - start, 3)}s')
     return xb, xb_ids
-
-
-
-
-
-
 
 
 def worker_fp_per_query(inp):
@@ -74,36 +69,37 @@ def worker_fp_per_query(inp):
     return y
 
 
-from collections import Counter as multiset
-
 def worker_precision(inp):
     query_id, data, p_values, query_silver_standard = inp
 
-    prec_results = []
+    results = []
+    
     true_relevances = [x[1] for x in query_silver_standard]
     
+    tr = multiset(true_relevances)
     true_relevances_multisets = {_p: multiset(true_relevances[:_p]) for _p in p_values}
     
     for (algorithm, mode), data in data.groupby(['algorithm', 'mode']):
-        result_relevances = data['sloth_overlap'].values.tolist()
+        predicted_relevances = data['sloth_overlap'].values.tolist()
         
-        # inv_rel_docs = defaultdict(set)
-        # for x, y in sorted_relevances:
-        #     inv_rel_docs[y].add(x)
-        # inv_rel_docs = sorted(list(inv_rel_docs.items()), reverse=True)
-
-        # to compute the Precision@P, take the intersection between the top-P relevant documents
-        # and the result IDs
-        # N.B. the top-P relevant documents "may" be more than P: in some cases, the same N documents
-        # have identical SLOTH overlap, so they share the same position in ranking
-        # TODO maybe directly check the overlap would not be right? 
-        rr = multiset(result_relevances)
         for _p in p_values:
-            tr = true_relevances_multisets[_p]
-            precision_at_p = sum(x[1] for x in (tr & rr).items())
-            # precision_at_k = len(set([r for r in true_relevances[:_p]]).intersection(result_relevances))
-            prec_results.append([query_id, len(query_silver_standard), algorithm, mode, _p, precision_at_p])
-    return prec_results
+            if _p > len(true_relevances):
+                continue
+            rr = multiset(predicted_relevances[:_p])
+            num_rel_res_in_top_p = sum(x[1] for x in (tr & rr).items())
+            precision = num_rel_res_in_top_p / _p
+            
+            num_rel_res_in_top_p_v2 = sum(x[1] for x in (true_relevances_multisets[_p] & rr).items())
+            precision_v2 = num_rel_res_in_top_p_v2 / _p
+            recall = num_rel_res_in_top_p / len(true_relevances)
+
+            try:
+                f1 = (2 * precision * recall) / (precision + recall)
+            except ZeroDivisionError:
+                f1 = 0
+            results.append([query_id, len(query_silver_standard), algorithm, mode, _p, precision, precision_v2, recall, f1])
+    
+    return results
 
 
 def ndcg_at_p(true_relevances, result_relevances, p):
@@ -114,8 +110,8 @@ def ndcg_at_p(true_relevances, result_relevances, p):
     dcg = sum(rel / log2(i + 1) for i, rel in enumerate(result_relevances[:p], start=1))
     if idcg < dcg:
         raise ValueError()
-
     return dcg / idcg, p
+
 
 def worker_ndcg(inp):
     query_id, query_res, p_values, query_silver_standard = inp

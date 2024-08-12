@@ -408,6 +408,7 @@ class JOSIETester(AlgorithmTester):
         start_query = time()
         logging.info('Running top-K...')
         x = 'true' if token_table_on_memory else 'false'
+        logging.info('Using token table on memory: ' + x)
         os.system(f'go run {josie_cmd_dir}/topk/main.go \
                     --pg-database={self.dbname} \
                     --test_tag={self.tables_prefix} \
@@ -426,12 +427,12 @@ class JOSIETester(AlgorithmTester):
         def get_result_overlaps(s):
             return str(list(map(int, re.findall(r'\d+', s)[1::2])))
         
-        results_df = results_df.with_columns((pl.col('duration') / 1000).keep_name())
+        results_df = results_df.with_columns((pl.col('duration') / 1000).name.keep())
         (   
             results_df
             .with_columns(
-                pl.col('results').apply(get_result_ids, return_dtype=pl.String).alias('result_ids'),
-                pl.col('results').apply(get_result_overlaps, return_dtype=pl.String).alias('result_overlaps'),
+                pl.col('results').map_elements(get_result_ids, return_dtype=pl.String).alias('result_ids'),
+                pl.col('results').map_elements(get_result_overlaps, return_dtype=pl.String).alias('result_overlaps'),
             )
             .drop('results')
             .write_csv(results_file)

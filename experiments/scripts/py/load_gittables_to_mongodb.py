@@ -46,6 +46,11 @@ for table_id in tqdm(os.listdir(gittables_csv_folder)):
                 batch_tables = []
 
 if batch_tables:
-    gittables_coll.bulk_write(batch_tables, ordered=False)
+    try:
+        gittables_coll.bulk_write(batch_tables, ordered=False)
+    except:
+        for table in batch_tables:
+            try: gittables_coll.insert_one(table)
+            except: continue
 
 mongoclient.close()

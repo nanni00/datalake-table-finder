@@ -66,29 +66,29 @@ def is_number_tryexcept(s):
         return False
     
 
-def naive_detect_table_numeric_columns(table: list[list], any_int:bool=False) -> list[int]:
+def naive_detect_table_numeric_and_null_columns(table: list[list], any_int:bool=False) -> list[int]:
     """ 
     :param table: a list of lists representing a table in row view
-    :param any_int: if set to True, a column is detected as an int column wheter any of its values is 
+    :param any_int: if set to True, a column is detected as an numeric column wheter any of its values is 
         a numeric value, else if the majority (i.e. #numeric_cells >= #column_size / 2 + 1) of its values are numerics
-    :return a list of int, where the i-th element is set to 1 if the i-th column is detected as numeric, 
+    :return a list of int, where the i-th element is set to 1 if the i-th column is detected as numeric or with only null values, 
         0 otherwise
     """
     if any_int:
         return [
-            int(any(is_number_tryexcept(cell) for cell in column))
+            int(any(is_number_tryexcept(cell) for cell in column) or any(cell for cell in column))
             for column in parse_table(table, len(table[0]), 0)
         ]
     else:
         return [
-            int(sum(is_number_tryexcept(cell) for cell in column) >= len(column) // 2 + 1)
+            int(sum(is_number_tryexcept(cell) for cell in column) >= len(column) // 2 + 1 or any(cell for cell in column))
             for column in parse_table(table, len(table[0]), 0)
         ]
 
 
 def worker(t: tuple[str, list[list]]):
     if mode == 'naive':
-        return (t[0], naive_detect_table_numeric_columns(t[1]))
+        return (t[0], naive_detect_table_numeric_and_null_columns(t[1]))
     elif mode == 'spacy':
         return (t[0], spacy_detect_table_numeric_columns(t[1], nlp[os.getpid() % ncpu], nsamples))
     else:

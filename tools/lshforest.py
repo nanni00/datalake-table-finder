@@ -149,7 +149,7 @@ class LSHForestTester(AlgorithmTester):
             results.append([query_id, round(end_query - start_query, 3), str(topk_res[:k]), str([])])
 
         logging.info(f' Saving results to {results_file}...')
-        pl.DataFrame(results, schema=['query_id', 'duration', 'results_id', 'results_overlap']).write_csv(results_file)
+        pl.DataFrame(results, schema=['query_id', 'duration', 'results_id', 'results_overlap'], orient='row').write_csv(results_file)
         return round(time() - start, 5)
 
     def clean(self):

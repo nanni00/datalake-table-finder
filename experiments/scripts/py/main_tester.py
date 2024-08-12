@@ -30,7 +30,7 @@ if __name__ == '__main__':
                         choices=['josie', 'lshforest', 'embedding', 'graph'])
     parser.add_argument('-m', '--mode', 
                         required=False, default='set',
-                        choices=['set', 'bag', 'fasttext', 'tabert', 'neo4j'],
+                        choices=['set', 'bag', 'fasttext', 'fasttextdist', 'tabert', 'neo4j'],
                         help='the specific version of the algorithm. Note that an algorithm doesn\'t support all the available modes: for example, \
                             if "algorithm"="embedding", the only accepted mode is "fasttext"')
     parser.add_argument('-k', 
@@ -89,7 +89,7 @@ if __name__ == '__main__':
     
     # Embedding versions specific arguments
     # None yet
-
+    
     # Neo4j graph specific arguments
     parser.add_argument('--neo4j-user', 
                         required=False, type=str, default='neo4j')
@@ -113,7 +113,7 @@ if __name__ == '__main__':
 
     # JOSIE
     user_dbname =       args.dbname
-    toktable_on_mem =   args.token_table_on_memory
+    token_table_on_mem =   args.token_table_on_memory
 
     # LSHForest
     num_perm =          args.num_perm
@@ -129,6 +129,7 @@ if __name__ == '__main__':
         ('lshforest', 'set'),       
         ('lshforest', 'bag'),
         ('embedding', 'fasttext'),
+        ('embedding', 'fasttextdist'),
         ('embedding', 'tabert'),
         # ('graph', 'neo4j')
         }:
@@ -162,12 +163,12 @@ if __name__ == '__main__':
     
     # embedding stuff
     embedding_dir =             TEST_DATASET_DIR + '/embedding'
-    cidx_file =                 embedding_dir + f'/col_idx_m{mode}.index'
+    cidx_file =                 embedding_dir + f'/col_idx_mfasttext.index' if mode in ['fasttext', 'fasttextdist'] else embedding_dir + f'/col_idx_m{mode}.index' 
 
     # results stuff
-    results_base_dir =          TEST_DATASET_DIR + '/results/base'
+    results_base_dir =          {n: TEST_DATASET_DIR + f'/results/base/k{k}_q{numerize(n, asint=True)}' for n in nsamples}
     results_extr_dir =          TEST_DATASET_DIR + '/results/extracted'
-    topk_results_files =        {n: results_base_dir + f'/a{algorithm}_m{mode}_k{k}_q{numerize(n, asint=True)}.csv' for n in nsamples}
+    topk_results_files =        {n: results_base_dir[n] + f'/a{algorithm}_m{mode}.csv' for n in nsamples}
 
     # statistics stuff
     statistics_dir =            TEST_DATASET_DIR  + '/statistics'
@@ -199,20 +200,15 @@ if __name__ == '__main__':
         case 'lshforest':
             tester = lshforest.LSHForestTester(*default_args, forest_file, num_perm, l, collections)
         case 'embedding':
-            model_path = defpath.model_path.fasttext + '/cc.en.300.bin' if mode == 'fasttext' else defpath.model_path.tabert + '/tabert_base_k3/model.bin'
+            model_path = defpath.model_path.fasttext + '/cc.en.300.bin' if mode in ['fasttext', 'fasttextdist'] else defpath.model_path.tabert + '/tabert_base_k3/model.bin'
             tester = embedding.EmbeddingTester(*default_args, model_path, cidx_file, collections)
-    
-        # case 'graph':
-        #     if mode == 'neo4j':
-        #         tester = neo4j_graph.Neo4jTester(mode, dataset, size, tables_thresholds, num_cpu, neo4j_user, neo4j_passwd, os.environ["NEO4J_HOME"] + "/data/databases/neo4j/", collections)
-
 
 
     if DATA_PREPARATION or QUERY or SAMPLE_QUERIES:
         if os.path.exists(TEST_DATASET_DIR) and user_interaction:
             if input(get_local_time(), f'Directory {TEST_DATASET_DIR} already exists: delete it (old data will be lost)? (yes/no) ') in ('y', 'yes'):
                 shutil.rmtree(TEST_DATASET_DIR)
-        for directory in [TEST_DATASET_DIR, statistics_dir, results_base_dir, results_extr_dir, forest_dir, embedding_dir]: # ]:
+        for directory in [TEST_DATASET_DIR, statistics_dir, *results_base_dir.values(), results_extr_dir, forest_dir, embedding_dir]:
             if not os.path.exists(directory): 
                 logging.info(f'Creating directory {directory}...')
                 os.makedirs(directory)
@@ -224,7 +220,7 @@ if __name__ == '__main__':
         logging.info(f'{"#" * 10} {test_name.upper()} - {algorithm.upper()} - {mode.upper()} - {k} - {dataset.upper()} - {size.upper()} - DATA PREPARATION {"#" * 10}')
         try:    
             exec_time, storage_size = tester.data_preparation()
-            runtime_metrics.append(('data_preparation', exec_time, get_local_time()))
+            runtime_metrics.append((('data_preparation', None), exec_time, get_local_time()))
             append = os.path.exists(storage_stat_file)
             dbsize = pd.DataFrame([[algorithm, mode, storage_size]], columns=['algorithm', 'mode', 'size(GB)'])
             dbsize.to_csv(storage_stat_file, index=False, mode='a' if append else 'w', header=False if append else True)
@@ -250,8 +246,10 @@ if __name__ == '__main__':
             try:
                 query_ids = get_query_ids_from_query_file(query_file)
                 topk_results_file = topk_results_files[n]
-                exec_time = tester.query(topk_results_file, k, query_ids, results_directory=results_base_dir, token_table_on_memory=toktable_on_mem)
-                runtime_metrics.append((f'query_{numerize(len(query_ids), asint=True)}', exec_time, get_local_time()))
+                query_mode = 'naive' if mode == 'fasttext' else 'distance'
+
+                exec_time = tester.query(topk_results_file, k, query_ids, results_directory=results_base_dir[n], token_table_on_memory=token_table_on_mem, query_mode=query_mode)
+                runtime_metrics.append((('query', numerize(len(query_ids), asint=True)), exec_time, get_local_time()))
             except Exception as e:
                 logging.error(f"Error on query: n={n}, query_file={query_file}, exception message {e.args}")
                 raise Exception()
@@ -261,9 +259,9 @@ if __name__ == '__main__':
         add_header = not os.path.exists(runtime_stat_file)
         with open(runtime_stat_file, 'a') as rfw:
             if add_header:
-                rfw.write("local_time,algorithm,mode,task,time(s)\n")
-            for (t_name, t_time, t_loctime) in runtime_metrics:
-                rfw.write(f"{t_loctime},{algorithm},{mode},{t_name},{t_time}\n")
+                rfw.write("local_time,algorithm,mode,task,k,num_queries,time(s)\n")
+            for ((t_name, num_queries), t_time, t_loctime) in runtime_metrics:
+                rfw.write(f"{t_loctime},{algorithm},{mode},{t_name},{k},{num_queries},{t_time}\n")
 
 
     if CLEAN:

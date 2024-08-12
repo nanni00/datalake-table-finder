@@ -1,7 +1,9 @@
+from itertools import groupby
 import logging
 import os
 import math
 import multiprocessing as mp
+from statistics import mean
 
 import numpy as np
 from time import time
@@ -19,7 +21,6 @@ from tools.utils.mongodb_utils import get_one_document_from_mongodb_by_key
     
 
 def chunks(sequence, chunk_size, *args):
-    print(args)
     # Chunks of chunk_size documents at a time.
     for j in range(0, len(sequence), chunk_size):
         yield (sequence[j:j + chunk_size], *args)
@@ -72,18 +73,13 @@ class EmbeddingTester(AlgorithmTester):
         xb = np.empty(shape=(0, d))
         xb_ids = np.empty(shape=(0, 1))
 
+        # the FastText original model is a huge model of 7.4GB, loading it for each core 
+        # is expensive, so reduce the number of actual CPUs...
+        num_effective_cpu = 24
         total_docs = sum(coll.count_documents({}) for coll in self.collections)
-        chunksize = max(total_docs // min(self.num_cpu, 12), 1)
+        chunksize = max(total_docs // min(self.num_cpu, num_effective_cpu), 1)
 
-        # TODO not elegant but ok
-        # globals()['mode'] = self.mode
-        # globals()['dataset'] = self.dataset
-        # globals()['size'] = self.size
-        # globals()['model_path'] = self.model_path
-        # globals()['blacklist'] = self.blacklist
-        # globals()['tables_thresholds'] = self.tables_thresholds
-
-        with mp.Pool(min(12, self.num_cpu)) as pool:
+        with mp.Pool(min(num_effective_cpu, self.num_cpu)) as pool:
             logging.info(f'Start embedding tables, chunk-size={chunksize}...')
             results = pool.map(worker_embedding_data_preparation, 
                                chunks(range(total_docs), chunksize, 
@@ -95,7 +91,7 @@ class EmbeddingTester(AlgorithmTester):
                 xb_ids = np.concatenate((xb_ids, xb_ids_batch))
                     
         N = xb.shape[0]
-        K = 4 * int(math.sqrt(N))
+        K = min(4 * int(math.sqrt(N)), 65536)
         training_size = min(64 * K, N)
         HNSW_links_per_vertex = 32
         logging.info(f'Vector shapes: xb={xb.shape}, xb_ids={xb_ids.shape}')
@@ -115,6 +111,13 @@ class EmbeddingTester(AlgorithmTester):
 
 
     def query(self, results_file, k, query_ids, **kwargs):
+        match kwargs['query_mode']:
+            case 'naive':
+                return self.query_naive(results_file, k, query_ids, **kwargs)
+            case 'distance':
+                return self.query_dist(results_file, k, query_ids, **kwargs)
+
+    def query_naive(self, results_file, k, query_ids, **kwargs):
         start = time()
         logging.info('Loading model...')
         if self.mode == 'fasttext':
@@ -133,12 +136,16 @@ class EmbeddingTester(AlgorithmTester):
         results = []
         logging.info('Start query time...')
         
+        # batch query processing, because it's significantly faster
         for i, qid in tqdm(enumerate(query_ids), total=len(query_ids)):
+            # when reached the batch threshold, execute the search for the 
+            # current batch vectors
             if i % batch_size == 0 and xq.shape[0] > 0:
                 start_s = time()
                 D, I = self.cidx.search(xq, int(k))
                 batch_mean_time = (time() - start_s) / xq.shape[0]
                 
+                # 
                 res = np.concatenate((xq_ids, I), axis=1)
                 res = np.split(res[:, 1:], np.unique(res[:, 0], return_index=True)[1][1:])
 
@@ -167,34 +174,84 @@ class EmbeddingTester(AlgorithmTester):
         pd.DataFrame(results, columns=['query_id', 'duration', 'results', 'results_overlap']).to_csv(results_file, index=False)    
         return round(time() - start, 5)
     
+    def query_dist(self, results_file, k, query_ids, **kwargs):
+        def compute_results(xq_ids, D, I, k):
+            ids = np.unique(xq_ids)
+            rI = np.concatenate((xq_ids, I), axis=1)
+            rI = np.split(rI[:, 1:], np.unique(rI[:, 0], return_index=True)[1][1:])
 
+            rD = np.concatenate((xq_ids, D), axis=1)
+            rD = np.split(rD[:, 1:], np.unique(rD[:, 0], return_index=True)[1][1:])
 
-
-    def _query(self, results_file, k, query_ids, **kwargs):
+            return [
+                    [
+                        int(y[0]) for y in
+                        sorted([[g[0], mean(x[1] for x in g[1])] for g in groupby(raw_group, key=lambda x: x[0])], key=lambda x: x[1])[:k]
+                    ]
+                    for raw_group in 
+                    [
+                        sorted(
+                            [
+                                x for j in range(rI[i].shape[0]) for x in zip(rI[i][j], rD[i][j]) if x[0] not in {ids[i], -1}
+                            ], 
+                            key=lambda x: x[0]) 
+                        for i in range(len(rI))
+                    ]
+                ]
+        
         start = time()
-        if not self.cidx and os.path.exists(self.cidx_file):
+        logging.info('Query mode: distance')
+        logging.info('Loading model...')
+        if self.mode in ['fasttext', 'fasttextdist']:
+            self.model = FastTextTableEmbedder(self.model_path)
+        elif self.mode == 'tabert':
+            self.model = TaBERTTableEmbedder(self.model_path)
+
+        if not self.cidx:
             logging.info(f'Reading column index from {self.cidx_file}...')
             self.cidx = faiss.read_index(self.cidx_file)
-            
+        
+        d = self.model.get_dimension()
+        xq, xq_ids = np.empty(shape=(0, d), dtype=np.float64), np.empty(shape=(0, 1), dtype=np.int32)
+        batch_size = 1000
         results = []
-        for query_id in tqdm(query_ids):
-            doc = get_one_document_from_mongodb_by_key('_id_numeric', query_id, *self.collections)
-            content, numeric_columns = doc['content'], doc['numeric_columns']
-            colemb = self.model.embedding_table(content, numeric_columns)
-            if colemb.shape[0] > 0:
+        logging.info('Start query time...')
+       
+        # batch query processing, because it's significantly faster
+        for qid in tqdm(query_ids, total=len(query_ids)):
+            # when reached the batch threshold, execute the search for the 
+            # current batch 
+            doc = get_one_document_from_mongodb_by_key('_id_numeric', int(qid), *self.collections)
+            colemb = self.model.embedding_table(doc['content'], doc['numeric_columns'], self.blacklist)
+            if colemb.shape[0] == 0:
+                continue
+            ids = np.expand_dims(np.repeat([qid], colemb.shape[0]), axis=0)
+            xq_ids = np.concatenate((xq_ids, ids.T))
+            xq = np.concatenate((xq, colemb), axis=0)
+            
+            if xq.shape[0] > batch_size:
                 start_s = time()
-                D, I = self.cidx.search(colemb, k)
-                end_s = time()
-                ccnt = np.unique(I, return_counts=True)
+                D, I = self.cidx.search(xq, int(k))
+                batch_results = compute_results(xq_ids, D, I, k)
+                batch_mean_time = (time() - start_s) / xq.shape[0]
+                    
+                for j, jqid in enumerate(np.unique(xq_ids)):
+                    results.append((jqid, round(batch_mean_time, 3), batch_results[j], []))
 
-                ctopk = sorted(zip(ccnt[0], ccnt[1]), key=lambda x: x[1], reverse=True)
-                results.append([query_id, round(end_s - start_s, 3), [x[0] for x in ctopk[:k] if x[0] != query_id], []])
-            else:
-                results.append([query_id, 0, [], []])
+                xq, xq_ids = np.empty(shape=(0, d), dtype=np.float64), np.empty(shape=(0, 1), dtype=np.int32)
+            
+        start_s = time()
+        D, I = self.cidx.search(xq, int(k))
+        batch_results = compute_results(xq_ids, D, I, k)
+        batch_mean_time = (time() - start_s) / xq.shape[0]
+     
+        for i, qid in enumerate(np.unique(xq_ids)):
+            results.append((qid, round(batch_mean_time, 3), batch_results[i], []))
 
         pd.DataFrame(results, columns=['query_id', 'duration', 'results', 'results_overlap']).to_csv(results_file, index=False)    
         return round(time() - start, 5)
-    
+
+
     def clean(self):
         if os.path.exists(self.cidx_file):
             os.remove(self.cidx_file)

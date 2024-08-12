@@ -11,6 +11,7 @@ import pandas as pd
 import polars as pl
 from tqdm import tqdm
 import matplotlib.pyplot as plt
+import matplotlib.colors as mcolors    
 from numerize_denumerize.numerize import numerize
 
 from tools.utils.settings import DefaultPath as defpath
@@ -29,18 +30,22 @@ if __name__ == '__main__':
     parser.add_argument('--num-query-samples',
                         type=int, required=False, default=1000,
                         help='extract results only for the given result set size (e.g. 1000)')
+    parser.add_argument('-k', 
+                        type=int, required=False, default=5,
+                        help='the K value for the top-K search')
     parser.add_argument('--dataset', 
                         required=True, choices=['wikipedia', 'gittables'])
     parser.add_argument('--size', 
                         required=False, default='standard', choices=['small', 'standard'],
                         help='works on small collection versions (only for testing)')
-        
+
     args = parser.parse_args()
     test_name =         args.test_name
     nsamples =          args.num_query_samples
+    k =                 args.k
     num_cpu =           args.num_cpu
     dataset =           args.dataset
-    size =             args.size
+    size =              args.size
     
     test_name = test_name.lower()
     q = numerize(nsamples, asint=True)
@@ -53,7 +58,7 @@ if __name__ == '__main__':
     logfile =               TEST_DATASET_DIR + '/logging.log'
     
     analyses_dir =          TEST_DATASET_DIR + '/results/analyses'
-    analyses_query_dir =    analyses_dir + f'/{q}'
+    analyses_query_dir =    analyses_dir + f'/k{k}_q{q}'
     
     statistics_dir =        TEST_DATASET_DIR  + '/statistics'
     runtime_stat_file =     statistics_dir + '/runtime.csv'     
@@ -71,18 +76,20 @@ if __name__ == '__main__':
     logging_setup(logfile)
     logging.info(f'{"#" * 10} {test_name.upper()} - {dataset.upper()} - {size.upper()} - ANALYSES {"#" * 10}')
 
-    solvers = [('josie', 'set'), ('josie', 'bag'), ('lshforest', 'set'), ('lshforest', 'bag'), ('embedding', 'fasttext')]
+    colors = list(mcolors.TABLEAU_COLORS.keys())
+    methods = [('josie', 'set'), ('josie', 'bag'), ('lshforest', 'set'), ('lshforest', 'bag'), ('embedding', 'fasttext'), ('embedding', 'fasttextdist')]
+    methods = {m: c for m, c in zip(methods, colors[:len(methods)])}
+    # p_values = [1, 3, 5, 10]
+    p_values = [5, 10, 20]
+    alpha = 0.8
+    showfliers = True
 
-    results = pl.read_csv(f'{results_extr_dir}/final_results_q{q}.csv')
+    results = pl.read_csv(f'{results_extr_dir}/final_results_k{k}_q{q}.csv')
     
-    # results.dropna()
-    results = results.drop_nulls() 
-
-    # results = results[results['sloth_overlap'] != -1]
+    # drop nan values (due to queries without any results) 
+    # and those pairs that have a SLOTH failure while computing the overlap
+    results = results.drop_nulls()
     results = results.filter(pl.col('sloth_overlap') != -1)
-
-    # results['difference_overlap'] = results['algorithm_overlap'] - results['sloth_overlap']
-    # results['algorithm_overlap_norm'] = results['algorithm_overlap'] / (results['sloth_overlap'] + 1)
 
     results = results.with_columns((pl.col('algorithm_overlap') - pl.col('sloth_overlap')).alias('difference_overlap'))
     results = results.with_columns((pl.col('algorithm_overlap') / (pl.col('sloth_overlap') + 1)).alias('algorithm_overlap_norm'))
@@ -96,7 +103,7 @@ if __name__ == '__main__':
     
     # False Positives per single query result
     start_zr = time()
-    with mp.get_context('spawn').Pool(len(solvers)) as pool:
+    with mp.get_context('spawn').Pool(len(methods)) as pool:
         r = pool.map(worker_fp_per_query, 
                      results.select(['algorithm', 'mode', 'query_id', 'result_id', 'sloth_overlap'])
                      .to_pandas().groupby(['algorithm', 'mode'], group_keys=True))
@@ -116,8 +123,8 @@ if __name__ == '__main__':
     # Saving the results
     logging.info(f'Finished. Total time: {round(end_zr - start_zr, 3)}s')
     runtime_metrics.append((get_local_time(), 'false_positives', round(end_zr-start_zr, 3)))
-    fp_per_query_pivot.to_csv(analyses_dir + f'/false_positives_per_group_q{q}.csv')
-    fp_per_algmode.to_csv(analyses_dir + f'/false_positives_per_alg_mode_q{q}.csv')
+    fp_per_query_pivot.to_csv(analyses_dir + f'/false_positives_per_group.csv')
+    fp_per_algmode.to_csv(analyses_dir + f'/false_positives_per_alg_mode.csv')
     
 
 
@@ -126,13 +133,16 @@ if __name__ == '__main__':
     ##################### Algorithm Overlap VS Real Overlap #####################
     #############################################################################
     data = [(am[0], am[1], group) for am, group in results.group_by('algorithm', 'mode')]
+    labels = [f'{a}-{m}' for a, m, _ in data]
+    colors = [methods[(a, m)] for a, m, _ in data]
 
     fig, ax = plt.subplots(1, 1, sharey='row', figsize=(15, 5))
     xmin, xmax, step = -500, 505, 25
 
     ax.hist([d[2]['difference_overlap'] for d in data], 
-            bins=np.arange(xmin, xmax, step), alpha=0.8, 
-            label=[f'{a}-{m}' for a, m, _ in data],
+            bins=np.arange(xmin, xmax, step), alpha=alpha, 
+            label=labels,
+            color=colors,
             align='mid')
     ax.set_xlim(xmin, xmax)
     ax.set_xticks(np.arange(xmin, xmax, step))
@@ -155,13 +165,15 @@ if __name__ == '__main__':
     # In this graph it may seems that JOSIE-bag underestimate the overlap, but this is due to the +1;
     # TODO handle this in some better way?
     data = [(am[0], am[1], group) for am, group in results.group_by('algorithm', 'mode')]
+    labels = [f'{a}-{m}' for a, m, _ in data]
+    colors = [methods[(a, m)] for a, m, _ in data]
 
     fig, ax = plt.subplots(1, 1, sharey='row', figsize=(15, 5))
     xmin, xmax, step = 0, 20.04, 0.5
 
     ax.hist([d[2]['algorithm_overlap_norm'] for d in data], 
-            bins=np.arange(xmin, xmax, step), alpha=0.8, 
-            label=[f'{a}-{m}' for a, m, _ in data],
+            bins=np.arange(xmin, xmax, step), alpha=alpha, 
+            label=labels, color=colors,
             align='mid')
     ax.set_xlim(xmin, xmax)
     ax.set_xticks(np.arange(xmin, xmax, step))
@@ -175,7 +187,6 @@ if __name__ == '__main__':
     plt.legend()
     plt.savefig(analyses_dir + '/graph_ratio_norm.png', bbox_inches='tight')
     plt.close()
-
 
     ###################################################################
     ##################### Create Silver Standards #####################
@@ -191,7 +202,7 @@ if __name__ == '__main__':
     # for each query, create its Silver Standard:
     # take all the result IDs from all the methods, then create a sorted list 
     # with pairs <result_ID, sloth_overlap>, taking only those pair with sloth_overlap>0,
-    # since they are actually relevant
+    # because they are actually relevant
     for query_id, ids_overlaps in tqdm(results_ids, total=nqueries):
         s = set()
         s.update(map(tuple, ids_overlaps.to_numpy()[:, 1:].tolist()))
@@ -203,85 +214,66 @@ if __name__ == '__main__':
 
 
     ##########################################################
-    ##################### Precision at K #####################
+    ############### Precision and Recall at K ################
     ##########################################################
 
-
-    p_values = [1, 3, 5, 10]
-    precision_at_p_results = []
     query_groups = results.select('query_id', 'algorithm', 'mode', 'sloth_overlap').to_pandas().groupby("query_id", group_keys=True)
 
-    # Parallel version needed for large query sets
+    # Parallel version
     with mp.Pool(processes=num_cpu) as pool:
         logging.info('Computing precision@p...')
         start_prec = time()
-        precision_at_p_results = pool.map(
+        prec_rec_results = pool.map(
             worker_precision, 
-            ((name, data, p_values, silver_standard[name]) for name, data in query_groups), 
-        )
-    
+            ((name, data, p_values, silver_standard[name]) for name, data in query_groups))
         end_prec = time()
         logging.info(f'Finished. Total time: {round(end_prec - start_prec, 3)}s')
+    runtime_metrics.append((get_local_time(), 'prec-rec-f1', round(end_prec - start_prec, 3)))
 
-    precision_at_p_results = [x for qres in precision_at_p_results for x in qres]
-    runtime_metrics.append((get_local_time(), 'precision', round(end_prec - start_prec, 3)))
+    prec_rec_results = [x for qres in prec_rec_results for x in qres]
+    prec_rec_results = pd.DataFrame(prec_rec_results, columns=['query_id', 'silver_std_size', 'algorithm', 'mode', 'p', 'precision', 'precision_v2', 'recall', 'f1'])
 
-    columns = ['query_id', 'silver_std_size', 'algorithm', 'mode', 'p', 'precision_at_p']
+    res_pivot = pd.pivot_table(prec_rec_results, values=['precision', 'precision_v2', 'recall', 'f1'], index=['algorithm', 'mode'], columns=['p'], aggfunc=['mean', 'std', 'max'])
+    res_pivot.to_csv(analyses_dir + f'/precision_recall@p.csv')
 
-    precision_at_p_results = pd.DataFrame(precision_at_p_results, columns=columns)
-
-    patp_pivot = pd.pivot_table(precision_at_p_results, values=['precision_at_p'], index=['algorithm', 'mode'], columns=['p'], aggfunc=['mean', 'std', 'max'])
-    patp_pivot.to_csv(analyses_dir + f'/precision@p_q{q}.csv')
-
-    for row, label in zip(patp_pivot['mean', 'precision_at_p'].values, patp_pivot.index):
-        plt.plot([1, 3, 5, 10], row, 'o-', label=f'{label[0]}-{label[1]}')
-    plt.xticks([1, 3, 5, 10], [1, 3, 5, 10])
-    plt.xlabel('p')
-    plt.ylabel('mean precision@P')
-    plt.title(f"Precision@P graph for dataset {dataset}")
-    plt.legend()
-    plt.grid()
-    plt.savefig(analyses_dir + f'/graph_precision@p_q{q}.png', bbox_inches='tight')
-    plt.close()
-
-    # scaling pivot table to [0, 1]
-    scaled_patp_pivot = patp_pivot['mean']['precision_at_p'] / np.array([1, 3, 5, 10])
-    scaled_patp_pivot.to_csv(analyses_dir + f'/precision@p_norm_q{q}.csv')
-
-    for row, label in zip(scaled_patp_pivot.values, patp_pivot.index):
-        plt.plot([1, 3, 5, 10], row, 'o-', label=f'{label[0]}-{label[1]}')
-    plt.xticks([1, 3, 5, 10], [1, 3, 5, 10])
-    plt.xlabel('p')
-    plt.ylabel('mean precision@P normalised')
-    plt.grid()
-    plt.title(f"Precision@P normalised graph for dataset {dataset}")
-    plt.legend()
-    plt.savefig(analyses_dir + f'/graph_precision@p_norm_q{q}.png', bbox_inches='tight')
-    plt.close()
+    # basic plot
+    for measure in ['precision', 'precision_v2', 'recall', 'f1']:
+        for row, label in zip(res_pivot['mean', measure].values, res_pivot.index):
+            plt.plot(p_values, row, 'o-', label=f'{label[0]}-{label[1]}', color=methods[(label[0], label[1])])
+        plt.xticks(p_values, p_values)
+        plt.xlabel('P')
+        plt.ylabel(f'mean {measure}@P')
+        plt.title(f"{measure}@P graph for dataset {dataset}")
+        plt.legend()
+        plt.grid()
+        plt.savefig(f'{analyses_dir}/graph_{measure}@p.png', bbox_inches='tight')
+        plt.close()
 
     # boxplots with precision@p
-    precision_at_p_results['precision_norm'] = precision_at_p_results['precision_at_p'] / precision_at_p_results['p']
-    data = [(amp[0], amp[1], amp[2], group) for amp, group in precision_at_p_results.groupby(by=['algorithm', 'mode', 'p'])]
-    import matplotlib.colors as mcolors
+    data = [(amp[0], amp[1], amp[2], group) for amp, group in prec_rec_results.groupby(by=['algorithm', 'mode', 'p'])]
 
-    fig, axes = plt.subplots(2, 2, figsize=(10, 10))
-    for i, p in enumerate(p_values):
-        x = i % 4 # here assuming we are working just with [1, 3, 5, 10]
-        x, y = x // 2, x % 2
-        labels = [f'{d[0]}\n{d[1]}' for d in data if d[2] == p]
-        colors = list(mcolors.TABLEAU_COLORS)[:len(labels)]
 
-        bplot = axes[x][y].boxplot([d[3]['precision_norm'] for d in data if d[2] == p],
-                    patch_artist=True,
-                    labels=labels)
-        for patch, color in zip(bplot['boxes'], colors):
-            patch.set_facecolor(color)
+    for measure in ['precision', 'precision_v2', 'recall']:
+        fig, axes = plt.subplots(1, len(p_values), figsize=(15, 7), sharey=True)
+        for i, p in enumerate(p_values):
+            labels = [f'{d[0]}\n{d[1]}' for d in data if d[2] == p]
+            colors = [methods[(d[0], d[1])] for d in data if d[2] == p]
 
-        axes[x][y].set_title(f'p = {p}')
-    fig.savefig(analyses_dir + f'/graph_boxplot_precision@p_q{q}.png', bbox_inches='tight')
-    plt.close()
+            bplot = axes[i].boxplot([d[3][measure] for d in data if d[2] == p],
+                        patch_artist=True,
+                        showfliers=showfliers,
+                        showmeans=True,
+                        labels=labels)
+            
+            for patch, color in zip(bplot['boxes'], colors):
+                patch.set_facecolor(color)
+                patch.set_alpha(alpha)
 
-    
+            axes[i].set_title(f'P = {p}')
+            axes[i].set_xticks(axes[i].get_xticks(), axes[i].get_xticklabels(), rotation=45)
+        fig.savefig(f'{analyses_dir}/graph_boxplot_{measure}@p.png', bbox_inches='tight')
+        plt.close()
+
 
     ###########################################################################
     ########### Normalised Discounted Cumulative Gain at P (nDCG@p) ###########
@@ -306,41 +298,43 @@ if __name__ == '__main__':
     df_thr = df[df['silver_standard_size'] >= silver_standard_size_threshold]
 
     ndcg_pivot = df_thr.pivot_table(index=['algorithm', 'mode'], columns=['p'], values=['ndcg_p', 'missing_p'], aggfunc=['mean', 'max']).convert_dtypes()
-    ndcg_pivot.to_csv(analyses_dir + f'/ndcg@p_q{q}.csv')
+    ndcg_pivot.to_csv(analyses_dir + f'/ndcg@p.csv')
 
     for row, label in zip(ndcg_pivot['mean', 'ndcg_p'].values, ndcg_pivot.index):
-        plt.plot([1, 3, 5, 10], row, 'o-', label=f'{label[0]}-{label[1]}')
-    plt.xticks([1, 3, 5, 10], [1, 3, 5, 10])
-    plt.xlabel("p")
+        plt.plot(p_values, row, 'o-', label=f'{label[0]}-{label[1]}', color=methods[(label[0], label[1])])
+    plt.xticks(p_values, p_values)
+    plt.xlabel("P")
     plt.ylabel("mean nDCG@P")
 
     plt.title(f"nDCG@P graph for dataset {dataset}")
     plt.legend()
     plt.grid()
-    plt.savefig(analyses_dir + f'/graph_ndcg@p_q{q}.png', bbox_inches='tight')
+    plt.savefig(analyses_dir + f'/graph_ndcg@p.png', bbox_inches='tight')
     plt.close()
     
     # boxplots with nDCG@p
     data = [(amp[0], amp[1], amp[2], group) for amp, group in df.groupby(by=['algorithm', 'mode', 'p'])]
     
-    import matplotlib.colors as mcolors
-    
-    # here assuming we are working just with [1, 3, 5, 10]
-    fig, axes = plt.subplots(2, 2, figsize=(10, 10))
+    fig, axes = plt.subplots(1, len(p_values), figsize=(15, 7), sharey=True)
     for i, p in enumerate(p_values):
-        x = i % 4
-        x, y = x // 2, x % 2
+        # x = i % 4
+        # x, y = x // 2, x % 2
         labels = [f'{d[0]}\n{d[1]}' for d in data if d[2] == p]
-        colors = list(mcolors.TABLEAU_COLORS)[:len(labels)]
+        colors = [methods[(d[0], d[1])] for d in data if d[2] == p]
 
-        bplot = axes[x][y].boxplot([d[3]['ndcg_p'] for d in data if d[2] == p],
+        bplot = axes[i].boxplot([d[3]['ndcg_p'] for d in data if d[2] == p],
                     patch_artist=True,
+                    showmeans=True,
+                    showfliers=showfliers,
                     labels=labels)
         for patch, color in zip(bplot['boxes'], colors):
             patch.set_facecolor(color)
+            patch.set_alpha(alpha)
 
-        axes[x][y].set_title(f'p = {p}')
-    fig.savefig(analyses_dir + f'/graph_boxplot_ndcg@p_q{q}.png', bbox_inches='tight')
+        axes[i].set_title(f'P = {p}')
+        axes[i].set_xticks(axes[i].get_xticks(), axes[i].get_xticklabels(), rotation=45)
+
+    fig.savefig(analyses_dir + f'/graph_boxplot_ndcg@p.png', bbox_inches='tight')
     plt.close()
 
 
@@ -349,10 +343,10 @@ if __name__ == '__main__':
     add_header = not os.path.exists(runtime_stat_file)
     with open(runtime_stat_file, 'a') as rfw:
         if add_header:
-            rfw.write("local_time,algorithm,mode,task,time(s)\n")
+            rfw.write("local_time,algorithm,mode,task,k,num_queries,time(s)\n")
 
         for (t_loctime, t_task, t_time) in runtime_metrics:
-            rfw.write(f"{t_loctime},analysis,,{t_task}_{q},{t_time}\n")
+            rfw.write(f"{t_loctime},analysis,,{t_task},{k},{q},{t_time}\n")
 
 
 

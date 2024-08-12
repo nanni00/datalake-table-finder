@@ -28,8 +28,11 @@ class FastTextTableEmbedder(TableEmbedder):
         it takes a sentence, splits it on blank spaces and for each word computes and normalises its 
         embedding; then gets the average of the normalised embeddings
         """
+
         blacklist = args
-        table = [column for i, column in enumerate(parse_table(table, len(table[0]), 0)) if numeric_columns[i] == 0]
+        
+        # with the any(column) we avoid that empty columns are embedded
+        table = [column for i, column in enumerate(parse_table(table, len(table[0]), 0)) if numeric_columns[i] == 0 and any(column)]
         return np.array([
             self.model.get_sentence_vector(
                 ' '.join([str(token) for token in column if token not in blacklist]).replace('\n', ' ')
