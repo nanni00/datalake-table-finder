@@ -11,7 +11,7 @@ from tqdm import tqdm
 
 from tools.utils.mongodb_utils import get_mongodb_collections, get_one_document_from_mongodb_by_key
 from tools.utils.table_embedder import FastTextTableEmbedder
-from tools.utils.utils import check_table_is_in_thresholds
+from tools.utils.misc import check_table_is_in_thresholds
 
 
 
@@ -135,7 +135,7 @@ def worker_ndcg(inp):
                 logging.warning(f'ZeroDivisionError - nDCG - query_id {query_id}, {algorithm}, {mode}')
                 continue
             except ValueError:
-                logging(f'ValueError - nDCG - query_id {query_id}, {algorithm}, {mode}')
+                logging.warning(f'ValueError - nDCG - query_id {query_id}, {algorithm}, {mode}')
                 continue
             ndcg_res.append([query_id, len(true_relevances), algorithm, mode, _p, _p - _actual_p, ndcg])
     return ndcg_res

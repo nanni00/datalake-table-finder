@@ -1,7 +1,5 @@
 import os
-import sys
 import logging
-import argparse
 from time import time
 import multiprocessing as mp
 from collections import defaultdict
@@ -14,54 +12,36 @@ import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors    
 from numerize_denumerize.numerize import numerize
 
-from tools.utils.settings import DefaultPath as defpath
-from tools.utils.utils import get_local_time, logging_setup
+from tools.utils import basicconfig
+from tools.utils.settings import make_parser, get_all_paths
+from tools.utils.misc import get_local_time, logging_setup
 from tools.utils.parallel_worker import worker_fp_per_query, worker_ndcg, worker_precision
 from tools.utils.mongodb_utils import get_mongodb_collections
 
 
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--test-name', required=True, type=str, help='a user defined test name, used instead of the default one m<mode>')
-    parser.add_argument('--num-cpu', 
-                        type=int, required=False, default=min(os.cpu_count(), 72),
-                        help='number of CPU(s) to use for processing, default is the minimum between computer CPUs and 64.')
-    parser.add_argument('--num-query-samples',
-                        type=int, required=False, default=1000,
-                        help='extract results only for the given result set size (e.g. 1000)')
-    parser.add_argument('-k', 
-                        type=int, required=False, default=5,
-                        help='the K value for the top-K search')
-    parser.add_argument('--dataset', 
-                        required=True, choices=['wikipedia', 'gittables'])
-    parser.add_argument('--size', 
-                        required=False, default='standard', choices=['small', 'standard'],
-                        help='works on small collection versions (only for testing)')
-
-    args = parser.parse_args()
+    args = make_parser('test_name', 'num_cpu', 'num_query_samples', 'k', 'dataset', 'size', 'p_values')
     test_name =         args.test_name
-    nsamples =          args.num_query_samples
-    k =                 args.k
+    num_query_samples = int(args.num_query_samples)
+    k =                 int(args.k)
     num_cpu =           args.num_cpu
     dataset =           args.dataset
     size =              args.size
-    
+    p_values =          args.p_values
+
     test_name = test_name.lower()
-    q = numerize(nsamples, asint=True)
+    q = numerize(num_query_samples, asint=True)
 
     mongoclient, collections = get_mongodb_collections(dataset=dataset, size=size)
 
-    ROOT_TEST_DIR =         defpath.data_path.tests + f'/{test_name}'
-    TEST_DATASET_DIR =      ROOT_TEST_DIR + f'/{dataset}'
-    results_extr_dir =      TEST_DATASET_DIR + '/results/extracted'
-    logfile =               TEST_DATASET_DIR + '/logging.log'
+    TEST_DATASET_DIR, query_file, logfile, forest_dir, embedding_dir, \
+        results_base_dir, results_extr_dir, \
+            statistics_dir, runtime_stat_file, storage_stat_file = get_all_paths(test_name, dataset, k, num_query_samples)
     
     analyses_dir =          TEST_DATASET_DIR + '/results/analyses'
     analyses_query_dir =    analyses_dir + f'/k{k}_q{q}'
     
-    statistics_dir =        TEST_DATASET_DIR  + '/statistics'
-    runtime_stat_file =     statistics_dir + '/runtime.csv'     
 
     runtime_metrics = []
 
@@ -74,25 +54,43 @@ if __name__ == '__main__':
     analyses_dir = analyses_query_dir
 
     logging_setup(logfile)
-    logging.info(f'{"#" * 10} {test_name.upper()} - {dataset.upper()} - {size.upper()} - ANALYSES {"#" * 10}')
+    logging.info(f'{"#" * 10} {test_name.upper()} - {dataset.upper()} - {size.upper()} - ANALYSES - {k} - {q} {"#" * 10}')
 
     colors = list(mcolors.TABLEAU_COLORS.keys())
-    methods = [('josie', 'set'), ('josie', 'bag'), ('lshforest', 'set'), ('lshforest', 'bag'), ('embedding', 'fasttext'), ('embedding', 'fasttextdist')]
+    # methods = [('josie', 'set'), ('josie', 'bag'), ('lshforest', 'set'), ('lshforest', 'bag'), ('embedding', 'fasttext'), ('embedding', 'fasttextdist')]
+    methods = basicconfig.algmodeconfig
     methods = {m: c for m, c in zip(methods, colors[:len(methods)])}
     # p_values = [1, 3, 5, 10]
-    p_values = [5, 10, 20]
+    # p_values = [5, 10, 20]
     alpha = 0.8
     showfliers = True
 
     results = pl.read_csv(f'{results_extr_dir}/final_results_k{k}_q{q}.csv')
     
-    # drop nan values (due to queries without any results) 
-    # and those pairs that have a SLOTH failure while computing the overlap
-    results = results.drop_nulls()
-    results = results.filter(pl.col('sloth_overlap') != -1)
+    results = results.drop_nulls() # queries without any results
+    results = results.filter(pl.col('sloth_overlap') != -1) # pairs that have had a SLOTH failure while computing the overlap
 
     results = results.with_columns((pl.col('algorithm_overlap') - pl.col('sloth_overlap')).alias('difference_overlap'))
     results = results.with_columns((pl.col('algorithm_overlap') / (pl.col('sloth_overlap') + 1)).alias('algorithm_overlap_norm'))
+
+    logging.info(f'Filtering those groups where any method has returned less than K={k} values...')
+    start_filtering = time()
+    bad_groups = []
+    for query_id, q_group in tqdm(results.to_pandas().groupby('query_id'), total=results.select('query_id').unique().shape[0]):
+        for (alg, mode), data in q_group.groupby(['algorithm', 'mode']):
+            if data.shape[0] < k:
+                bad_groups.append(query_id)
+                break
+    results = results.filter(~pl.col('query_id').is_in(bad_groups))
+    end_filtering = time()
+    print(len(bad_groups), num_query_samples, results.select('query_id').unique().shape[0])
+    # assert len(bad_groups) == num_query_samples - results.shape[0]
+    runtime_metrics.append((get_local_time(), 'filtering_groups', round(end_filtering - start_filtering, 3)))
+    logging.info(f'Filtered {len(bad_groups)} groups in {round(end_filtering - start_filtering, 3)}s')
+
+    def fix_mode(mode:str):
+        return mode.replace('fasttext', 'ft') if mode.startswith('fasttext') else mode
+
 
 
     ##########################################################
@@ -128,11 +126,10 @@ if __name__ == '__main__':
     
 
 
-
     #############################################################################
     ##################### Algorithm Overlap VS Real Overlap #####################
     #############################################################################
-    data = [(am[0], am[1], group) for am, group in results.group_by('algorithm', 'mode')]
+    data = [(am[0], fix_mode(am[1]), group) for am, group in results.group_by('algorithm', 'mode')]
     labels = [f'{a}-{m}' for a, m, _ in data]
     colors = [methods[(a, m)] for a, m, _ in data]
 
@@ -164,10 +161,6 @@ if __name__ == '__main__':
 
     # In this graph it may seems that JOSIE-bag underestimate the overlap, but this is due to the +1;
     # TODO handle this in some better way?
-    data = [(am[0], am[1], group) for am, group in results.group_by('algorithm', 'mode')]
-    labels = [f'{a}-{m}' for a, m, _ in data]
-    colors = [methods[(a, m)] for a, m, _ in data]
-
     fig, ax = plt.subplots(1, 1, sharey='row', figsize=(15, 5))
     xmin, xmax, step = 0, 20.04, 0.5
 
@@ -203,7 +196,12 @@ if __name__ == '__main__':
     # take all the result IDs from all the methods, then create a sorted list 
     # with pairs <result_ID, sloth_overlap>, taking only those pair with sloth_overlap>0,
     # because they are actually relevant
+    # if a Silver Standard has less than the maximum P value, it isn't considered in the 
+    # next analyses, just to avoid corner cases with groups with just N<<P values (however, this
+    # shouldn't happen since we've already filtered on the returned list size of each algorithm...)
     for query_id, ids_overlaps in tqdm(results_ids, total=nqueries):
+        if ids_overlaps.shape[0] < max(p_values):
+            continue
         s = set()
         s.update(map(tuple, ids_overlaps.to_numpy()[:, 1:].tolist()))
         silver_standard[query_id[0]] = sorted([x for x in list(s) if x[1] > 0], key=lambda x: x[1], reverse=True)
@@ -239,7 +237,7 @@ if __name__ == '__main__':
     # basic plot
     for measure in ['precision', 'precision_v2', 'recall', 'f1']:
         for row, label in zip(res_pivot['mean', measure].values, res_pivot.index):
-            plt.plot(p_values, row, 'o-', label=f'{label[0]}-{label[1]}', color=methods[(label[0], label[1])])
+            plt.plot(p_values, row, 'o-', label=f'{label[0]}-{fix_mode(label[1])}', color=methods[(label[0], fix_mode(label[1]))])
         plt.xticks(p_values, p_values)
         plt.xlabel('P')
         plt.ylabel(f'mean {measure}@P')
@@ -250,9 +248,7 @@ if __name__ == '__main__':
         plt.close()
 
     # boxplots with precision@p
-    data = [(amp[0], amp[1], amp[2], group) for amp, group in prec_rec_results.groupby(by=['algorithm', 'mode', 'p'])]
-
-
+    data = [(amp[0], fix_mode(amp[1]), amp[2], group) for amp, group in prec_rec_results.groupby(by=['algorithm', 'mode', 'p'])]
     for measure in ['precision', 'precision_v2', 'recall']:
         fig, axes = plt.subplots(1, len(p_values), figsize=(15, 7), sharey=True)
         for i, p in enumerate(p_values):
@@ -263,6 +259,7 @@ if __name__ == '__main__':
                         patch_artist=True,
                         showfliers=showfliers,
                         showmeans=True,
+                        meanline=True,
                         labels=labels)
             
             for patch, color in zip(bplot['boxes'], colors):
@@ -271,7 +268,7 @@ if __name__ == '__main__':
 
             axes[i].set_title(f'P = {p}')
             axes[i].set_xticks(axes[i].get_xticks(), axes[i].get_xticklabels(), rotation=45)
-        fig.savefig(f'{analyses_dir}/graph_boxplot_{measure}@p.png', bbox_inches='tight')
+        fig.savefig(f'{analyses_dir}/boxplot_{measure}@p.png', bbox_inches='tight')
         plt.close()
 
 
@@ -280,7 +277,7 @@ if __name__ == '__main__':
     ###########################################################################
 
     query_groups = results.select('query_id', 'result_id', 'algorithm', 'mode', 'sloth_overlap').to_pandas().groupby("query_id", group_keys=True)
-    work = ((name, data, p_values, silver_standard[name]) for name, data in query_groups)
+    work = ((query_id, data, p_values, silver_standard[query_id]) for query_id, data in query_groups)
 
     with mp.Pool(num_cpu) as pool:
         logging.info('Computing nDCG@p...')
@@ -294,14 +291,14 @@ if __name__ == '__main__':
     df = pd.DataFrame(ndcg_results, columns=['query_id', 'silver_standard_size', 'algorithm', 'mode', 'p', 'missing_p', 'ndcg_p'])
 
     # consider only those groups that have more than X elements
-    silver_standard_size_threshold = 0
+    silver_standard_size_threshold = max(p_values)
     df_thr = df[df['silver_standard_size'] >= silver_standard_size_threshold]
 
     ndcg_pivot = df_thr.pivot_table(index=['algorithm', 'mode'], columns=['p'], values=['ndcg_p', 'missing_p'], aggfunc=['mean', 'max']).convert_dtypes()
     ndcg_pivot.to_csv(analyses_dir + f'/ndcg@p.csv')
 
     for row, label in zip(ndcg_pivot['mean', 'ndcg_p'].values, ndcg_pivot.index):
-        plt.plot(p_values, row, 'o-', label=f'{label[0]}-{label[1]}', color=methods[(label[0], label[1])])
+        plt.plot(p_values, row, 'o-', label=f'{label[0]}-{fix_mode(label[1])}', color=methods[(label[0], fix_mode(label[1]))])
     plt.xticks(p_values, p_values)
     plt.xlabel("P")
     plt.ylabel("mean nDCG@P")
@@ -309,22 +306,21 @@ if __name__ == '__main__':
     plt.title(f"nDCG@P graph for dataset {dataset}")
     plt.legend()
     plt.grid()
-    plt.savefig(analyses_dir + f'/graph_ndcg@p.png', bbox_inches='tight')
+    plt.savefig(f'{analyses_dir}/graph_ndcg@p.png', bbox_inches='tight')
     plt.close()
     
     # boxplots with nDCG@p
-    data = [(amp[0], amp[1], amp[2], group) for amp, group in df.groupby(by=['algorithm', 'mode', 'p'])]
+    data = [(amp[0], fix_mode(amp[1]), amp[2], group) for amp, group in df.groupby(by=['algorithm', 'mode', 'p'])]
     
     fig, axes = plt.subplots(1, len(p_values), figsize=(15, 7), sharey=True)
     for i, p in enumerate(p_values):
-        # x = i % 4
-        # x, y = x // 2, x % 2
         labels = [f'{d[0]}\n{d[1]}' for d in data if d[2] == p]
         colors = [methods[(d[0], d[1])] for d in data if d[2] == p]
 
         bplot = axes[i].boxplot([d[3]['ndcg_p'] for d in data if d[2] == p],
                     patch_artist=True,
                     showmeans=True,
+                    meanline=True,
                     showfliers=showfliers,
                     labels=labels)
         for patch, color in zip(bplot['boxes'], colors):
@@ -334,7 +330,7 @@ if __name__ == '__main__':
         axes[i].set_title(f'P = {p}')
         axes[i].set_xticks(axes[i].get_xticks(), axes[i].get_xticklabels(), rotation=45)
 
-    fig.savefig(analyses_dir + f'/graph_boxplot_ndcg@p.png', bbox_inches='tight')
+    fig.savefig(f'{analyses_dir}/boxplot_ndcg@p.png', bbox_inches='tight')
     plt.close()
 
 

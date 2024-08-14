@@ -8,7 +8,7 @@ import pandas as pd
 from neo4j import GraphDatabase
 
 from tools.utils.classes import AlgorithmTester
-from tools.utils.utils import get_initial_spark_rdd
+from tools.utils.misc import get_initial_spark_rdd
 
 
 def get_table_tokens_counter(table, numeric_columns):

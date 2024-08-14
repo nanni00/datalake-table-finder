@@ -15,7 +15,7 @@ import pyspark
 import psycopg
 
 from tools.utils.classes import AlgorithmTester
-from tools.utils.utils import create_token_set, convert_to_giga, print_info, get_initial_spark_rdd
+from tools.utils.misc import create_token_set, convert_to_giga, print_info, get_initial_spark_rdd
 
 
 

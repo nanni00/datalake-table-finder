@@ -16,7 +16,7 @@ import pandas as pd
 from tools.utils.classes import AlgorithmTester
 from tools.utils.parallel_worker import worker_embedding_data_preparation
 from tools.utils.table_embedder import FastTextTableEmbedder, TaBERTTableEmbedder
-from tools.utils.utils import check_table_is_in_thresholds
+from tools.utils.misc import check_table_is_in_thresholds
 from tools.utils.mongodb_utils import get_one_document_from_mongodb_by_key
     
 

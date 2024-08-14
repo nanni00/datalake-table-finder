@@ -10,7 +10,7 @@ from tqdm import tqdm
 from datasketch import MinHashLSHForest, MinHash
 
 from tools.utils.classes import AlgorithmTester
-from tools.utils.utils import create_token_set, check_table_is_in_thresholds, get_initial_spark_rdd
+from tools.utils.misc import create_token_set, check_table_is_in_thresholds, get_initial_spark_rdd
 from tools.utils.mongodb_utils import get_one_document_from_mongodb_by_key
 
 

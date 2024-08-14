@@ -1,20 +1,20 @@
 #!/bin/bash
 
-TEST_NAME=b_test
+TEST_NAME=a_test
 
 MEMORY_PROFILING=0
-MEMORY_REPORTS_DIR=$THESIS_PATH/experiments/scripts/py/memory_reports
+MEMORY_REPORTS_DIR=$THESIS_PATH/scripts/py/memory_reports
 
-PY_SCRIPTS_PATH=$THESIS_PATH/experiments/scripts/py
+PY_SCRIPTS_PATH=$THESIS_PATH/scripts/py
 
 # python scripts
-PY_TESTER=$PY_SCRIPTS_PATH/main_tester.py
+PY_TESTER=$PY_SCRIPTS_PATH/main_pipeline.py
 PY_RESULTS_EXTRACTION=$PY_SCRIPTS_PATH/extract_results.py
 PY_RESULTS_ANALYSIS=$PY_SCRIPTS_PATH/analysis_pl.py
 
 
 # query generic parameters
-K=20
+K=10
 
 # JOSIE parameter
 DBNAME=nanni
@@ -36,18 +36,23 @@ ALGORITHMS="josie lshforest embedding"
 MODES="set bag fasttext fasttextdist"
 
 # dataset
-DATASETS="gittables"
+DATASETS="wikipedia"
 SIZE="standard"
 
 # query sizes in term of number of queries
 QUERY_SIZES="50000"
 # QUERY_SIZES="1000 10000 100000"
 
+# values used for analyses
+# P_VALUES="10 15 20"
+P_VALUES="1 3 5 10"
+
+
 # tasks
 DATA_PREPRATION=0
 SAMPLE_QUERIES=0
-QUERY=1
-EXTRACT=1   # extract more information from initial results (like SLOTH overlap for each table pair) 
+QUERY=0
+EXTRACT=0   # extract more information from initial results (like SLOTH overlap for each table pair) 
 ANALYSE=1   # do the concrete analyses
 CLEAN=0   # remove database tables and big files
 
@@ -176,7 +181,8 @@ do
                 --num-cpu $NUM_CPU \
                 --dataset $DATASET \
                 -k $K \
-                --size $SIZE
+                --size $SIZE \
+                --p-values $P_VALUES
         done
     fi
 done

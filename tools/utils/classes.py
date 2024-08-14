@@ -39,6 +39,8 @@ class ResultDatabase:
     def __init__(self, dbname, table_name='results_table'):
         self.dbname = dbname
         self.table_name = table_name
+    
+    def open(self):
         self._dbconn = psycopg.connect(f"port=5442 host=/tmp dbname={self.dbname}", row_factory=psycopg.rows.dict_row)
 
     def create_table(self):
@@ -105,6 +107,14 @@ class ResultDatabase:
             logging.info(f'Truncating results table {self.table_name}...')
             self._dbconn.execute(f"TRUNCATE {self.table_name} ;")
             self._dbconn.commit()
+
+    def get_number_of_sloth_failures(self):
+        return self._dbconn.execute(f"SELECT COUNT(*) FROM {self.table_name} WHERE sloth_overlap = -1").fetchone()
+
+    def get_numer_of_records(self):
+        return self._dbconn.execute(f"SELECT COUNT(*) FROM {self.table_name}").fetchone()
+
+
 
     def close(self):
         self._dbconn.close()

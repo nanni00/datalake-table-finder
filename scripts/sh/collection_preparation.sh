@@ -1,8 +1,8 @@
 #!/bin/bash
 
 # Python scripts
-PY_ID_NUMERIC_SCRIPT=$THESIS_PATH/experiments/main/create_numeric_index_on_collections.py
-PY_DETECT_NUMERIC_COLUMNS_SCRIPT=$THESIS_PATH/experiments/main/detect_numeric_columns.py
+PY_ID_NUMERIC_SCRIPT=$THESIS_PATH/scripts/py/create_numeric_index_on_collections.py
+PY_DETECT_NUMERIC_COLUMNS_SCRIPT=$THESIS_PATH/scripts/py/detect_numeric_columns.py
 
 TASK="set"
 DATASET="gittables"

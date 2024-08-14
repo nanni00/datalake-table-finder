@@ -3,7 +3,6 @@ import logging.handlers
 import warnings
 warnings.filterwarnings('ignore')
 import os
-import argparse
 from time import time
 import multiprocessing as mp
 
@@ -14,8 +13,8 @@ from tqdm import tqdm
 
 from tools.utils.mongodb_utils import get_mongodb_collections, get_one_document_from_mongodb_by_key
 from tools.utils.classes import ResultDatabase
-from tools.utils.settings import DefaultPath as defpath
-from tools.utils.utils import (
+from tools.utils.settings import get_all_paths, make_parser
+from tools.utils.misc import (
     apply_sloth,
     get_local_time,
     create_token_set,
@@ -24,7 +23,7 @@ from tools.utils.utils import (
 
 
 
-def _worker_result_extractor(chunk):
+def worker_result_extractor(chunk):
     global dbname, table_name, dataset, size, blacklist
     resultsdb = ResultDatabase(dbname, table_name)
     mongoclient, collections = get_mongodb_collections(dataset=dataset, size=size)
@@ -94,27 +93,7 @@ def chunks(sequence, chunk_size):
         yield sequence[j:j + chunk_size]
 
 
-
-parser = argparse.ArgumentParser()
-parser.add_argument('--test-name', required=True, type=str, help='a user defined test name, used instead of the default one m<mode>')
-parser.add_argument('--num-cpu', 
-                    type=int, required=False, default=min(os.cpu_count(), 64),
-                    help='number of CPU(s) to use for processing, default is the minimum between computer CPUs and 64.')
-parser.add_argument('--num-query-samples',
-                    type=int, required=False, default=1000,
-                    help='extract results only for the given result set size (e.g. 1000)')
-parser.add_argument('-k', 
-                    type=int, required=False, default=5,
-                    help='the K value for the top-K search')
-parser.add_argument('--dbname', 
-                    type=str, required=True, default='user',
-                    help='The database in which will be stored the computed SLOTH overlap for future analyses')
-parser.add_argument('--dataset', 
-                    required=True, choices=['wikipedia', 'gittables'])
-parser.add_argument('--size', required=False, default='standard', choices=['standard', 'small'],
-                    help='works on small collection versions (only for testing)')
-
-args = parser.parse_args()
+args = make_parser('test_name', 'num_cpu', 'num_query_samples', 'k', 'dbname', 'dataset', 'size')
 test_name =         args.test_name
 nworkers =          args.num_cpu
 num_query_samples = args.num_query_samples
@@ -124,19 +103,11 @@ dataset =           args.dataset
 size =              args.size
 
 test_name = test_name.lower()
-
 num_query_samples = numerize(num_query_samples, asint=True)
 
-ROOT_TEST_DIR =             defpath.data_path.tests + f'/{test_name}'
-TEST_DATASET_DIR =          ROOT_TEST_DIR + f'/{dataset}'
-results_base_directory =    TEST_DATASET_DIR + f'/results/base/k{k}_q{num_query_samples}'
-results_extr_directory =    TEST_DATASET_DIR + '/results/extracted'
-final_results_file =        results_extr_directory + f'/final_results_k{k}_q{num_query_samples}.csv'
-logfile =                   TEST_DATASET_DIR + '/logging.log'
+TEST_DATASET_DIR, query_file, logfile, forest_dir, embedding_dir, results_base_dir, results_extr_dir, statistics_dir, runtime_stat_file, storage_stat_file = get_all_paths(test_name, dataset, size, k, num_query_samples)
+final_results_file = f'{results_extr_dir}/final_results_k{k}_q{num_query_samples}.csv'
 
-statistics_dir =            TEST_DATASET_DIR  + '/statistics'
-runtime_stat_file =         statistics_dir + '/runtime.csv'     
-storage_stat_file =         statistics_dir + '/storage.csv'
 
 logging_setup(logfile)
 logging.info(f'{"#" * 10} {test_name.upper()} - {dataset.upper()} - {size.upper()} - EXTRACTION {"#" * 10}')
@@ -146,10 +117,6 @@ blacklist = {'{"$numberDouble": "NaN"}', 'comment', 'story'} if dataset == 'gitt
 
 table_name = f'results_table_d{dataset}_s{size}_blacklist' 
 
-# if os.path.exists(final_results_file):
-#     logging.info(f"Extracted results file already exists at {final_results_file}, appending new results to it")
-#     final_results = pl.read_csv(final_results_file)
-# else:
 final_results = pl.DataFrame(schema={
     'query_id': pl.Int64, 
     'result_id': pl.Int64, 
@@ -166,6 +133,7 @@ final_results = pl.DataFrame(schema={
 
 start_analysis = time()
 resultsdb = ResultDatabase(dbname, table_name)
+resultsdb.open()
 # clear the result table (occhio a farlo che poi si perdono i dati già salvati...)
 # resultsdb.clear()
 resultsdb.create_table()
@@ -174,11 +142,10 @@ resultsdb.create_table()
 hit_rates = []
 
 with mp.Pool(processes=nworkers) as pool:
-    for result_file in os.listdir(results_base_directory):
+    for result_file in os.listdir(results_base_dir):
         if result_file.endswith('.raw'): continue
-        # if f"_q{num_query_samples}.csv" not in result_file: continue
         
-        results = pl.read_csv(results_base_directory + '/' + result_file)
+        results = pl.read_csv(f'{results_base_dir}/{result_file}')
         algorithm, mode = [x[1:] for x in result_file[:-4].split('_')]
         
         logging.info(f'Extracting results from {result_file} ({algorithm}-{mode})...')
@@ -194,7 +161,7 @@ with mp.Pool(processes=nworkers) as pool:
         # SLOTH often takes time and some processes finish while others still have many computations to do 
         chunksize = max(min(len(work) // nworkers, 1000) // 4, 1)
         logging.info(f'Total work length: {len(work)}, total workers: {nworkers}, chunk-size: {chunksize}. Starting extraction...')
-        extr_res = pool.map(_worker_result_extractor, chunks(work, chunksize))
+        extr_res = pool.map(worker_result_extractor, chunks(work, chunksize))
         logging.info(f"Completed extraction in {round(time() - sss)}s")
         
         hit = 0

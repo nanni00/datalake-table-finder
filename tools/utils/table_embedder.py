@@ -2,7 +2,7 @@ import fasttext
 import numpy as np
 
 from tools.sloth.utils import parse_table
-from tools.utils.utils import prepare_token
+from tools.utils.misc import prepare_token
 
 
 class TableEmbedder:
