@@ -162,13 +162,14 @@ def create_token_set(table, mode, numeric_columns, encode=None, blacklist:set=se
     :param numeric_columns: a flag vector, where if the ith element is 1, this means that the 
                             ith column is numeric and its elements are skipped while creating the token set
     :param encode: if set, tokens will be encoded as specified (e.g. 'utf-8')
+    :param blacklist: a set of tokens that won't be considered
     """
     
     if mode == 'set':
         tokens = list({prepare_token(token) for row in table for icol, token in enumerate(row) 
                      if not pd.isna(token) and token and numeric_columns[icol] == 0 and token not in blacklist})
     elif mode == 'bag':
-        counter = defaultdict(int) # is that better? More space but no sort operation            
+        counter = defaultdict(int)
         
         def _create_token_tag(token):
             counter[token] += 1

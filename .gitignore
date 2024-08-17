@@ -13,6 +13,8 @@ data/pg_data
 go/*
 !go/src/github.com
 
+experiments
+TaBERT
 documentation
 
 models

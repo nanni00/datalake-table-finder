@@ -33,6 +33,10 @@ def worker_result_extractor(chunk):
     hit = 0
 
     for (algorithm, mode, (query_id, _, result_ids, algorithm_overlaps)) in tqdm(chunk, leave=False, total=len(chunk), disable=False if os.getpid() % 72 == 0 else True):
+        match mode: # problem with previous versions...
+            case 'fasttext': mode = 'ft'
+            case 'fasttextdist': mode = 'ftdist'
+            case '_': mode = mode
         if not result_ids:
             rv.append([query_id, None, algorithm, mode, None, None, None, None, None, None])
             continue
@@ -53,20 +57,9 @@ def worker_result_extractor(chunk):
             table_r = doc_table_r['content']
             numeric_columns_r = doc_table_r['numeric_columns']
 
-            # JOSIE already returns the couple exact overlap, referred to the used semantic
-            # LSHForest, instead, returns only the ranked results without any other information,
-            # then now compute the overlap between the query and the result tables with the 
-            # overlap of the table sets with set/bag semantic
-            if algorithm_overlaps:
-                algorithm_overlap = algorithm_overlaps[i]
-            else:
-                set_q = create_token_set(table_q, 'set' if mode.startswith('f') else mode, numeric_columns_q, blacklist=blacklist)
-                set_r = create_token_set(table_r, 'set' if mode.startswith('f') else mode, numeric_columns_r, blacklist=blacklist)
-                algorithm_overlap = len(set(set_q).intersection(set_r))
-            
             # if already exists a couple with these ID, take its computed SLOTH overlap
             r_id, s_id = (query_id, _id_r) if query_id <= _id_r else (_id_r, query_id)
-            dboverlap, lookuptime = resultsdb.lookup_result_table(r_id, s_id), 0
+            dboverlap, lookuptime = resultsdb.lookup_result_table(r_id, s_id), -1
             
             if dboverlap != None:
                 hit += 1
@@ -78,22 +71,72 @@ def worker_result_extractor(chunk):
 
             # the intersection size is used for computing Jaccard Similarity or other metrics like containment, 
             # so compute using the set semantic, since it considers the intersection of the table "basic" values
-            set_q = create_token_set(table_q, 'set', numeric_columns_q, blacklist=blacklist)
-            set_r = create_token_set(table_r, 'set', numeric_columns_r, blacklist=blacklist)
-            intersection_size = len(set(set_q).intersection(set_r))
+            set_q = set(create_token_set(table_q, 'set', numeric_columns_q, blacklist=blacklist))
+            set_r = set(create_token_set(table_r, 'set', numeric_columns_r, blacklist=blacklist))
+            set_intersection_size = len(set_q.intersection(set_r))
+            
+            bag_q = set(create_token_set(table_q, 'bag', numeric_columns_q, blacklist=blacklist))
+            bag_r = set(create_token_set(table_r, 'bag', numeric_columns_r, blacklist=blacklist))
+            bag_intersection_size = len(bag_q.intersection(bag_r))
 
-            size_q, size_r = len(set_q), len(set_r)
+            set_size_q, set_size_r = len(set_q), len(set_r)
+            bag_size_q, bag_size_r = len(bag_q), len(bag_r)
 
-            match mode:
-                case 'fasttext': mode = 'ft'
-                case 'fasttextdist': mode = 'ftdist'
-                case '_': mode = mode
+            algorithm_overlap = set_intersection_size if mode in ['set', 'ft', 'ftdist'] else bag_intersection_size
+            
+            jaccard_sim = set_intersection_size / len(set_q.union(set_r))
+            multi_jaccard_sim = set_intersection_size / (set_size_q + set_size_r)
+            containment = set_intersection_size / set_size_q
+            overlap_set_similarity = set_intersection_size / min(bag_size_q, bag_size_r)
 
-            rv.append([query_id, _id_r, algorithm, mode, algorithm_overlap, sloth_overlap, size_q, size_r, intersection_size, sloth_time])
+            # the area ratio, as stated in SLOTH paper is "the largest overlap 
+            # normalized by the area of the smaller table", and we could consider
+            # the token set in bag mode as the table area
+            area_ratio = sloth_overlap / min(bag_size_q, bag_size_r) 
+
+            rv.append([query_id, _id_r, algorithm, mode, sloth_overlap, algorithm_overlap,
+                       
+                       set_size_q, set_size_r, set_intersection_size, 
+                       bag_size_q, bag_size_r, bag_intersection_size,
+                       
+                       jaccard_sim, 
+                       multi_jaccard_sim, 
+                       containment, 
+                       overlap_set_similarity, 
+                       area_ratio,
+                       
+                       sloth_time])
         
     mongoclient.close()
     resultsdb.close()
     return hit, rv
+
+
+final_results = pl.DataFrame(schema={
+    'query_id': pl.Int32, 
+    'result_id': pl.Int32, 
+    'algorithm': pl.String, 
+    'mode': pl.String, 
+    'sloth_overlap': pl.Int32,
+    'algorithm_overlap': pl.Int32,
+
+    'set_size_q': pl.Int32,
+    'set_size_r': pl.Int32, 
+    'set_intersection_size': pl.Int32,
+
+    'bag_size_q': pl.Int32, 
+    'bag_size_r': pl.Int32, 
+    'bag_intersection_size': pl.Int32,
+    
+    'jaccard_sim': pl.Float32,
+    'multi_jaccard_sim': pl.Float32,
+    'containment': pl.Float32,
+    'overlap_set_sim': pl.Float32,
+    'area_ratio': pl.Float32,
+    
+    'sloth_time(s)': pl.Float32
+    }
+)
 
 
 def chunks(sequence, chunk_size):
@@ -126,27 +169,16 @@ logging.info(f'{"#" * 10} {test_name.upper()} - {dataset.upper()} - {size.upper(
 blacklist = {'{"$numberDouble": "NaN"}', 'comment', 'story'} if dataset == 'gittables' else set()
 # blacklist = {'{"$numberDouble": "NaN"}'} if dataset == 'gittables' else set()
 
-table_name = f'results_table_d{dataset}_s{size}_blacklist' 
+table_name = f'results_d{dataset}_s{size}' 
+# table_name = f'results_d{dataset}_s{size}_blacklist' 
 
-final_results = pl.DataFrame(schema={
-    'query_id': pl.Int64, 
-    'result_id': pl.Int64, 
-    'algorithm': pl.String, 
-    'mode': pl.String, 
-    'algorithm_overlap': pl.Int64, 
-    'sloth_overlap': pl.Int64, 
-    'query_size': pl.Int64, 
-    'res_tab_size': pl.Int64, 
-    'intersection_mode_size': pl.Int64,
-    'sloth_time(s)': pl.Float64
-    }
-)
+
 
 start_analysis = time()
 resultsdb = ResultDatabase(dbname, table_name)
 resultsdb.open()
 # clear the result table (occhio a farlo che poi si perdono i dati già salvati...)
-# resultsdb.clear()
+resultsdb.clear()
 resultsdb.create_table()
 
 # just to know if the results database is actually useful
@@ -179,7 +211,7 @@ with mp.Pool(processes=nworkers) as pool:
         for h, r in extr_res:
             hit += h
             data += r
-            resultsdb.insert_results([[x[0], x[1], x[5]] if x[0] < x[1] else [x[1], x[0], x[5]] for x in r if x[5] != None])
+            resultsdb.insert_results([[x[0], x[1], x[4]] if x[0] < x[1] else [x[1], x[0], x[4]] for x in r if x[4] != None])
 
         logging.info(f'hit = {hit} ({round(100 * hit / len(data), 3)}%)')
         hit_rates.append(hit / len(data))

@@ -1,32 +1,40 @@
 import logging
+import sys
 import pymongo
 import pymongo.collection
 
 from tools.utils.basicconfig import datasets, datasets_size
 
-def get_mongodb_collections(dataset:str='wikitables', size:str='standard') -> tuple[pymongo.MongoClient, list[pymongo.collection.Collection]]:
-    mongoclient = pymongo.MongoClient(directConnection=True)
-    collections = []
+
+def get_mongodb_collections(dataset:str='wiki_snap_turl', size:str='standard') -> tuple[pymongo.MongoClient, list[pymongo.collection.Collection]]:
+    if dataset not in datasets:
+        logging.error('Unknown dataset: ' + str(dataset))
+        raise ValueError('Unknown dataset: ' + str(dataset))
     if size not in datasets_size:
         logging.error('Unknown dataset size: ' + str(size))
         raise ValueError('Unknown dataset size: ' + str(size))
 
-    if dataset == 'wikitables':
-        if size == 'small':
-            # collections.append(mongoclient.dataset.turl_training_set_small)
-            collections.append(mongoclient.datasets.wikitables)
-        else:
-            # collections.append(mongoclient.dataset.turl_training_set)
-            collections.append(mongoclient.datasets.wikitables)
-    elif dataset == 'gittables':
-        if size == 'small':
-            collections.append(mongoclient.datasets.gittables_small)
-        else:
-            collections.append(mongoclient.datasets.gittables)
-    else:
-        logging.error('Unknown dataset: ' + str(dataset))
-        raise ValueError('Unknown dataset: ' + str(dataset))
+    mongoclient = pymongo.MongoClient(directConnection=True)
+    collections = []
 
+    if 'optitab' in mongoclient.list_database_names():
+        match dataset:
+            case 'wikitables':
+                collections.append('mongoclient.optitab.turl_training_set')
+                collections.append('mongoclient.sloth.latest_snapshot_tables')
+            case 'gittables':
+                collections.append('mongoclient.sloth.gittables')
+    elif 'datasets' in mongoclient.list_database_names():
+        match dataset:
+            case 'wikitables':
+                collections.append('mongoclient.datasets.wikitables')
+            case 'gittables':
+                collections.append('mongoclient.datasets.gittables')
+    else:
+        logging.error('Current MongoDB not configured')
+        raise KeyError('Current MongoDB not configured')
+    
+    collections = [eval(c + '_small' if size == 'small' else c, {'mongoclient': mongoclient}) for c in collections]
     return mongoclient, collections
 
 

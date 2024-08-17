@@ -1,12 +1,18 @@
-
+"""
+To add a new tester, create a class which inherits from tools.utils.classes.AlgorithmTester, implementing the 
+methods data_preparation, query and clean (and __init__ obv) with the default interface and then add the specifications
+for everything (loading models, modules, paths...) in the code below, indicating the 'algorithm' and 'mode' tag as well,
+which will be used to specify the results file, in statistics and other stuff.
+N.B. In the extraction and analyses phases there are grouping stages on the 'algorithm' and 'mode' tag, but differences in
+parameters are not introduced in naming (e.g. no embedding-ft300 vs embedding-ft128), so if needed is necessary to create a different
+test folder
+"""
 import logging
 import os
 import sys
 
 import pandas as pd
-# there is a custom modification in the numerize.py code, 
-# to get only integers, e.g. 10K instead of 10.0K
-from numerize_denumerize.numerize import numerize   
+from numerize_denumerize.numerize import numerize
 
 from tools.utils.settings import DefaultPath as defpath, get_all_paths, make_parser
 from tools.utils.basicconfig import tables_thresholds

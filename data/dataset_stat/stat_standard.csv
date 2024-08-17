@@ -1,0 +1,5 @@
+dataset,size,tables,tables_in_thresholds,rows_tot,rows_max,rows_mean,rows_stdev,final_rows_tot,final_rows_max,final_rows_mean,final_rows_stdev,columns_tot,columns_max,columns_mean,columns_stdev,final_columns_tot,final_columns_max,final_columns_mean,final_columns_stdev,area_mean,area_max,area_stdev,final_area_mean,final_area_max,final_area_stdev,%numeric_columns_per_table_mean,%numeric_columns_per_table_stdev,%nan_per_table_mean,%nan_per_table_stdev
+wikipedia,standard,2697723,1770176,33866842,4671,12.55386,27.45091,31321357,4671,17.69392,32.68829,10041615,141,5.67266,3.53205,7016938,141,3.96398,3.53205,103.10764,38570,223.65139,74.9544,31044,177.56782,0.25488,0.26939,0.0758,0.13316
+
+
+gittables,standard,759970,671588,101661081,36045,133.76986,308.30865,84061403,36045,125.16811,271.4182,7754082,742,11.54589,10.87925,2478057,702,3.68985,10.87925,1080.44758,401802,2194.20114,355.4229,50284,553.81403,0.58035,0.26115,0.03945,0.05297

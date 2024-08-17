@@ -1,6 +1,7 @@
 #!/bin/bash
 
-TEST_NAME=main_wblacklist
+# TEST_NAME=main_wblacklist
+TEST_NAME=a_test
 
 MEMORY_PROFILING=0
 MEMORY_REPORTS_DIR=$THESIS_PATH/scripts/py/memory_reports
@@ -18,7 +19,8 @@ K=10
 
 # JOSIE parameter
 DBNAME=nanni
-PG_USER="giovanni.malaguti"
+# PG_USER="giovanni.malaguti"
+PG_USER="nanni"
 # PG_PASSWORD="" 
 
 # LSHForest parameters
@@ -33,7 +35,7 @@ NEO4J_USER=neo4j
 NEO4J_PASSWORD=12345678
 
 # number of cores used in parallel tasks
-NUM_CPU=24
+NUM_CPU=72
 
 # ALGORITHMS="josie"
 # MODES="bag"
@@ -45,7 +47,7 @@ DATASETS="wikitables"
 SIZE="standard"
 
 # query sizes in term of number of queries
-QUERY_SIZES="50000"
+QUERY_SIZES="100000"
 # QUERY_SIZES="1000 10000 100000"
 
 # values used for analyses
@@ -54,12 +56,15 @@ P_VALUES="1 3 5 10"
 
 
 # tasks
-DATA_PREPRATION=1
+DATA_PREPRATION=0
 SAMPLE_QUERIES=0
 QUERY=0
 EXTRACT=1   # extract more information from initial results (like SLOTH overlap for each table pair) 
-ANALYSE=1   # do the concrete analyses
+ANALYSE=0   # do the concrete analyses
 CLEAN=0   # remove database tables and big files
+
+
+
 
 for DATASET in $DATASETS 
 do
