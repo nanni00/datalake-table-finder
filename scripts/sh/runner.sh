@@ -1,6 +1,6 @@
 #!/bin/bash
 
-TEST_NAME=a_test
+TEST_NAME=main_wblacklist
 
 MEMORY_PROFILING=0
 MEMORY_REPORTS_DIR=$THESIS_PATH/scripts/py/memory_reports
@@ -18,6 +18,8 @@ K=10
 
 # JOSIE parameter
 DBNAME=nanni
+PG_USER="giovanni.malaguti"
+# PG_PASSWORD="" 
 
 # LSHForest parameters
 NUM_PERM=256
@@ -31,15 +33,15 @@ NEO4J_USER=neo4j
 NEO4J_PASSWORD=12345678
 
 # number of cores used in parallel tasks
-NUM_CPU=72
+NUM_CPU=24
 
+# ALGORITHMS="josie"
+# MODES="bag"
 ALGORITHMS="embedding"
-MODES="ft ftdist"
-# ALGORITHMS="josie lshforest embedding"
-# MODES="set bag fasttext fasttextdist"
+MODES="ft"
 
 # dataset
-DATASETS="gittables"
+DATASETS="wikitables"
 SIZE="standard"
 
 # query sizes in term of number of queries
@@ -52,7 +54,7 @@ P_VALUES="1 3 5 10"
 
 
 # tasks
-DATA_PREPRATION=0
+DATA_PREPRATION=1
 SAMPLE_QUERIES=0
 QUERY=0
 EXTRACT=1   # extract more information from initial results (like SLOTH overlap for each table pair) 
@@ -96,6 +98,7 @@ do
                         --num-query-samples $QUERY_SIZES \
                         -k $K \
                         -l $L \
+                        --pg-user $PG_USER \
                         --num-perm $NUM_PERM \
                         --num-cpu $NUM_CPU \
                         --dataset $DATASET \
@@ -111,11 +114,10 @@ do
                         --mode $MODE \
                         --tasks $TASKS \
                         --dbname $DBNAME \
+                        --pg-user $PG_USER \
                         --num-query-samples $QUERY_SIZES \
                         -k $K \
                         -l $L \
-                        --neo4j-user $NEO4J_USER \
-                        --neo4j-password $NEO4J_PASSWORD \
                         --num-perm $NUM_PERM \
                         --num-cpu $NUM_CPU \
                         --dataset $DATASET \

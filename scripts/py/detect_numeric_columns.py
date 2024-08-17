@@ -8,6 +8,7 @@ from tqdm import tqdm
 
 from tools.sloth.utils import parse_table
 from tools.utils.mongodb_utils import get_mongodb_collections
+from tools.utils.basicconfig import datasets, datasets_size
 
 
 NUMERICAL_NER_TAGS = {
@@ -64,6 +65,8 @@ def is_number_tryexcept(s):
         return True
     except ValueError:
         return False
+    except TypeError:
+        return False
     
 
 def naive_detect_table_numeric_and_null_columns(table: list[list], any_int:bool=False) -> list[int]:
@@ -74,16 +77,20 @@ def naive_detect_table_numeric_and_null_columns(table: list[list], any_int:bool=
     :return a list of int, where the i-th element is set to 1 if the i-th column is detected as numeric or with only null values, 
         0 otherwise
     """
+    if len(table) == 0 or len(table[0]) == 0:
+        return []
+    
     if any_int:
         return [
-            int(any(is_number_tryexcept(cell) for cell in column) or any(cell for cell in column))
+            int(any(is_number_tryexcept(cell) for cell in column) or not any(cell for cell in column))
             for column in parse_table(table, len(table[0]), 0)
         ]
     else:
         return [
-            int(sum(is_number_tryexcept(cell) for cell in column) >= len(column) // 2 + 1 or any(cell for cell in column))
+            int(sum(is_number_tryexcept(cell) for cell in column) >= len(column) // 2 + 1 or not any(cell for cell in column))
             for column in parse_table(table, len(table[0]), 0)
         ]
+
 
 
 def worker(t: tuple[str, list[list]]):
@@ -122,9 +129,9 @@ if __name__ == '__main__':
                         help='defines how many cell(s) must be sampled in spacy mode from each column to detect wheter or not the column is numeric, \
                             default is 3. If set to -1 analyses the whole column.')
     parser.add_argument('--dataset', 
-                        required=True, choices=['wikipedia', 'gittables'])
+                        required=True, choices=datasets)
     parser.add_argument('--size',
-                         required=False, default='standard',
+                        required=False, default='standard', choices=datasets_size,
                         help='works on small collection versions (only for testing)')
 
     args = parser.parse_args()
@@ -134,6 +141,10 @@ if __name__ == '__main__':
     nsamples = args.sample_size
     dataset = args.dataset
     size = args.size
+
+    if os.cpu_count() < ncpu:
+        print(f"Using {os.cpu_count()} cores")
+    ncpu = min(os.cpu_count(), ncpu)
 
     mongoclient, collections = get_mongodb_collections(dataset=dataset, size=size)
 
@@ -149,7 +160,7 @@ if __name__ == '__main__':
             for collection in collections:
                 collsize = collection.count_documents({})
                 batch_update = []
-                batch_size = 1000
+                batch_size = 10000
 
                 print(f'Starting pool working on {collection.database.name}.{collection.name}...')
                 for res in tqdm(pool.imap(
@@ -161,7 +172,8 @@ if __name__ == '__main__':
                         collection.bulk_write(batch_update, ordered=False)
                         batch_update = []
                 
-                collection.bulk_write(batch_update, ordered=False)
+                if len(batch_update) > 0:
+                    collection.bulk_write(batch_update, ordered=False)
                 print(f'{collection.database.name}.{collection.name} updated.')
     else:
         for collection in collections:

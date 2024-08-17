@@ -14,11 +14,11 @@ import pandas as pd
 
 
 from tools.utils.classes import AlgorithmTester
-from tools.utils.parallel_worker import worker_embedding_data_preparation
-from tools.utils.table_embedder import FastTextTableEmbedder, TaBERTTableEmbedder
 from tools.utils.misc import check_table_is_in_thresholds
+from tools.utils.parallel_worker import worker_embedding_data_preparation
 from tools.utils.mongodb_utils import get_one_document_from_mongodb_by_key
-    
+from tools.utils.table_embedder import FastTextTableEmbedder, TaBERTTableEmbedder
+
 
 def chunks(sequence, chunk_size, *args):
     # Chunks of chunk_size documents at a time.
@@ -75,17 +75,16 @@ class EmbeddingTester(AlgorithmTester):
 
         # the FastText original model is a huge model of 7.4GB, loading it for each core 
         # is expensive, so reduce the number of actual CPUs...
-        num_effective_cpu = 24
         total_docs = sum(coll.count_documents({}) for coll in self.collections)
-        chunksize = max(total_docs // min(self.num_cpu, num_effective_cpu), 1)
+        chunksize = max(total_docs // self.num_cpu, 1) // 4
 
-        with mp.Pool(min(num_effective_cpu, self.num_cpu)) as pool:
+        with mp.Pool(self.num_cpu) as pool:
             logging.info(f'Start embedding tables, chunk-size={chunksize}...')
             results = pool.map(worker_embedding_data_preparation, 
                                chunks(range(total_docs), chunksize, 
                                       self.mode, self.dataset, self.size, self.model_path, self.tables_thresholds, self.blacklist))
             logging.info('Tables embedded.')
-            for result in results:
+            for result in tqdm(results, leave=False):
                 xb_batch, xb_ids_batch = result
                 xb = np.concatenate((xb, xb_batch))
                 xb_ids = np.concatenate((xb_ids, xb_ids_batch))

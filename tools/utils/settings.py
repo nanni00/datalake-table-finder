@@ -78,12 +78,12 @@ def make_parser(*arguments):
                                     help='number of CPUs that will be used in the experiment')
             case 'size':
                 parser.add_argument('--size', 
-                                    type=str, choices=['standard', 'small'],
+                                    type=str, choices=basicconfig.datasets_size,
                                     required=False, default='standard',
                                     help='works on small collection versions (only for testing)')
             case 'dataset':
                 parser.add_argument('--dataset', 
-                                    required=True, choices=['wikipedia', 'gittables'])
+                                    required=True, choices=basicconfig.datasets)
 
             # Clean task
             case 'clean':            
@@ -97,8 +97,11 @@ def make_parser(*arguments):
                                     required=False, default='user',
                                     help='the PostgreSQL database where will be uploaded the data used by JOSIE. It must be already running on the machine')
             case 'token_table_on_memory':
-                parser.add_argument('--token-table-on-memory',
-                                    required=False, action='store_true')
+                parser.add_argument('--token-table-on-memory', required=False, action='store_true')
+            case 'pg_user': 
+                parser.add_argument('--pg-user', required=False, default='user')
+            case 'pg_password': 
+                parser.add_argument('--pg-password', required=False, default='')
 
             # LSH Forest specific arguments
             case 'forest_file':

@@ -105,21 +105,23 @@ def get_initial_spark_rdd(dataset, size, num_cpu, tables_thresholds, spark_jars_
             .appName("Big Bang Testing with MongoDB")
             .master(f"local[{num_cpu}]")
             .config('spark.jars.packages', ','.join(spark_jars_packages))
-            .config('spark.executor.memory', '100g')
+            .config('spark.executor.memory', '50g')
             .config('spark.driver.memory', '10g')
-            .config('spark.local.dir', '/data4/nanni/spark')
+            .config('spark.local.dir', '/home/giovanni.malaguti/spark')
             .getOrCreate()
         )
 
         # adjusting logging level to error, avoiding warnings
         spark.sparkContext.setLogLevel("ERROR")
 
-        if dataset == 'wikipedia':
-            db_collections = zip(['optitab', 'sloth'], 
-                                ["turl_training_set_small"      if size == 'small' else "turl_training_set", 
-                                "latest_snapshot_tables_small"  if size == 'small' else "latest_snapshot_tables"])
+        if dataset == 'wikitables':
+            # db_collections = zip(['optitab', 'sloth'], 
+            #                     ["turl_training_set_small"      if size == 'small' else "turl_training_set", 
+            #                     "latest_snapshot_tables_small"  if size == 'small' else "latest_snapshot_tables"])
+            db_collections = zip(['datasets'], ['wikitables'])
         else:
-            db_collections = zip(['sloth'], ['gittables_small' if size == 'small' else 'gittables'])
+            # db_collections = zip(['sloth'], ['gittables_small' if size == 'small' else 'gittables'])
+            db_collections = zip(['datasets'], ['gittables'])
             
         initial_rdd = spark.sparkContext.emptyRDD()
 

@@ -4,7 +4,9 @@ import os
 import sys
 
 import pandas as pd
-from numerize_denumerize.numerize import numerize
+# there is a custom modification in the numerize.py code, 
+# to get only integers, e.g. 10K instead of 10.0K
+from numerize_denumerize.numerize import numerize   
 
 from tools.utils.settings import DefaultPath as defpath, get_all_paths, make_parser
 from tools.utils.basicconfig import tables_thresholds
@@ -23,7 +25,7 @@ from tools import josie, lshforest, embedding
 if __name__ == '__main__':
     args = make_parser('test_name', 'algorithm', 'mode', 'k', 'tasks', 'num_query_samples', 'num_cpu', 'size', 'dataset', 
                        'clean', 
-                       'dbname', 'token_table_on_memory', 
+                       'dbname', 'token_table_on_memory', 'pg_user', 'pg_password',
                        'forest_file', 'num_perm', 'l',
                        'fasttext_model_size')
 
@@ -40,6 +42,8 @@ if __name__ == '__main__':
     # JOSIE
     user_dbname =       args.dbname
     token_table_on_mem =args.token_table_on_memory
+    pg_password =       args.pg_password
+    pg_user =           args.pg_user
 
     # LSHForest
     num_perm =          args.num_perm
@@ -93,7 +97,7 @@ if __name__ == '__main__':
     default_args = (mode, dataset, size, tables_thresholds, num_cpu, blacklist)
     match algorithm:
         case 'josie':
-            tester = josie.JOSIETester(*default_args, user_dbname, table_prefix, db_stat_file)
+            tester = josie.JOSIETester(*default_args, user_dbname, table_prefix, db_stat_file, pg_user, pg_password)
         case 'lshforest':
             tester = lshforest.LSHForestTester(*default_args, forest_file, num_perm, l, collections)
         case 'embedding':
@@ -111,7 +115,7 @@ if __name__ == '__main__':
     logging_setup(logfile=logfile)
         
     if DATA_PREPARATION:
-        logging.info(f'{"#" * 10} {test_name.upper()} - {algorithm.upper()} - {mode.upper()} - {k} - {dataset.upper()} - {size.upper()} - DATA PREPARATION {"#" * 10}')
+        logging.info(f'{"#" * 10} {test_name.upper()} - {algorithm.upper()} - {mode.upper()} - {dataset.upper()} - {size.upper()} - DATA PREPARATION {"#" * 10}')
         try:    
             exec_time, storage_size = tester.data_preparation()
             runtime_metrics.append((('data_preparation', None), exec_time, get_local_time()))
