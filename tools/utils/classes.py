@@ -6,7 +6,7 @@ from abc import ABC, abstractmethod
 import bisect
 import logging
 
-import orjson
+# import orjson
 import psycopg
 
 

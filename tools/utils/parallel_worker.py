@@ -2,11 +2,9 @@ import logging
 from math import log2
 import os
 from time import time
-from collections import defaultdict
 from collections import Counter as multiset
 
 import numpy as np
-import polars as pl
 from tqdm import tqdm
 
 from tools.utils.mongodb_utils import get_mongodb_collections, get_one_document_from_mongodb_by_key
@@ -20,7 +18,7 @@ def worker_embedding_data_preparation(inp) -> tuple[np.ndarray, np.ndarray]:
     # print(dataset, size, mode, model_path)
     chunk, mode, dataset, size, model_path, tables_thresholds, blacklist = inp
     mongoclient, collections = get_mongodb_collections(dataset=dataset, size=size)
-    if mode in ['fasttext', 'fasttextdist']:
+    if mode in ['ft', 'ftdist']:
         model = FastTextTableEmbedder(model_path)
     print(f'Process {os.getpid()} (ppid={os.getppid()}) works on {chunk} total batch size {chunk.stop - chunk.start}')
     d = model.get_dimension()
@@ -32,7 +30,7 @@ def worker_embedding_data_preparation(inp) -> tuple[np.ndarray, np.ndarray]:
     batch_size = 1000
 
     start = time()
-    for i, qid in tqdm(enumerate(chunk), total=chunk.stop - chunk.start, disable=False if os.getpid() % 12 == 0 else True):
+    for i, qid in tqdm(enumerate(chunk), total=chunk.stop - chunk.start, leave=False, disable=False if os.getpid() % os.cpu_count() == 0 else True):
         doc = get_one_document_from_mongodb_by_key('_id_numeric', qid, *collections)
         _id_numeric, content, numeric_columns = doc['_id_numeric'], doc['content'], doc['numeric_columns']
         

@@ -14,8 +14,8 @@ NUM_CPU=72
 
 
 # adding the '_id_numeric' field
-echo "CREATING '_id_numeric' ID ON DATASET $DATASET"
-python $PY_ID_NUMERIC_SCRIPT --task $TASK --dataset $DATASET --size $SIZE
+# echo "CREATING '_id_numeric' ID ON DATASET $DATASET"
+# python $PY_ID_NUMERIC_SCRIPT --task $TASK --dataset $DATASET --size $SIZE
 
 
 # detecting numeric columns

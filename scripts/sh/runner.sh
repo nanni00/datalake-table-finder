@@ -1,6 +1,6 @@
 #!/bin/bash
 
-TEST_NAME=a_test
+TEST_NAME=main_wblacklist
 
 MEMORY_PROFILING=0
 MEMORY_REPORTS_DIR=$THESIS_PATH/scripts/py/memory_reports
@@ -18,6 +18,8 @@ K=10
 
 # JOSIE parameter
 DBNAME=nanni
+PG_USER="giovanni.malaguti"
+# PG_PASSWORD="" 
 
 # LSHForest parameters
 NUM_PERM=256
@@ -28,15 +30,15 @@ NEO4J_USER=neo4j
 NEO4J_PASSWORD=12345678
 
 # number of cores used in parallel tasks
-NUM_CPU=72
+NUM_CPU=24
 
 # ALGORITHMS="josie"
 # MODES="bag"
-ALGORITHMS="josie lshforest embedding"
-MODES="set bag fasttext fasttextdist"
+ALGORITHMS="embedding"
+MODES="ft"
 
 # dataset
-DATASETS="wikipedia"
+DATASETS="wikitables"
 SIZE="standard"
 
 # query sizes in term of number of queries
@@ -49,11 +51,11 @@ P_VALUES="1 3 5 10"
 
 
 # tasks
-DATA_PREPRATION=0
+DATA_PREPRATION=1
 SAMPLE_QUERIES=0
 QUERY=0
 EXTRACT=0   # extract more information from initial results (like SLOTH overlap for each table pair) 
-ANALYSE=1   # do the concrete analyses
+ANALYSE=0   # do the concrete analyses
 CLEAN=0   # remove database tables and big files
 
 for DATASET in $DATASETS 
@@ -94,8 +96,7 @@ do
                         --num-query-samples $QUERY_SIZES \
                         -k $K \
                         -l $L \
-                        --neo4j-user $NEO4J_USER \
-                        --neo4j-password $NEO4J_PASSWORD \
+                        --pg-user $PG_USER \
                         --num-perm $NUM_PERM \
                         --num-cpu $NUM_CPU \
                         --dataset $DATASET \
@@ -110,11 +111,10 @@ do
                         --mode $MODE \
                         --tasks $TASKS \
                         --dbname $DBNAME \
+                        --pg-user $PG_USER \
                         --num-query-samples $QUERY_SIZES \
                         -k $K \
                         -l $L \
-                        --neo4j-user $NEO4J_USER \
-                        --neo4j-password $NEO4J_PASSWORD \
                         --num-perm $NUM_PERM \
                         --num-cpu $NUM_CPU \
                         --dataset $DATASET \

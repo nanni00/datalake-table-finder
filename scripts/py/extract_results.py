@@ -59,8 +59,8 @@ def worker_result_extractor(chunk):
             if algorithm_overlaps:
                 algorithm_overlap = algorithm_overlaps[i]
             else:
-                set_q = create_token_set(table_q, 'set' if mode in ['fasttext', 'fasttextdist', 'tabert'] else mode, numeric_columns_q, blacklist=blacklist)
-                set_r = create_token_set(table_r, 'set' if mode in ['fasttext', 'fasttextdist', 'tabert'] else mode, numeric_columns_r, blacklist=blacklist)
+                set_q = create_token_set(table_q, 'set' if mode in ['ft', 'ftdist', 'tabert'] else mode, numeric_columns_q, blacklist=blacklist)
+                set_r = create_token_set(table_r, 'set' if mode in ['ft', 'ftdist', 'tabert'] else mode, numeric_columns_r, blacklist=blacklist)
                 algorithm_overlap = len(set(set_q).intersection(set_r))
             
             # if already exists a couple with these ID, take its computed SLOTH overlap

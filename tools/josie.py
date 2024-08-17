@@ -170,7 +170,7 @@ class JosieDB:
 class JOSIETester(AlgorithmTester):
     def __init__(self, mode, dataset, size, tables_thresholds, num_cpu, blacklist, *args) -> None:
         super().__init__(mode, dataset, size, tables_thresholds, num_cpu, blacklist)        
-        self.dbname, self.tables_prefix, self.db_stat_file = args
+        self.dbname, self.tables_prefix, self.db_stat_file, self.pg_user, self.pg_password = args
         
         self.josiedb = JosieDB(self.dbname, self.tables_prefix)
         self.josiedb.open()
@@ -183,11 +183,11 @@ class JOSIETester(AlgorithmTester):
         self.josiedb.create_tables()
 
         # PostgreSQL write parameters
-        url = "jdbc:postgresql://localhost:5442/nanni"
+        url = f"jdbc:postgresql://localhost:5442/{self.dbname}"
 
         properties = {
-            "user": "nanni",
-            "password": "",
+            "user": self.pg_user,
+            "password": self.pg_password,
             "driver": "org.postgresql.Driver"
         }
         

@@ -22,6 +22,7 @@ algmodeconfig = [
     ('embedding', 'ftlsh'),
 ]
 
+
 # filtering only those tables that have very few cells (<10)
 tables_thresholds = {
     'min_row':      5,
@@ -32,3 +33,13 @@ tables_thresholds = {
     'max_area':     999999,
 }
 
+
+datasets = [
+    'gittables',
+    'wikitables'
+]
+
+datasets_size = [
+    'small',
+    'standard'
+]
