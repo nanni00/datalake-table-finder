@@ -1,3 +1,4 @@
+
 import logging
 import os
 import sys
@@ -62,7 +63,10 @@ if __name__ == '__main__':
     CLEAN =                     args.clean
 
 
-    TEST_DATASET_DIR, query_file, logfile, forest_dir, embedding_dir, results_base_dir, results_extr_dir, statistics_dir, runtime_stat_file, storage_stat_file = get_all_paths(test_name, dataset, size, k, str_num_query_samples)
+    TEST_DATASET_DIR, query_file, logfile, \
+        forest_dir, embedding_dir, \
+            results_base_dir, results_extr_dir, \
+                statistics_dir, runtime_stat_file, storage_stat_file = get_all_paths(test_name, dataset, k, str_num_query_samples)
 
     forest_file =       f'{forest_dir}/forest_m{mode}.json' if not args.forest_file else args.forest_file
     cidx_file =         f'{embedding_dir}/col_idx_mft.index' if mode in ['ft', 'ftdist'] else f'{embedding_dir}/col_idx_m{mode}.index' 
@@ -94,7 +98,7 @@ if __name__ == '__main__':
             tester = lshforest.LSHForestTester(*default_args, forest_file, num_perm, l, collections)
         case 'embedding':
             model_path = f'{defpath.model_path.fasttext}/cc.en.{fasttext_model_size}.bin' if mode.startswith('ft') else f'{defpath.model_path.tabert}/tabert_base_k3/model.bin'
-            tester = embedding.EmbeddingTester(*default_args, model_path, cidx_file, collections)
+            tester = embedding.EmbeddingTester(*default_args, model_path, cidx_file, collections, fasttext_model_size)
 
 
     if DATA_PREPARATION or QUERY or SAMPLE_QUERIES:

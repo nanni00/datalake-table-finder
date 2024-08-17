@@ -29,7 +29,7 @@ def chunks(sequence, chunk_size, *args):
 class EmbeddingTester(AlgorithmTester):
     def __init__(self, mode, dataset, size, tables_thresholds, num_cpu, blacklist, *args) -> None:
         super().__init__(mode, dataset, size, tables_thresholds, num_cpu, blacklist)
-        self.model_path, self.cidx_file, self.collections = args
+        self.model_path, self.cidx_file, self.collections, self.fasttext_model_dim = args
         self.cidx = None
         
     def _tabert_data_preparation(self):
@@ -67,8 +67,8 @@ class EmbeddingTester(AlgorithmTester):
         start = time()
         # index "Flat,IDMap2" no good for this case, since we have to deal with more
         # than 10M vectors the search time is not acceptable
-        
-        d = 300 # self.model.get_dimension()
+        logging.info(f'Embedding model: {self.model_path}')
+        d = self.fasttext_model_dim
         
         xb = np.empty(shape=(0, d))
         xb_ids = np.empty(shape=(0, 1))
@@ -97,11 +97,11 @@ class EmbeddingTester(AlgorithmTester):
         logging.info(f'Vector shapes: xb={xb.shape}, xb_ids={xb_ids.shape}')
         logging.info(f'FAISS index parameters: N={N}, K={K}, HNSW={HNSW_links_per_vertex}, training_size={training_size}')
 
-        index = faiss.index_factory(300, f"IVF{K}_HNSW{HNSW_links_per_vertex},Flat")
+        index = faiss.index_factory(d, f"IVF{K}_HNSW{HNSW_links_per_vertex},Flat")
         logging.info('Training column index...')
         index.train(xb[:training_size])
         self.cidx = faiss.IndexIDMap2(index)
-        
+
         logging.info('Adding vectors with IDs...')
         self.cidx.add_with_ids(xb, xb_ids[:, 0])
 
@@ -120,11 +120,13 @@ class EmbeddingTester(AlgorithmTester):
     def query_naive(self, results_file, k, query_ids, **kwargs):
         start = time()
         logging.info('Loading model...')
-        if self.mode == 'fasttext':
-            self.model = FastTextTableEmbedder(self.model_path)
-        elif self.mode == 'tabert':
-            self.model = TaBERTTableEmbedder(self.model_path)
-
+        match self.mode:
+            case 'ft':
+                self.model = FastTextTableEmbedder(self.model_path)
+            case 'tabert':
+                self.model = TaBERTTableEmbedder(self.model_path)
+            case '_':
+                raise ValueError('Unknown mode for table embedder with naive query mode: ' + self.mode)
         if not self.cidx:
             logging.info(f'Reading column index from {self.cidx_file}...')
             self.cidx = faiss.read_index(self.cidx_file)
@@ -176,6 +178,7 @@ class EmbeddingTester(AlgorithmTester):
     
     def query_dist(self, results_file, k, query_ids, **kwargs):
         def compute_results(xq_ids, D, I, k):
+            """From the search returned data, extract the 10 best values, through the average on the distance values"""
             ids = np.unique(xq_ids)
             rI = np.concatenate((xq_ids, I), axis=1)
             rI = np.split(rI[:, 1:], np.unique(rI[:, 0], return_index=True)[1][1:])
@@ -185,11 +188,14 @@ class EmbeddingTester(AlgorithmTester):
 
             return [
                     [
+                        # the sorting is in ascending order and this is ok, 
+                        # we work with distances, the lower the better in our case
                         int(y[0]) for y in
-                        sorted([[g[0], mean(x[1] for x in g[1])] for g in groupby(raw_group, key=lambda x: x[0])], key=lambda x: x[1])[:k]
+                        sorted([[g[0], mean(m[1] for m in g[1])] for g in groupby(raw_group, key=lambda n: n[0])], key=lambda x: x[1])[:k]
                     ]
                     for raw_group in 
                     [
+                        #
                         sorted(
                             [
                                 x for j in range(rI[i].shape[0]) for x in zip(rI[i][j], rD[i][j]) if x[0] not in {ids[i], -1}
@@ -202,10 +208,11 @@ class EmbeddingTester(AlgorithmTester):
         start = time()
         logging.info('Query mode: distance')
         logging.info('Loading model...')
-        if self.mode in ['fasttext', 'fasttextdist']:
-            self.model = FastTextTableEmbedder(self.model_path)
-        elif self.mode == 'tabert':
-            self.model = TaBERTTableEmbedder(self.model_path)
+        match self.mode:
+            case 'ftdist':
+                self.model = FastTextTableEmbedder(self.model_path)
+            case '_':
+                raise ValueError('Unknown mode for table embedder with distance query mode: ' + self.mode)
 
         if not self.cidx:
             logging.info(f'Reading column index from {self.cidx_file}...')
@@ -231,7 +238,9 @@ class EmbeddingTester(AlgorithmTester):
             
             if xq.shape[0] > batch_size:
                 start_s = time()
-                D, I = self.cidx.search(xq, int(k))
+                # here it searches K vectors for each query vector, i.e. for each column vector,
+                # in the end there will be at least K results vector in almost every case
+                D, I = self.cidx.search(xq, int(k)) 
                 batch_results = compute_results(xq_ids, D, I, k)
                 batch_mean_time = (time() - start_s) / xq.shape[0]
                     

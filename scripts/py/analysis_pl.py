@@ -65,6 +65,8 @@ if __name__ == '__main__':
     alpha = 0.8
     showfliers = True
 
+    logging.info(f'{"#" * 10} {test_name.upper()} - {dataset.upper()} - {size.upper()} - {k} - {q} - ANALYSES {"#" * 10}')
+
     results = pl.read_csv(f'{results_extr_dir}/final_results_k{k}_q{q}.csv')
     
     results = results.drop_nulls() # queries without any results

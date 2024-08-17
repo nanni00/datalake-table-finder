@@ -20,7 +20,7 @@ def worker_embedding_data_preparation(inp) -> tuple[np.ndarray, np.ndarray]:
     # print(dataset, size, mode, model_path)
     chunk, mode, dataset, size, model_path, tables_thresholds, blacklist = inp
     mongoclient, collections = get_mongodb_collections(dataset=dataset, size=size)
-    if mode in ['fasttext', 'fasttextdist']:
+    if mode in ['ft', 'ftdist']:
         model = FastTextTableEmbedder(model_path)
     print(f'Process {os.getpid()} (ppid={os.getppid()}) works on {chunk} total batch size {chunk.stop - chunk.start}')
     d = model.get_dimension()

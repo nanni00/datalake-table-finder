@@ -26,6 +26,7 @@ from tools.utils.misc import (
 def worker_result_extractor(chunk):
     global dbname, table_name, dataset, size, blacklist
     resultsdb = ResultDatabase(dbname, table_name)
+    resultsdb.open()
     mongoclient, collections = get_mongodb_collections(dataset=dataset, size=size)
 
     rv = []
@@ -59,17 +60,20 @@ def worker_result_extractor(chunk):
             if algorithm_overlaps:
                 algorithm_overlap = algorithm_overlaps[i]
             else:
-                set_q = create_token_set(table_q, 'set' if mode in ['fasttext', 'fasttextdist', 'tabert'] else mode, numeric_columns_q, blacklist=blacklist)
-                set_r = create_token_set(table_r, 'set' if mode in ['fasttext', 'fasttextdist', 'tabert'] else mode, numeric_columns_r, blacklist=blacklist)
+                set_q = create_token_set(table_q, 'set' if mode.startswith('f') else mode, numeric_columns_q, blacklist=blacklist)
+                set_r = create_token_set(table_r, 'set' if mode.startswith('f') else mode, numeric_columns_r, blacklist=blacklist)
                 algorithm_overlap = len(set(set_q).intersection(set_r))
             
             # if already exists a couple with these ID, take its computed SLOTH overlap
             r_id, s_id = (query_id, _id_r) if query_id <= _id_r else (_id_r, query_id)
-            x = resultsdb.lookup_result_table(r_id, s_id), 0
-            if x[0] != None:
+            dboverlap, lookuptime = resultsdb.lookup_result_table(r_id, s_id), 0
+            
+            if dboverlap != None:
                 hit += 1
-            sloth_overlap, sloth_time = x if x[0] != None else apply_sloth(table_q, table_r, numeric_columns_q, numeric_columns_r, blacklist=blacklist)
-            if sloth_overlap == -1 and x[0] == None:
+            
+            sloth_overlap, sloth_time = (dboverlap, lookuptime) if dboverlap != None else apply_sloth(table_q, table_r, numeric_columns_q, numeric_columns_r, blacklist=blacklist)
+            
+            if sloth_overlap == -1 and dboverlap == None:
                 logging.warning(f"Pair {query_id} - {_id_r} SLOTH failed")
 
             # the intersection size is used for computing Jaccard Similarity or other metrics like containment, 
@@ -79,6 +83,11 @@ def worker_result_extractor(chunk):
             intersection_size = len(set(set_q).intersection(set_r))
 
             size_q, size_r = len(set_q), len(set_r)
+
+            match mode:
+                case 'fasttext': mode = 'ft'
+                case 'fasttextdist': mode = 'ftdist'
+                case '_': mode = mode
 
             rv.append([query_id, _id_r, algorithm, mode, algorithm_overlap, sloth_overlap, size_q, size_r, intersection_size, sloth_time])
         
@@ -105,12 +114,14 @@ size =              args.size
 test_name = test_name.lower()
 num_query_samples = numerize(num_query_samples, asint=True)
 
-TEST_DATASET_DIR, query_file, logfile, forest_dir, embedding_dir, results_base_dir, results_extr_dir, statistics_dir, runtime_stat_file, storage_stat_file = get_all_paths(test_name, dataset, size, k, num_query_samples)
+TEST_DATASET_DIR, query_file, logfile, _, _, \
+    results_base_dir, results_extr_dir, \
+        statistics_dir, runtime_stat_file, storage_stat_file = get_all_paths(test_name, dataset, k, num_query_samples)
 final_results_file = f'{results_extr_dir}/final_results_k{k}_q{num_query_samples}.csv'
 
 
 logging_setup(logfile)
-logging.info(f'{"#" * 10} {test_name.upper()} - {dataset.upper()} - {size.upper()} - EXTRACTION {"#" * 10}')
+logging.info(f'{"#" * 10} {test_name.upper()} - {dataset.upper()} - {size.upper()} - {k} - {num_query_samples} - EXTRACTION {"#" * 10}')
 
 blacklist = {'{"$numberDouble": "NaN"}', 'comment', 'story'} if dataset == 'gittables' else set()
 # blacklist = {'{"$numberDouble": "NaN"}'} if dataset == 'gittables' else set()

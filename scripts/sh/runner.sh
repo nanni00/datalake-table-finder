@@ -23,6 +23,9 @@ DBNAME=nanni
 NUM_PERM=256
 L=32
 
+# Embedding parameters
+FASTTEXT_MODEL_SIZE=128
+
 # Neo4j graph parameters
 NEO4J_USER=neo4j
 NEO4J_PASSWORD=12345678
@@ -30,13 +33,13 @@ NEO4J_PASSWORD=12345678
 # number of cores used in parallel tasks
 NUM_CPU=72
 
-# ALGORITHMS="josie"
-# MODES="bag"
-ALGORITHMS="josie lshforest embedding"
-MODES="set bag fasttext fasttextdist"
+ALGORITHMS="embedding"
+MODES="ft ftdist"
+# ALGORITHMS="josie lshforest embedding"
+# MODES="set bag fasttext fasttextdist"
 
 # dataset
-DATASETS="wikipedia"
+DATASETS="gittables"
 SIZE="standard"
 
 # query sizes in term of number of queries
@@ -52,7 +55,7 @@ P_VALUES="1 3 5 10"
 DATA_PREPRATION=0
 SAMPLE_QUERIES=0
 QUERY=0
-EXTRACT=0   # extract more information from initial results (like SLOTH overlap for each table pair) 
+EXTRACT=1   # extract more information from initial results (like SLOTH overlap for each table pair) 
 ANALYSE=1   # do the concrete analyses
 CLEAN=0   # remove database tables and big files
 
@@ -84,7 +87,6 @@ do
             
             if [[ $DATA_PREPRATION -eq 1 || $SAMPLE_QUERIES -eq 1 || $QUERY -eq 1 ]]; then
                 if [[ $MEMORY_PROFILING -eq 0 ]]; then    
-                # run the program with all the parameters
                     python $PY_TESTER \
                         --test-name $TEST_NAME \
                         --algorithm $ALGORITHM \
@@ -94,13 +96,12 @@ do
                         --num-query-samples $QUERY_SIZES \
                         -k $K \
                         -l $L \
-                        --neo4j-user $NEO4J_USER \
-                        --neo4j-password $NEO4J_PASSWORD \
                         --num-perm $NUM_PERM \
                         --num-cpu $NUM_CPU \
                         --dataset $DATASET \
                         --size $SIZE \
-                        --token-table-on-memory
+                        --token-table-on-memory \
+                        --fasttext-model-size $FASTTEXT_MODEL_SIZE
                 else
                     REPORT_FILE="${MEMORY_REPORTS_DIR}/main_tester.${TEST_NAME}_${DATASET}_${ALGORITHM}_${MODE}.bin"
                     memray run --native --follow-fork --output $REPORT_FILE \
@@ -118,7 +119,10 @@ do
                         --num-perm $NUM_PERM \
                         --num-cpu $NUM_CPU \
                         --dataset $DATASET \
-                        --size $SIZE
+                        --size $SIZE \
+                        --size $SIZE \
+                        --token-table-on-memory \
+                        --fasttext-model-size $FASTTEXT_MODEL_SIZE
                 fi
             fi
         done

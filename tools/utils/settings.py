@@ -69,7 +69,7 @@ def make_parser(*arguments):
                                     help='the tasks to do')
             case 'num_query_samples':
                 parser.add_argument('--num-query-samples', 
-                                    required=False, default=1000,
+                                    required=False, default=1000, type=int,
                                     help='the number of tables that will be sampled from the collections and that will be used as query id for JOSIE (the actual number) \
                                     may be less than the specified one due to thresholds tables parameter')
             case 'num_cpu':
