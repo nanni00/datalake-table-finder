@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # TEST_NAME=main_wblacklist
-TEST_NAME=a_test
+TEST_NAME=b_test
 
 MEMORY_PROFILING=0
 MEMORY_REPORTS_DIR=$THESIS_PATH/scripts/py/memory_reports
@@ -37,17 +37,20 @@ NEO4J_PASSWORD=12345678
 # number of cores used in parallel tasks
 NUM_CPU=72
 
+# BLACKLIST="story comment"
+BLACKLIST=""
+
 # ALGORITHMS="josie"
 # MODES="bag"
 ALGORITHMS="embedding"
 MODES="ft"
 
 # dataset
-DATASETS="wikitables"
+DATASETS="gittables"
 SIZE="standard"
 
 # query sizes in term of number of queries
-QUERY_SIZES="100000"
+QUERY_SIZES="50000"
 # QUERY_SIZES="1000 10000 100000"
 
 # values used for analyses
@@ -59,8 +62,8 @@ P_VALUES="1 3 5 10"
 DATA_PREPRATION=0
 SAMPLE_QUERIES=0
 QUERY=0
-EXTRACT=1   # extract more information from initial results (like SLOTH overlap for each table pair) 
-ANALYSE=0   # do the concrete analyses
+EXTRACT=0   # extract more information from initial results (like SLOTH overlap for each table pair) 
+ANALYSE=1   # do the concrete analyses
 CLEAN=0   # remove database tables and big files
 
 
@@ -165,7 +168,8 @@ do
                     --dbname $DBNAME \
                     --dataset $DATASET \
                     -k $K \
-                    --size $SIZE
+                    --size $SIZE \
+                    --blacklist $BLACKLIST
             else
                 REPORT_FILE="${MEMORY_REPORTS_DIR}/extraction.${TEST_NAME}_${NUM_QUERY_SAMPLES}.bin"
                 memray run --native --follow-fork --output $REPORT_FILE \
@@ -176,8 +180,8 @@ do
                     --dbname $DBNAME \
                     --dataset $DATASET \
                     -k $K \
-                    --size $SIZE
-
+                    --size $SIZE \
+                    --blacklist $BLACKLIST
             fi
         done
     fi

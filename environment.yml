@@ -1,4 +1,4 @@
-name: nanni-env
+name: tesi-env
 
 dependencies:
   - python=3.10.13

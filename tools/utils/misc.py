@@ -6,6 +6,7 @@ import logging
 import logging.handlers
 from collections import defaultdict
 
+import pymongo
 import pyspark
 import numpy as np
 import pandas as pd
@@ -105,7 +106,7 @@ def get_initial_spark_rdd(dataset, size, num_cpu, tables_thresholds, spark_jars_
             .appName("Big Bang Testing with MongoDB")
             .master(f"local[{num_cpu}]")
             .config('spark.jars.packages', ','.join(spark_jars_packages))
-            .config('spark.executor.memory', '50g')
+            .config('spark.executor.memory', '100g')
             .config('spark.driver.memory', '10g')
             .config('spark.local.dir', '/home/giovanni.malaguti/spark')
             .getOrCreate()
@@ -113,16 +114,25 @@ def get_initial_spark_rdd(dataset, size, num_cpu, tables_thresholds, spark_jars_
 
         # adjusting logging level to error, avoiding warnings
         spark.sparkContext.setLogLevel("ERROR")
+        mongoclient = pymongo.MongoClient(directConnection=True)
 
-        if dataset == 'wikitables':
-            # db_collections = zip(['optitab', 'sloth'], 
-            #                     ["turl_training_set_small"      if size == 'small' else "turl_training_set", 
-            #                     "latest_snapshot_tables_small"  if size == 'small' else "latest_snapshot_tables"])
-            db_collections = zip(['datasets'], ['wikitables'])
-        else:
-            # db_collections = zip(['sloth'], ['gittables_small' if size == 'small' else 'gittables'])
-            db_collections = zip(['datasets'], ['gittables'])
-            
+        match dataset:
+            case 'wikiturlsnap':
+                databases, collections = ['optitab', 'sloth'], ['turl_training_set', 'latest_snapshot_tables']
+            case 'gittables':
+                if 'sloth' in mongoclient.list_database_names():
+                    databases = ['sloth']
+                elif 'dataset' in mongoclient.list_database_names():
+                    databases = ['datasets']
+                collections = ['gittables']
+            case 'wikitables':
+                databases, collections = ['datasets'], ['wikitables']
+                
+
+        if size == 'small':
+            collections = [c + '_small' for c in collections]
+        db_collections = zip(databases, collections)
+
         initial_rdd = spark.sparkContext.emptyRDD()
 
         for database, collection_name in db_collections:

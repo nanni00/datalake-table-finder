@@ -9,6 +9,8 @@ import logging
 # import orjson
 import psycopg
 
+from tools.utils.misc import print_info
+
 
 class AlgorithmTester(ABC):
     def __init__(self, mode, dataset, size, tables_thresholds, num_cpu, blacklist) -> None:
@@ -94,7 +96,7 @@ class ResultDatabase:
             raise Exception()
 
         return None if result == None else result['sloth_overlap']
-        
+    
     def clear(self):
         q = f"""
             SELECT EXISTS (

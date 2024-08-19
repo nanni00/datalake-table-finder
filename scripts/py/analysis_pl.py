@@ -16,31 +16,25 @@ from tools.utils import basicconfig
 from tools.utils.settings import make_parser, get_all_paths
 from tools.utils.misc import get_local_time, logging_setup
 from tools.utils.parallel_worker import worker_fp_per_query, worker_ndcg, worker_precision
-from tools.utils.mongodb_utils import get_mongodb_collections
 
 
 
-if __name__ == '__main__':
-    args = make_parser('test_name', 'num_cpu', 'num_query_samples', 'k', 'dataset', 'size', 'p_values')
-    test_name =         args.test_name
-    num_query_samples = int(args.num_query_samples)
-    k =                 int(args.k)
-    num_cpu =           args.num_cpu
-    dataset =           args.dataset
-    size =              args.size
-    p_values =          args.p_values
 
+def analyses(test_name, k, num_query_samples, num_cpu, dataset, size, p_values):
+    assert int(k) > 0
+    assert int(num_cpu) > 0
+    assert dataset in basicconfig.datasets
+    assert size in basicconfig.datasets_size
+    
     test_name = test_name.lower()
     q = numerize(num_query_samples, asint=True)
 
-    mongoclient, collections = get_mongodb_collections(dataset=dataset, size=size)
-
-    TEST_DATASET_DIR, query_file, logfile, forest_dir, embedding_dir, \
-        results_base_dir, results_extr_dir, \
-            statistics_dir, runtime_stat_file, storage_stat_file = get_all_paths(test_name, dataset, k, num_query_samples)
+    TEST_DATASET_DIR, _, logfile, _, _, \
+        _, results_extr_dir, \
+            _, runtime_stat_file, _ = get_all_paths(test_name, dataset, k, num_query_samples)
     
-    analyses_dir =          TEST_DATASET_DIR + '/results/analyses'
-    analyses_query_dir =    analyses_dir + f'/k{k}_q{q}'
+    analyses_dir =          f'{TEST_DATASET_DIR}/results/analyses'
+    analyses_query_dir =    f'{analyses_dir}/k{k}_q{q}'
     
 
     runtime_metrics = []
@@ -65,8 +59,6 @@ if __name__ == '__main__':
     alpha = 0.8
     showfliers = True
 
-    logging.info(f'{"#" * 10} {test_name.upper()} - {dataset.upper()} - {size.upper()} - {k} - {q} - ANALYSES {"#" * 10}')
-
     results = pl.read_csv(f'{results_extr_dir}/final_results_k{k}_q{q}.csv')
     
     results = results.drop_nulls() # queries without any results
@@ -86,7 +78,7 @@ if __name__ == '__main__':
     results = results.filter(~pl.col('query_id').is_in(bad_groups))
     end_filtering = time()
     print(len(bad_groups), num_query_samples, results.select('query_id').unique().shape[0])
-    # assert len(bad_groups) == num_query_samples - results.shape[0]
+    
     runtime_metrics.append((get_local_time(), 'filtering_groups', round(end_filtering - start_filtering, 3)))
     logging.info(f'Filtered {len(bad_groups)} groups in {round(end_filtering - start_filtering, 3)}s')
 
@@ -348,3 +340,17 @@ if __name__ == '__main__':
 
 
 
+
+
+if __name__ == '__main__':
+    args = make_parser('test_name', 'num_cpu', 'num_query_samples', 'k', 'dataset', 'size', 'p_values')
+    test_name =         args.test_name
+    num_query_samples = args.num_query_samples
+    k =                 args.k
+    num_cpu =           args.num_cpu
+    dataset =           args.dataset
+    size =              args.size
+    p_values =          args.p_values
+
+
+    analyses(test_name, k, num_query_samples, num_cpu, dataset, size, p_values)

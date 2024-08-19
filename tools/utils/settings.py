@@ -84,6 +84,10 @@ def make_parser(*arguments):
             case 'dataset':
                 parser.add_argument('--dataset', 
                                     required=True, choices=basicconfig.datasets)
+            case 'blacklist':
+                parser.add_argument('--blacklist', 
+                                    required=False, nargs='*',
+                                    help='a list of tokens that will be filtered')
 
             # Clean task
             case 'clean':            

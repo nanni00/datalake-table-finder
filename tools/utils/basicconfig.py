@@ -37,7 +37,7 @@ tables_thresholds = {
 datasets = [
     'gittables',
     'wikitables',
-    'wiki_snap_turl'
+    'wikiturlsnap'
 ]
 
 datasets_size = [

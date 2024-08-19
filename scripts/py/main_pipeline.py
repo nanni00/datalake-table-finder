@@ -7,9 +7,9 @@ N.B. In the extraction and analyses phases there are grouping stages on the 'alg
 parameters are not introduced in naming (e.g. no embedding-ft300 vs embedding-ft128), so if needed is necessary to create a different
 test folder
 """
-import logging
 import os
 import sys
+import logging
 
 import pandas as pd
 from numerize_denumerize.numerize import numerize
@@ -19,7 +19,6 @@ from tools.utils.basicconfig import tables_thresholds
 from tools.utils.misc import (
     get_local_time,
     get_query_ids_from_query_file, 
-    sample_queries,
     logging_setup
 )
 from tools.utils.mongodb_utils import get_mongodb_collections
@@ -28,39 +27,23 @@ from tools import josie, lshforest, embedding
 
 
 
-if __name__ == '__main__':
-    args = make_parser('test_name', 'algorithm', 'mode', 'k', 'tasks', 'num_query_samples', 'num_cpu', 'size', 'dataset', 
-                       'clean', 
-                       'dbname', 'token_table_on_memory', 'pg_user', 'pg_password',
-                       'forest_file', 'num_perm', 'l',
-                       'fasttext_model_size')
-
-    test_name =         args.test_name
-    algorithm =         args.algorithm
-    mode =              args.mode
-    tasks =             args.tasks if args.tasks else []
-    k =                 args.k
-    num_query_samples = args.num_query_samples
-    num_cpu =           args.num_cpu
-    size =              args.size
-    dataset =           args.dataset
-
-    # JOSIE
-    user_dbname =       args.dbname
-    token_table_on_mem =args.token_table_on_memory
-    pg_password =       args.pg_password
-    pg_user =           args.pg_user
-
-    # LSHForest
-    num_perm =          args.num_perm
-    l =                 args.l
-
-    # fastText
-    fasttext_model_size = args.fasttext_model_size
-
+def main_pipeline(test_name, algorithm, mode, tasks:list[str], 
+                  k:int=10, num_query_samples:int=1000, num_cpu:int=72, 
+                  dataset:str='wikiturlsnap', size:str='standard',
+                  pg_dbname:str='user', token_table_on_mem:bool=False, pg_user:str='user', pg_password:str='',
+                  num_perm:int=256, l:int=16, forest_file=None,
+                  fasttext_model_size:int=300,
+                  blacklist:list[str]=[],
+                  clean:bool=False):
     # check configuration
-    if (algorithm, mode) not in basicconfig.algmodeconfig:
-        sys.exit(1)
+    assert (algorithm, mode) in basicconfig.algmodeconfig
+    assert int(k) > 0
+    assert int(num_cpu) > 0
+    assert dataset in basicconfig.datasets
+    assert size in basicconfig.datasets_size
+    assert int(num_perm) > 0
+    assert int(l) > 0
+    assert int(fasttext_model_size) > 0
 
     test_name = test_name.lower()
     num_query_samples = int(num_query_samples)
@@ -70,7 +53,7 @@ if __name__ == '__main__':
     DATA_PREPARATION =          'data-preparation' in tasks or 'all' in tasks
     SAMPLE_QUERIES =            'sample-queries' in tasks or 'all' in tasks
     QUERY =                     'query' in tasks or 'all' in tasks
-    CLEAN =                     args.clean
+    CLEAN =                     clean
 
 
     TEST_DATASET_DIR, query_file, logfile, \
@@ -78,15 +61,17 @@ if __name__ == '__main__':
             results_base_dir, results_extr_dir, \
                 statistics_dir, runtime_stat_file, storage_stat_file = get_all_paths(test_name, dataset, k, str_num_query_samples)
 
-    forest_file =       f'{forest_dir}/forest_m{mode}.json' if not args.forest_file else args.forest_file
+    forest_file =       f'{forest_dir}/forest_m{mode}.json' if not forest_file else forest_file
     cidx_file =         f'{embedding_dir}/col_idx_mft.index' if mode in ['ft', 'ftdist'] else f'{embedding_dir}/col_idx_m{mode}.index' 
     topk_results_file = f'{results_base_dir}/a{algorithm}_m{mode}.csv'
     db_stat_file =      statistics_dir + '/db.csv'
 
 
+    blacklist = set(blacklist)
+    logging.info(f"Blacklist: {blacklist}")
     # a set of tokens that will be discarded when working on a specific dataset
     # 'comment' and 'story' are very frequent in GitTables, should they be removed? 
-    blacklist = {'{"$numberDouble": "NaN"}', 'comment', 'story'} if dataset == 'gittables' else set()
+    # blacklist = {'{"$numberDouble": "NaN"}', 'comment', 'story'} if dataset == 'gittables' else set()
     # blacklist = {'{"$numberDouble": "NaN"}'} if dataset == 'gittables' else set()
 
     # a list containing information about timing of each step
@@ -103,7 +88,7 @@ if __name__ == '__main__':
     default_args = (mode, dataset, size, tables_thresholds, num_cpu, blacklist)
     match algorithm:
         case 'josie':
-            tester = josie.JOSIETester(*default_args, user_dbname, table_prefix, db_stat_file, pg_user, pg_password)
+            tester = josie.JOSIETester(*default_args, pg_dbname, table_prefix, db_stat_file, pg_user, pg_password)
         case 'lshforest':
             tester = lshforest.LSHForestTester(*default_args, forest_file, num_perm, l, collections)
         case 'embedding':
@@ -133,19 +118,6 @@ if __name__ == '__main__':
             raise Exception()
             
 
-    if SAMPLE_QUERIES:
-        logging.info(f'{"#" * 10} {test_name.upper()} - {algorithm.upper()} - {mode.upper()} - {k} - {dataset.upper()} - {size.upper()} - SAMPLING QUERIES {"#" * 10}')
-        try:
-            if not os.path.exists(query_file):
-                num_samples = sample_queries(query_file, num_query_samples, tables_thresholds, *collections)
-                logging.info(f'Sampled {num_samples} query tables (required {num_query_samples}).')
-            else:
-                logging.info(f'Query file for {num_query_samples} queries already present.')
-        except Exception as e:
-            logging.error(f"Error on sampling queries: n={num_query_samples}, query_file={query_file}, exception message {e.args}")
-            raise Exception()
-
-
     if QUERY:
         logging.info(f'{"#" * 10} {test_name.upper()} - {algorithm.upper()} - {mode.upper()} - {k} - {dataset.upper()} - {size.upper()} - QUERY {"#" * 10}')
         try:
@@ -161,7 +133,12 @@ if __name__ == '__main__':
             logging.error(f"Error on query: n={num_query_samples}, query_file={query_file}, exception message {e.args}")
             raise Exception()
         
-            
+
+    if CLEAN:
+        logging.info(f'{"#" * 10} {test_name.upper()} - {algorithm.upper()} - {mode.upper()} - {dataset.upper()} - {size.upper()} - CLEANING {"#" * 10}')
+        tester.clean()
+
+
     if DATA_PREPARATION or QUERY or SAMPLE_QUERIES:
         add_header = not os.path.exists(runtime_stat_file)
         with open(runtime_stat_file, 'a') as rfw:
@@ -170,13 +147,51 @@ if __name__ == '__main__':
             for ((t_name, num_queries), t_time, t_loctime) in runtime_metrics:
                 rfw.write(f"{t_loctime},{algorithm},{mode},{t_name},{k},{num_queries},{t_time}\n")
 
-
-    if CLEAN:
-        logging.info(f'{"#" * 10} {test_name.upper()} - {algorithm.upper()} - {mode.upper()} - {dataset.upper()} - {size.upper()} - CLEANING {"#" * 10}')
-        tester.clean()
         
     if mongoclient:
         mongoclient.close()
 
 
     logging.info('All tasks have been completed.')
+
+
+
+
+
+if __name__ == '__main__':
+    args = make_parser('test_name', 'algorithm', 'mode', 'k', 'tasks', 'num_query_samples', 'num_cpu', 'size', 'dataset', 
+                       'clean', 
+                       'dbname', 'token_table_on_memory', 'pg_user', 'pg_password',
+                       'forest_file', 'num_perm', 'l',
+                       'fasttext_model_size')
+
+    test_name =         args.test_name
+    algorithm =         args.algorithm
+    mode =              args.mode
+    tasks =             args.tasks if args.tasks else []
+    k =                 args.k
+    num_query_samples = args.num_query_samples
+    num_cpu =           args.num_cpu
+    size =              args.size
+    dataset =           args.dataset
+
+    # JOSIE
+    user_dbname =       args.dbname
+    token_table_on_mem =args.token_table_on_memory
+    pg_password =       args.pg_password
+    pg_user =           args.pg_user
+
+    # LSHForest
+    num_perm =          args.num_perm
+    l =                 args.l
+    forest_file =       args.forest_file
+
+    # fastText
+    fasttext_model_size = args.fasttext_model_size
+
+    clean = args.clean
+
+    main_pipeline(test_name, algorithm, mode, 
+                  tasks, k, num_query_samples, num_cpu, size, dataset,
+                  user_dbname, token_table_on_mem, pg_password, pg_user,
+                  num_perm, l, forest_file, fasttext_model_size, clean)
