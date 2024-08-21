@@ -1,7 +1,7 @@
-import logging
 import os
-import binascii
 import re
+import logging
+import binascii
 from time import time
 
 import mmh3
@@ -9,13 +9,21 @@ import pandas as pd
 import polars as pl
 import numpy as np
 
-import psycopg.rows
+import pymongo
 import pyspark
+import pyspark.rdd
+import psycopg.rows
 
 import psycopg
 
 from tools.utils.classes import AlgorithmTester
-from tools.utils.misc import create_token_set, convert_to_giga, print_info, get_initial_spark_rdd
+from tools.utils.misc import (
+    get_tables_thresholds_from,
+    print_info, 
+    create_token_set, 
+    convert_to_giga, 
+    get_spark_session, 
+)
 
 
 
@@ -168,13 +176,19 @@ class JosieDB:
 
 
 class JOSIETester(AlgorithmTester):
-    def __init__(self, mode, dataset, size, tables_thresholds, num_cpu, blacklist, *args) -> None:
-        super().__init__(mode, dataset, size, tables_thresholds, num_cpu, blacklist)        
-        self.dbname, self.tables_prefix, self.db_stat_file, self.pg_user, self.pg_password = args
+    def __init__(self, mode, dataset, size, tables_thresholds, num_cpu, blacklist, datalake_helper, *args) -> None:
+        super().__init__(mode, dataset, size, tables_thresholds, num_cpu, blacklist, datalake_helper)
+        (
+            self.dbname, 
+            self.tables_prefix, 
+            self.db_stat_file, 
+            self.pg_user, self.pg_password, 
+            self.spark_local_dir
+        ) = args
         
         self.josiedb = JosieDB(self.dbname, self.tables_prefix)
         self.josiedb.open()
-        logging.info("Status PostgreSQL connection: ", self.josiedb.is_open())
+        logging.info(f"Status PostgreSQL connection: {self.josiedb.is_open()}")
 
     @print_info(msg_before='Creating PostegreSQL integer sets and inverted index tables...', msg_after='Completed JOSIE data preparation.')
     def data_preparation(self):
@@ -196,10 +210,70 @@ class JOSIETester(AlgorithmTester):
             'org.mongodb.spark:mongo-spark-connector_2.12:10.3.0'
         ]
         
-        spark, initial_rdd = get_initial_spark_rdd(self.dataset, self.size, self.num_cpu, self.tables_thresholds, spark_jars_packages)
+        mode, blacklist, dlh = self.mode, self.blacklist, self.datalake_helper
+        
+        spark = get_spark_session(self.num_cpu, self.spark_local_dir, spark_jars_packages)
+        MIN_ROW, MAX_ROW, MIN_COLUMN, MAX_COLUMN, MIN_AREA, MAX_AREA = get_tables_thresholds_from(self.tables_thresholds)
 
-        mode, blacklist = self.mode, self.blacklist
+        match self.datalake_helper.datalake_location:
+            # in the end we must have a RDD with tuples (table_id, table_content, table_numeric_columns)
+            # with table_id as an integer,
+            # table_content as a list of list (rows)
+            # table_numeric_columns as a list of 0/1 values (0 => column i-th is not numeric, 1 otherwise)
+            case 'mongodb':
+                    # if the datalake is stored on MongoDB, then through the connector we
+                    # can easily access the tables
+                    mongoclient = pymongo.MongoClient(directConnection=True)
+                    
+                    match self.dataset:
+                        case 'wikiturlsnap':
+                            databases, collections = ['optitab', 'sloth'], ['turl_training_set', 'latest_snapshot_tables']
+                        case 'gittables':
+                            if 'sloth' in mongoclient.list_database_names():
+                                databases = ['sloth']
+                            elif 'dataset' in mongoclient.list_database_names():
+                                databases = ['datasets']
+                            collections = ['gittables']
+                        case 'wikitables':
+                            databases, collections = ['datasets'], ['wikitables']
+                            
+                    collections = [c + '_small' if self.size == 'small' else c for c in collections]
+                    db_collections = zip(databases, collections)
 
+                    initial_rdd = spark.sparkContext.emptyRDD()
+
+                    for database, collection_name in db_collections:
+                        initial_rdd = initial_rdd.union(
+                            spark 
+                            .read 
+                            .format("mongodb") 
+                            .option ("uri", "mongodb://127.0.0.1:27017/") 
+                            .option("database", database) 
+                            .option("collection", collection_name) 
+                            .load() 
+                            .select('_id_numeric', 'content', 'numeric_columns') 
+                            .filter(f"""
+                                size(content) BETWEEN {MIN_ROW} AND {MAX_ROW}
+                                AND size(content[0]) BETWEEN {MIN_COLUMN} AND {MAX_COLUMN}
+                                AND size(content) * size(content[0]) BETWEEN {MIN_AREA} AND {MAX_AREA}""")
+                            .rdd
+                            .map(list)
+                        )
+            case _:
+                    # otherwise, if the datalake is stored on disk as CSV files, then we can access it using
+                    # the helper class
+                    initial_rdd = spark.sparkContext.parallelize([(id_num, id_name) for id_num, id_name in dlh._mapping_id.items()])
+
+                    initial_rdd = initial_rdd.map(
+                        lambda tabid_tabf: (tabid_tabf[0], pl.read_csv(f'{dlh.datalake_location}/{tabid_tabf[1]}.csv', infer_schema_length=0, encoding='latin1').rows())
+                    ).filter(
+                        lambda tid_tab: (MIN_ROW <= len(tid_tab[1]) <= MAX_ROW) \
+                            and (MIN_COLUMN <= len(tid_tab[1][0]) <= MAX_COLUMN) \
+                            and (MIN_AREA <= len(tid_tab[1]) * len(tid_tab[1][0]) <= MAX_AREA)            
+                    ).map(
+                        lambda tid_tab: (tid_tab[0], tid_tab[1], dlh._numeric_columns[tid_tab[0]])
+                    )
+        
         def prepare_tuple(t):
             nonlocal mode, blacklist
             # t = (_id_numeric, content, numeric_columns)
@@ -211,8 +285,7 @@ class JOSIETester(AlgorithmTester):
                     # from MongoDB directly
                     # (_id_numeric, content, numeric_columns) -> (_id_numeric, [token1, token2, token3, ...])
                     lambda t: prepare_tuple(t)
-                )
-                    .flatMap(
+                ).flatMap(
                         # (set_id, [tok1, tok2, tok3, ...]) -> [(tok1, set_id), (tok2, set_id), ...]
                         lambda t: [ (token, t[0]) for token in t[1]]
                     )

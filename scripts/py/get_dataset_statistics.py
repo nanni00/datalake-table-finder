@@ -4,7 +4,7 @@ import pandas as pd
 from tqdm import tqdm
 
 from tools.utils.misc import check_table_is_in_thresholds
-from tools.utils.mongodb_utils import get_mongodb_collections
+from tools.utils.datalake import get_mongodb_collections
 from tools.utils.settings import DefaultPath as defpath
 
 size = 'standard'

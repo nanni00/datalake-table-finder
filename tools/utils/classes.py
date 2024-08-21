@@ -10,16 +10,18 @@ import logging
 import psycopg
 
 from tools.utils.misc import print_info
+from tools.utils.datalake import SimpleDataLakeHelper
 
 
 class AlgorithmTester(ABC):
-    def __init__(self, mode, dataset, size, tables_thresholds, num_cpu, blacklist) -> None:
+    def __init__(self, mode, dataset, size, tables_thresholds, num_cpu, blacklist, datalake_helper:SimpleDataLakeHelper) -> None:
         self.mode = mode
         self.dataset = dataset
         self.size = size
         self.num_cpu = num_cpu
         self.tables_thresholds = tables_thresholds
         self.blacklist = blacklist
+        self.datalake_helper = datalake_helper
 
     @abstractmethod
     def data_preparation(self) -> None:
@@ -106,7 +108,6 @@ class ResultDatabase:
         """
         exists = self._dbconn.execute(q).fetchone()['exists'] == True
         if exists:
-            logging.info(f'Truncating results table {self.table_name}...')
             self._dbconn.execute(f"TRUNCATE {self.table_name} ;")
             self._dbconn.commit()
 
@@ -116,54 +117,9 @@ class ResultDatabase:
     def get_numer_of_records(self):
         return self._dbconn.execute(f"SELECT COUNT(*) FROM {self.table_name}").fetchone()
 
-
-
     def close(self):
         self._dbconn.close()
 
 
-
-
-class LUT:
-    """
-    LookUp Table used for keep the ids of indexed vectors on FAISS index
-    --- Deprecated: FAISS indexes allow to use non-unique IDs for vectors, in
-    this way the column vectors of a table can share the same ID, so when doing the
-    top-K it's no longer needed a LUT to retrieve for each specifc vector ID its 
-    table ID.
-    """
-    def __init__(self, json_lut_file=None) -> None:
-        self.idxs = []
-        self.ids = []
-
-        if json_lut_file:
-            self._load(json_lut_file)
-
-    def insert_index(self, numitems, id):
-        " Insert a new record in the LUT, assuming ordered insert. "
-        self.idxs.append(numitems - 1 if len(self.idxs) == 0 else self.idxs[-1] + numitems)
-        self.ids.append(id)
-
-    def _load(self, json_lut_file):
-        with open(json_lut_file, 'rb') as reader:
-            json_lut = orjson.loads(reader.read())
-            try:
-                assert len(json_lut['idxs']) == len(json_lut['ids'])
-                self.idxs = json_lut['idxs']
-                self.ids = json_lut['ids']
-            except AssertionError:
-                print(f"idxs and table ids have different lengths: {len(json_lut['idxs'])}, {len(json_lut['table_ids'])}")
-
-    def save(self, json_lut_filepath:str):
-        with open(json_lut_filepath, 'wb') as writer:
-            data = orjson.dumps({"idxs": self.idxs, "ids": self.ids})
-            writer.write(data)
- 
-    def lookup(self, vector_id):
-        return self.ids[bisect.bisect_left(self.idxs, vector_id)]
-
-    @property
-    def ntotal(self):
-        return len(self.idxs)
 
 

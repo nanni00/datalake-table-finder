@@ -7,8 +7,9 @@ import pymongo
 from tqdm import tqdm
 
 from tools.sloth.utils import parse_table
-from tools.utils.mongodb_utils import get_mongodb_collections
-from tools.utils.basicconfig import datasets, datasets_size
+from tools.utils.misc import naive_detect_table_numeric_and_null_columns
+from tools.utils.datalake import get_mongodb_collections
+from tools.utils.basicconfig import DATASETS, DATASETS_SIZES
 
 
 NUMERICAL_NER_TAGS = {
@@ -59,37 +60,6 @@ def spacy_detect_table_numeric_columns(table: list[list], nlp, nsamples: int) ->
     ]
 
 
-def is_number_tryexcept(s):
-    try: 
-        float(s)
-        return True
-    except ValueError:
-        return False
-    except TypeError:
-        return False
-    
-
-def naive_detect_table_numeric_and_null_columns(table: list[list], any_int:bool=False) -> list[int]:
-    """ 
-    :param table: a list of lists representing a table in row view
-    :param any_int: if set to True, a column is detected as an numeric column wheter any of its values is 
-        a numeric value, else if the majority (i.e. #numeric_cells >= #column_size / 2 + 1) of its values are numerics
-    :return a list of int, where the i-th element is set to 1 if the i-th column is detected as numeric or with only null values, 
-        0 otherwise
-    """
-    if len(table) == 0 or len(table[0]) == 0:
-        return []
-    
-    if any_int:
-        return [
-            int(any(is_number_tryexcept(cell) for cell in column) or not any(cell for cell in column))
-            for column in parse_table(table, len(table[0]), 0)
-        ]
-    else:
-        return [
-            int(sum(is_number_tryexcept(cell) for cell in column) >= len(column) // 2 + 1 or not any(cell for cell in column))
-            for column in parse_table(table, len(table[0]), 0)
-        ]
 
 
 
@@ -129,9 +99,9 @@ if __name__ == '__main__':
                         help='defines how many cell(s) must be sampled in spacy mode from each column to detect wheter or not the column is numeric, \
                             default is 3. If set to -1 analyses the whole column.')
     parser.add_argument('--dataset', 
-                        required=True, choices=datasets)
+                        required=True, choices=DATASETS)
     parser.add_argument('--size',
-                        required=False, default='standard', choices=datasets_size,
+                        required=False, default='standard', choices=DATASETS_SIZES,
                         help='works on small collection versions (only for testing)')
 
     args = parser.parse_args()

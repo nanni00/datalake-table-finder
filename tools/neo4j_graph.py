@@ -1,3 +1,6 @@
+"""
+This was just a test
+"""
 import logging
 import os
 from time import time
@@ -8,7 +11,7 @@ import pandas as pd
 from neo4j import GraphDatabase
 
 from tools.utils.classes import AlgorithmTester
-from tools.utils.misc import get_initial_spark_rdd
+from tools.utils.misc import get_initial_spark_rdd_from_mongodb
 
 
 def get_table_tokens_counter(table, numeric_columns):
@@ -43,7 +46,7 @@ class Neo4jTester(AlgorithmTester):
                 session.run("CREATE CONSTRAINT tab_id_constraint IF NOT EXISTS FOR (tab:Table) REQUIRE tab.table_id IS KEY") # KEY only with Enterprise edition
                 session.run("CREATE CONSTRAINT tab_id_constraint IF NOT EXISTS FOR (tok:Token) REQUIRE tok.token_id IS KEY") # KEY only with Enterprise edition
 
-        spark, initial_rdd = get_initial_spark_rdd(self.size, self.num_cpu, self.tables_thresholds, spark_jars_packages)
+        spark, initial_rdd = get_initial_spark_rdd_from_mongodb(self.size, self.num_cpu, self.tables_thresholds, spark_jars_packages)
                          
         spark.conf.set('neo4j.authentication.basic.username', self.user)
         spark.conf.set('neo4j.authentication.basic.password', self.password)

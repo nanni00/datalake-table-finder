@@ -1,10 +1,10 @@
-algorithms = [
+ALGORITHMS = [
     'josie',
     'lshforest',
     'embedding'
 ]
 
-modes = [
+MODES = [
     'set',
     'bag',
     'ft',
@@ -12,19 +12,20 @@ modes = [
     'ftlsh'
 ]
 
-algmodeconfig = [
+ALGORITHM_MODE_CONFIG = [
     ('josie', 'set'),
     ('josie', 'bag'),
     ('lshforest', 'set'),
     ('lshforest', 'bag'),
     ('embedding', 'ft'),
     ('embedding', 'ftdist'),
-    ('embedding', 'ftlsh'),
+    ('embedding', 'cft'),
+    ('embedding', 'cftdist'),
 ]
 
 
 # filtering only those tables that have very few cells (<10)
-tables_thresholds = {
+TABLES_THRESHOLDS = {
     'min_row':      5,
     'min_column':   2,
     'min_area':     0,
@@ -34,13 +35,21 @@ tables_thresholds = {
 }
 
 
-datasets = [
+DATASETS = [
     'gittables',
     'wikitables',
-    'wikiturlsnap'
+    'wikiturlsnap',
+    'santoslarge'
 ]
 
-datasets_size = [
+MONGODB_DATASETS = [
+    'gittables',
+    'wikitables',
+    'wikiturlsnap',
+]
+
+
+DATASETS_SIZES = [
     'small',
     'standard'
 ]

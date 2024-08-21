@@ -1,3 +1,5 @@
+import os
+import random
 import re
 import sys
 import time
@@ -6,13 +8,18 @@ import logging
 import logging.handlers
 from collections import defaultdict
 
+from bidict import bidict
 import pymongo
 import pyspark
+import pyspark.rdd
 import numpy as np
 import pandas as pd
+import polars as pl
 from pyspark.sql import SparkSession
 
 from tools.sloth.sloth import sloth
+from tools.sloth.utils import parse_table
+from tools.utils.datalake import SimpleDataLakeHelper
 
 
 def print_info(**dec_kwargs):
@@ -25,44 +32,6 @@ def print_info(**dec_kwargs):
         return wrapper
     return decorator
 
-
-def round_to(n, precision):
-    if n >= 0 or n < 0:
-        correction = 0.5 if n >= 0 else -0.5
-        return int(n / precision + correction) * precision
-    else:
-        return n
-
-
-def round_to_05(n):
-    return float(format(round_to(n, 0.05), ".2f"))
-
-
-def my_tokenizer(s: str, remove_numbers=False):
-    from nltk.corpus import stopwords
-    stopwords_set = set(stopwords.words('english'))
-
-    s = str(s)
-    if not remove_numbers:
-        return [            
-            x for x in re.findall(r'\b([a-zA-Z]+|\d{1}|\d{2}|\d{3}|\d{4})\b', s) 
-            if x not in stopwords_set
-        ]
-    else:
-        return [
-            x for x in re.findall(r'[a-zA-Z]+', s)
-            if x not in stopwords_set
-        ]
-
-
-def cosine_similarity(arr1:np.array, arr2:np.array):
-    return np.dot(arr1, arr2) / (np.linalg.norm(arr1) * np.linalg.norm(arr2))
-
-
-def get_int_from_(s: str) -> list[int]:
-    """Returns all the integer found in the given string"""
-    return [int(x) for x in re.findall(r'\d+', s)]
-    
 
 def get_local_time():
     return time.strftime("%Y/%m/%d %H:%M:%S")
@@ -95,68 +64,58 @@ def get_tables_thresholds_from(tables_thresholds):
     )
 
 
-def get_initial_spark_rdd(dataset, size, num_cpu, tables_thresholds, spark_jars_packages=['org.mongodb.spark:mongo-spark-connector_2.12:10.3.0']) \
-    -> tuple[SparkSession, pyspark.rdd.RDD]:
-        MIN_ROW, MAX_ROW, MIN_COLUMN, MAX_COLUMN, MIN_AREA, MAX_AREA = get_tables_thresholds_from(tables_thresholds)
 
-        # fine tune of executor/driver.memory?
-        builder = SparkSession.Builder()
-        spark = (
-            builder
-            .appName("Big Bang Testing with MongoDB")
-            .master(f"local[{num_cpu}]")
-            .config('spark.jars.packages', ','.join(spark_jars_packages))
-            .config('spark.executor.memory', '100g')
-            .config('spark.driver.memory', '10g')
-            .config('spark.local.dir', '/home/giovanni.malaguti/spark')
-            .getOrCreate()
-        )
-
-        # adjusting logging level to error, avoiding warnings
-        spark.sparkContext.setLogLevel("ERROR")
-        mongoclient = pymongo.MongoClient(directConnection=True)
-
-        match dataset:
-            case 'wikiturlsnap':
-                databases, collections = ['optitab', 'sloth'], ['turl_training_set', 'latest_snapshot_tables']
-            case 'gittables':
-                if 'sloth' in mongoclient.list_database_names():
-                    databases = ['sloth']
-                elif 'dataset' in mongoclient.list_database_names():
-                    databases = ['datasets']
-                collections = ['gittables']
-            case 'wikitables':
-                databases, collections = ['datasets'], ['wikitables']
-                
-
-        if size == 'small':
-            collections = [c + '_small' for c in collections]
-        db_collections = zip(databases, collections)
-
-        initial_rdd = spark.sparkContext.emptyRDD()
-
-        for database, collection_name in db_collections:
-            initial_rdd = initial_rdd.union(
-                spark 
-                .read 
-                .format("mongodb") 
-                .option ("uri", "mongodb://127.0.0.1:27017/") 
-                .option("database", database) 
-                .option("collection", collection_name) 
-                .load() 
-                .select('_id_numeric', 'content', 'numeric_columns') 
-                .filter(f"""
-                    size(content) BETWEEN {MIN_ROW} AND {MAX_ROW}
-                    AND size(content[0]) BETWEEN {MIN_COLUMN} AND {MAX_COLUMN}
-                    AND size(content) * size(content[0]) BETWEEN {MIN_AREA} AND {MAX_AREA}""")
-                .rdd
-                .map(list)
-            )
-
-        return spark, initial_rdd
+def naive_detect_table_numeric_and_null_columns(table: list[list], any_int:bool=False) -> list[int]:
+    """ 
+    :param table: a list of lists representing a table in row view
+    :param any_int: if set to True, a column is detected as an numeric column wheter any of its values is 
+        a numeric value, else if the majority (i.e. #numeric_cells >= #column_size / 2 + 1) of its values are numerics
+    :return a list of int, where the i-th element is set to 1 if the i-th column is detected as numeric or with only null values, 
+        0 otherwise
+    """
+    if len(table) == 0 or len(table[0]) == 0:
+        return []
+    
+    if any_int:
+        return [
+            int(any(is_number_tryexcept(cell) for cell in column) or not any(cell for cell in column))
+            for column in parse_table(table, len(table[0]), 0)
+        ]
+    else:
+        return [
+            int(sum(is_number_tryexcept(cell) for cell in column) >= len(column) // 2 + 1 or not any(cell for cell in column))
+            for column in parse_table(table, len(table[0]), 0)
+        ]
 
 
+def get_spark_session(num_cpu, spark_local_dir:str, spark_jars_packages=['org.mongodb.spark:mongo-spark-connector_2.12:10.3.0']) -> SparkSession:
+    # fine tune of executor/driver.memory?
+    builder = SparkSession.Builder()
+    spark = (
+        builder
+        .appName("Big Bang Testing with MongoDB")
+        .master(f"local[{num_cpu}]")
+        .config('spark.jars.packages', ','.join(spark_jars_packages))
+        .config('spark.executor.memory', '100g')
+        .config('spark.driver.memory', '10g')
+        .config('spark.local.dir', spark_local_dir)
+        .config('spark.driver.maxResultSize', '12g')
+        .getOrCreate()
+    )
 
+    # adjusting logging level to error, avoiding warnings
+    spark.sparkContext.setLogLevel("ERROR")
+    return spark    
+
+
+def is_number_tryexcept(s):
+    try: 
+        float(s)
+        return True
+    except ValueError:
+        return False
+    except TypeError:
+        return False
 
 
 _TOKEN_TAG_SEPARATOR = '@#'
@@ -220,32 +179,24 @@ def apply_sloth(table1, table2, numeric_columns1, numeric_columns2, verbose=Fals
 
 
 
-def sample_queries(
-    output_query_json,
-    nsamples,
-    tables_thresholds:dict[str, int],
-    *collections
-    ):
-
+def sample_queries(output_query_json, nsamples, tables_thresholds:dict[str, int], dlh:SimpleDataLakeHelper):
     s = set()
+    print('Sampling tables...')
     while len(s) < nsamples:
-        samples = [collection.aggregate([{"$sample": {"size": nsamples}}]) for collection in collections]
-        for p in samples:
-            for t in list(p):
-                if not check_table_is_in_thresholds(t['content'], tables_thresholds) or all(t['numeric_columns']):
-                    continue
-                s.add(t['_id_numeric'])
-                if len(s) >= nsamples:
-                    break            
-
+        r = random.randint(0, dlh.get_number_of_tables() - 1)
+        table = dlh.get_table_by_numeric_id(r)
+        if not check_table_is_in_thresholds(table['content'], tables_thresholds) or all(table['numeric_columns']):
+            continue
+        s.add(r)
+        print(f'Sampled {len(s)} ({round(len(s) * 100 / nsamples)}%)', end='\r')
+        if len(s) >= nsamples:            
+            break
+    
     samples = {'_id_numeric': list(s)[:nsamples]}
     
     with open(output_query_json, 'w') as wf:
-        json.dump(
-            samples,
-            wf,
-            indent=1
-        )
+        json.dump(samples, wf, indent=1)
+
     return len(samples['_id_numeric'])
 
 
@@ -258,19 +209,15 @@ def get_query_ids_from_query_file(query_file):
 
 
 def logging_setup(logfile):
-    logging.root.handlers = []
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s [%(levelname)s] %(message)s",
-        datefmt="%Y-%m-%d %H:%M:%S",
-        handlers=[
-            logging.FileHandler(logfile),
-            logging.StreamHandler(sys.stdout)
-        ]
-    )
+    logger = logging.getLogger('TestLog')
+    handler_sysout = logging.StreamHandler(sys.stdout)
+    handler_file = logging.FileHandler(logfile)
+    formatter = logging.Formatter("%(asctime)s [%(levelname)s] %(message)s", datefmt="%Y-%m-%d %H:%M:%S")
     
-    for name in logging.root.manager.loggerDict:
-        if name.startswith('pymongo'):
-            logging.getLogger(name).setLevel(logging.WARN)
+    handler_sysout.setFormatter(formatter)
+    handler_file.setFormatter(formatter)
 
+    logger.addHandler(handler_sysout)
+    logger.addHandler(handler_file)
 
+    logger.setLevel(logging.INFO)

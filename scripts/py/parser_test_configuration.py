@@ -7,9 +7,9 @@ from extract_results import extract_results
 from main_pipeline import main_pipeline
 
 from tools.utils.misc import sample_queries
-from tools.utils.mongodb_utils import get_mongodb_collections
+from tools.utils.datalake import SimpleDataLakeHelper
 from tools.utils.settings import get_all_paths 
-from tools.utils.basicconfig import tables_thresholds
+from tools.utils.basicconfig import TABLES_THRESHOLDS
 from numerize_denumerize.numerize import numerize
 
 
@@ -20,21 +20,11 @@ if __name__ == '__main__':
 
     configuration_file = parser.parse_args().configuration_file
 
-    print(configuration_file)
-
     with open(configuration_file, 'r') as fp:
         configuration = json.load(fp)
-
-    test_name = configuration['test_name']
-    dataset = configuration['dataset']
-    size = configuration['size']
-    num_cpu = configuration['num_cpu']
-
-    blacklist = configuration['blacklist'] if 'blacklist' in configuration else []
-    k = configuration['k'] if 'k' in configuration else None
-    num_query_samples = configuration['num_query_samples'] if 'num_query_samples' in configuration else None
-
-    pg_dbname = configuration['pg_dbname']
+    
+    # general configuration
+    g_config = configuration['general']
 
     if 'data_preparation' in configuration:
         dp_config = configuration['data_preparation']
@@ -47,28 +37,31 @@ if __name__ == '__main__':
 
             for algorithm in algorithms:
                 for mode in modes:
-                    main_pipeline(test_name, algorithm, mode, ['data_preparation'], 
-                                k, num_query_samples, num_cpu,
-                                dataset, size,                        
-                                blacklist=blacklist,
-                                pg_dbname=pg_dbname,
+                    main_pipeline(algorithm=algorithm, mode=mode, tasks=['data_preparation'], 
+                                **g_config,
                                 **dp_config)
                     
 
     if 'sample_queries' in configuration:
         sq_config = configuration['sample_queries']
         if sq_config['exec_now']:
-            mongoclient, collections = get_mongodb_collections(dataset, size)
+            num_query_samples = g_config['num_query_samples']
+
+            dlh = SimpleDataLakeHelper(g_config['datalake_location'], 
+                                       g_config['dataset'], g_config['size'], 
+                                       g_config['mapping_id_file'], g_config['numeric_columns_file'])
+            
             str_num_query_samples = numerize(num_query_samples, asint=True)
 
             TEST_DATASET_DIR, query_file, \
-                _, _, _, _, _, _, _, _ = get_all_paths(test_name, dataset, k, str_num_query_samples)
+                _, _, _, _, _, _, _, _ = get_all_paths(g_config['test_name'], g_config['dataset'], g_config['k'], str_num_query_samples)
 
             if not os.path.exists(query_file):
-                num_samples = sample_queries(query_file, num_query_samples, tables_thresholds, *collections)
+                num_samples = sample_queries(query_file, num_query_samples, TABLES_THRESHOLDS, dlh)
             else:
                 print(f'Query file for {num_query_samples} already exists: {query_file}')
-            mongoclient.close()
+            
+            dlh.close()
 
 
     if 'query' in configuration:
@@ -82,22 +75,21 @@ if __name__ == '__main__':
 
             for algorithm in algorithms:
                 for mode in modes:
-                    main_pipeline(test_name, algorithm, mode, ['data_preparation'], 
-                                k, num_query_samples, num_cpu, 
-                                dataset, size, 
-                                blacklist=blacklist,
-                                pg_dbname=pg_dbname,
+                    main_pipeline(algorithm=algorithm, mode=mode, tasks=['query'], 
+                                **g_config,
                                 **q_config)
 
+    if 'ft_model_path' in g_config:
+        del g_config['ft_model_path']
 
     if 'extract' in configuration:
         e_config = configuration['extract']
         if e_config['exec_now']:
-            extract_results(test_name, k, num_query_samples, num_cpu, pg_dbname, dataset, size, blacklist)
+            extract_results(**g_config)
 
 
     if 'analyses' in configuration:
         a_config = configuration['analyses']
         if a_config['exec_now']:
-            analyses(test_name, k, num_query_samples, num_cpu, dataset, size, a_config['p_values'])
+            analyses(**g_config, p_values=a_config['p_values'])
 

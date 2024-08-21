@@ -13,6 +13,9 @@ data/pg_data
 go/*
 !go/src/github.com
 
+**test**
+
+src
 experiments
 TaBERT
 documentation

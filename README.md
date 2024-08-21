@@ -20,23 +20,22 @@ export GOBIN=$GOPATH/bin
 export PATH=$PATH:$GOBIN
 ```
 
-I test e le azioni preliminari si possono eseguire direttamente sulle collection principali o sulle toy-collection indicando il parametro --size.
-Prima di eseguire i test, occorre preparare il database MongoDB e le relative collection, aggiungendo un identificatore numerico a ogni documento e un vettore booleano che indichi le colonne numeriche.
+I datalake usati nei test possono essere o su un database MongoDB oppure si possono strutturare come una cartella contenente dei CSV, ogniuno dei quali è una tabella del corpus.
 
-Per aggiungere l'identificatore numerico,
+Prima di eseguire i test, occorre svolgere una fase di preparazione per costruire un mapping tra l'ID della tabella (su MongoDB il campo '_id', altrimenti il nome del file CSV) e un ID numerico; inoltre bisogna determinare quali colonne sono numeriche.
+
+Su MongoDB, per aggiungere l'identificatore numerico,
 ```
 python create_numeric_index_on_collections.py --task set
 ```
-questa azione è reversibile (--task unset).
 
-
-Per creare i metadati relativi alle colonne numeriche,
+e per determinare le colonne numeriche
 ```
 python detect_numeric_columns.py --task set --mode naive
 ```
-anche qui ci sono alcune opzioni accessibili (e.g. nella modalità spacy le colonne vengono selezionate con un modo un po' più fine, ma forse non è così necessario e inoltre è computazionalmente più pesante). Anche questa azione è reversibile (--task unset).
-
 L'esecuzione dei due passaggi è riassunta di fatto nello script scripts/sh/collection_preparation.sh.
+
+Se si lavora con una cartella di file CSV, lo script scripts/py/preproc/datalake_csv_preparation.py.
 
 
 # Esecuzione dei test

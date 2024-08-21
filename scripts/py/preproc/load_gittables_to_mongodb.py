@@ -8,7 +8,7 @@ import pymongo
 import polars as pl
 from tqdm import tqdm
 
-from tools.utils.mongodb_utils import get_mongodb_collections
+from tools.utils.datalake import get_mongodb_collections
 from tools.utils.settings import DefaultPath as dp
 
 

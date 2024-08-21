@@ -7,53 +7,10 @@ from collections import Counter as multiset
 import numpy as np
 from tqdm import tqdm
 
-from tools.utils.mongodb_utils import get_mongodb_collections, get_one_document_from_mongodb_by_key
+from tools.utils.datalake import SimpleDataLakeHelper
 from tools.utils.table_embedder import FastTextTableEmbedder
 from tools.utils.misc import check_table_is_in_thresholds
 
-
-
-def worker_embedding_data_preparation(inp) -> tuple[np.ndarray, np.ndarray]:
-    # global dataset, size, mode, model_path, tables_thresholds, blacklist
-    # print(dataset, size, mode, model_path)
-    chunk, mode, dataset, size, model_path, tables_thresholds, blacklist = inp
-    mongoclient, collections = get_mongodb_collections(dataset=dataset, size=size)
-    if mode in ['ft', 'ftdist']:
-        model = FastTextTableEmbedder(model_path)
-    print(f'Process {os.getpid()} (ppid={os.getppid()}) works on {chunk} total batch size {chunk.stop - chunk.start}')
-    d = model.get_dimension()
-    
-    xb = np.empty(shape=(0, d))
-    xb_ids = np.empty(shape=(0, 1))
-
-    xb_batch, xb_ids_batch = np.empty(shape=(0, d)), np.empty(shape=(0, 1))
-    batch_size = 1000
-
-    start = time()
-    for i, qid in tqdm(enumerate(chunk), total=chunk.stop - chunk.start, leave=False, disable=False if os.getpid() % os.cpu_count() == 0 else True):
-        doc = get_one_document_from_mongodb_by_key('_id_numeric', qid, *collections)
-        _id_numeric, content, numeric_columns = doc['_id_numeric'], doc['content'], doc['numeric_columns']
-        
-        if not check_table_is_in_thresholds(content, tables_thresholds) or all(numeric_columns):
-            continue
-
-        if xb_batch.shape[0] > batch_size:
-            xb = np.concatenate((xb, xb_batch))
-            xb_ids = np.concatenate((xb_ids, xb_ids_batch))
-            xb_batch, xb_ids_batch = np.empty(shape=(0, d)), np.empty(shape=(0, 1))
-        
-        colemb = model.embedding_table(content, numeric_columns, blacklist)
-        if colemb.shape[0] == 0:
-            continue
-        ids = np.expand_dims(np.repeat([_id_numeric], colemb.shape[0]), axis=0)
-        xb_ids_batch = np.concatenate((xb_ids_batch, ids.T))
-        xb_batch = np.concatenate((xb_batch, colemb), axis=0)
-
-    xb = np.concatenate((xb, xb_batch))
-    xb_ids = np.concatenate((xb_ids, xb_ids_batch))
-    mongoclient.close()
-    print(f'Process {os.getpid()} completed current batch of size {chunk.stop - chunk.start} in {round(time() - start, 3)}s')
-    return xb, xb_ids
 
 
 def worker_fp_per_query(inp):
@@ -129,11 +86,9 @@ def worker_ndcg(inp):
                 # TODO maybe is better to check and drop before those query tables which don't have
                 # any good pair? 
                 ndcg, _actual_p = ndcg_at_p(true_relevances, result_relevances, _p)
-            except ZeroDivisionError:
-                logging.warning(f'ZeroDivisionError - nDCG - query_id {query_id}, {algorithm}, {mode}')
+            except ZeroDivisionError:            
                 continue
-            except ValueError:
-                logging.warning(f'ValueError - nDCG - query_id {query_id}, {algorithm}, {mode}')
+            except ValueError:                
                 continue
             ndcg_res.append([query_id, len(true_relevances), algorithm, mode, _p, _p - _actual_p, ndcg])
     return ndcg_res

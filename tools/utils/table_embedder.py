@@ -1,4 +1,5 @@
 import fasttext
+import compress_fasttext
 import numpy as np
 
 from tools.sloth.utils import parse_table
@@ -7,7 +8,8 @@ from tools.utils.misc import prepare_token
 
 class TableEmbedder:
     def __init__(self, model_path) -> None:
-        pass
+        self.mode_path = model_path
+
 
     def get_dimension(self) -> int:
         pass
@@ -16,8 +18,31 @@ class TableEmbedder:
         pass
 
 
+
+class CompressFastTextTableEmbedder(TableEmbedder):
+    def __init__(self, model_path) -> None:
+        super().__init__(model_path)
+        self.model = compress_fasttext.models.CompressedFastTextKeyedVectors.load(model_path)
+
+    def get_dimension(self) -> int:
+        return self.model.vector_size
+
+    def embedding_table(self, table, numeric_columns, *args):
+        blacklist = args
+        
+        # with the any(column) we avoid that empty columns are embedded (btw they should have already been filtered previously)
+        table = [column for i, column in enumerate(parse_table(table, len(table[0]), 0)) if numeric_columns[i] == 0 and any(column)]
+        return np.array([
+            self.model.get_sentence_vector(
+                ' '.join([str(token) for token in column if token not in blacklist])
+                ) for column in table
+            ]
+        )
+
+
 class FastTextTableEmbedder(TableEmbedder):
     def __init__(self, model_path):
+        super().__init__(model_path)
         self.model = fasttext.load_model(model_path)
 
     def embedding_table(self, table, numeric_columns, *args):
@@ -35,9 +60,10 @@ class FastTextTableEmbedder(TableEmbedder):
         table = [column for i, column in enumerate(parse_table(table, len(table[0]), 0)) if numeric_columns[i] == 0 and any(column)]
         return np.array([
             self.model.get_sentence_vector(
-                ' '.join([str(token) for token in column if token not in blacklist]).replace('\n', ' ')
+                ' '.join([str(token) for token in column if token not in blacklist])
                 ) for column in table
-            ])
+            ]
+        )
 
     def get_dimension(self):
         return self.model.get_dimension()

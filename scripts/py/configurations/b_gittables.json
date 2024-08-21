@@ -1,16 +1,18 @@
 {
-    "test_name": "b_test",
-    "dataset": "gittables",
-    "size": "standard",
-    "blacklist": [
-        "comment", "story", "'{\"$numberDouble\": \"NaN\"}'"
-    ],
-    "k": 10,
-    "num_query_samples": 50000,
-    "num_cpu": 72,
-    "pg_dbname": "nanni",
-
-    
+    "general": {  
+        "test_name": "b_test",
+        "datalake_location": "mongodb",
+        "dataset": "gittables",
+        "size": "standard",
+        "blacklist": [
+            "comment", "story", "'{\"$numberDouble\": \"NaN\"}'"
+        ],
+        "k": 10,
+        "num_query_samples": 50000,
+        "num_cpu": 72,
+        "pg_dbname": "nanni"
+    },
+        
     "data_preparation": {
         "algorithms": [
             "josie", "lshforest", "embedding"

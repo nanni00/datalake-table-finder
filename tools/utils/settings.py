@@ -49,11 +49,11 @@ def make_parser(*arguments):
             case 'algorithm':
                 parser.add_argument('-a', '--algorithm',
                                     required=False, default='josie',
-                                    choices=basicconfig.algorithms)
+                                    choices=basicconfig.ALGORITHMS)
             case 'mode':
                 parser.add_argument('-m', '--mode', 
                                     required=False, default='set',
-                                    choices=basicconfig.modes,
+                                    choices=basicconfig.MODES,
                                     help='the specific version of the algorithm. Note that an algorithm doesn\'t support all the available modes')
             case 'k':
                 parser.add_argument('-k', 
@@ -63,8 +63,7 @@ def make_parser(*arguments):
                 parser.add_argument('-t', '--tasks', 
                                     required=False, nargs='+',
                                     choices=['all', 
-                                            'data-preparation',
-                                            'sample-queries', 
+                                            'data_preparation',
                                             'query'], 
                                     help='the tasks to do')
             case 'num_query_samples':
@@ -78,12 +77,12 @@ def make_parser(*arguments):
                                     help='number of CPUs that will be used in the experiment')
             case 'size':
                 parser.add_argument('--size', 
-                                    type=str, choices=basicconfig.datasets_size,
+                                    type=str, choices=basicconfig.DATASETS_SIZES,
                                     required=False, default='standard',
                                     help='works on small collection versions (only for testing)')
             case 'dataset':
                 parser.add_argument('--dataset', 
-                                    required=True, choices=basicconfig.datasets)
+                                    required=True, choices=basicconfig.DATASETS)
             case 'blacklist':
                 parser.add_argument('--blacklist', 
                                     required=False, nargs='*',
