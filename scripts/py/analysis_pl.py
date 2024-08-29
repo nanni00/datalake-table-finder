@@ -50,14 +50,14 @@ def analyses(test_name, k, num_query_samples, num_cpu, dataset, size, p_values,
     analyses_dir = analyses_query_dir
 
     logging_setup(logfile)
-    logging.getLogger('TestLog').info(f'{"#" * 10} {test_name.upper()} - {dataset.upper()} - {size.upper()} - ANALYSES - {k} - {q} {"#" * 10}')
+    logging.getLogger('TestLog').info(f' {test_name.upper()} - {dataset.upper()} - {size.upper()} - ANALYSES - {k} - {q} '.center(150, '-'))
 
     colors = list(mcolors.TABLEAU_COLORS.keys())
     methods = basicconfig.ALGORITHM_MODE_CONFIG
     methods = {m: c for m, c in zip(methods, colors[:len(methods)])}
 
-    alpha = 0.8
-    showfliers = True
+    alpha = 1
+    showfliers = False
 
     results = pl.read_csv(f'{results_extr_dir}/final_results_k{k}_q{q}.csv')
     

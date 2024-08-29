@@ -1,16 +1,13 @@
-import logging
 from math import log2
-import os
-from time import time
 from collections import Counter as multiset
 
-import numpy as np
-from tqdm import tqdm
 
-from tools.utils.datalake import SimpleDataLakeHelper
-from tools.utils.table_embedder import FastTextTableEmbedder
-from tools.utils.misc import check_table_is_in_thresholds
 
+
+def chunks(sequence, chunk_size, *args):
+    # Chunks of chunk_size documents at a time.
+    for j in range(0, len(sequence), chunk_size):
+        yield (sequence[j:j + chunk_size], *args)
 
 
 def worker_fp_per_query(inp):

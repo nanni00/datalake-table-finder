@@ -13,7 +13,7 @@ import faiss
 import pandas as pd
 
 
-from tools.utils.misc import check_table_is_in_thresholds
+from tools.utils.misc import is_valid_table
 from tools.utils.classes import AlgorithmTester
 from tools.utils.datalake import SimpleDataLakeHelper
 from tools.utils.table_embedder import FastTextTableEmbedder, TaBERTTableEmbedder, CompressFastTextTableEmbedder
@@ -22,7 +22,7 @@ from tools.utils.table_embedder import FastTextTableEmbedder, TaBERTTableEmbedde
 
 
 def worker_embedding_data_preparation(data) -> tuple[np.ndarray, np.ndarray]:
-    global datalake_location, dataset, size, mapping_id_file, numeric_columns_file, blacklist, num_cpu, model_path, tables_thresholds, mode
+    global datalake_location, dataset, size, mapping_id_file, numeric_columns_file, blacklist, num_cpu, model_path, mode
 
     dlh = SimpleDataLakeHelper(datalake_location, dataset, size, mapping_id_file, numeric_columns_file)
     match mode:
@@ -32,7 +32,9 @@ def worker_embedding_data_preparation(data) -> tuple[np.ndarray, np.ndarray]:
             model = CompressFastTextTableEmbedder(model_path)
     
     chunk = data[0]
-    print(f'Process {os.getpid()} works on {chunk} total batch size {chunk.stop - chunk.start}')
+    if os.getpid() % num_cpu == 0:
+        print(f'Debug process {os.getpid()} works on {chunk} total batch size {chunk.stop - chunk.start}')
+        start = time()
     d = model.get_dimension()
     
     xb = np.empty(shape=(0, d))
@@ -40,22 +42,23 @@ def worker_embedding_data_preparation(data) -> tuple[np.ndarray, np.ndarray]:
     xb_batch, xb_ids_batch = np.empty(shape=(0, d)), np.empty(shape=(0, 1))
     batch_size = 1000
 
-    start = time()
     for qid in tqdm(chunk, total=chunk.stop - chunk.start, leave=False, disable=False if os.getpid() % num_cpu == 0 else True):
-        table = dlh.get_table_by_numeric_id(qid)
-        _id_numeric, content, numeric_columns = table['_id_numeric'], table['content'], table['numeric_columns']
-        
-        if not check_table_is_in_thresholds(content, tables_thresholds) or all(numeric_columns):
+        table_obj = dlh.get_table_by_numeric_id(qid)
+        _id_numeric, content, numeric_columns = table_obj['_id_numeric'], table_obj['content'], table_obj['numeric_columns']
+        if not is_valid_table(content, numeric_columns):
             continue
-
         if xb_batch.shape[0] > batch_size:
             xb = np.concatenate((xb, xb_batch))
             xb_ids = np.concatenate((xb_ids, xb_ids_batch))
             xb_batch, xb_ids_batch = np.empty(shape=(0, d)), np.empty(shape=(0, 1))
         
+        if os.getpid() % num_cpu == 0:
+            print(f"\tdebug process working on table with shape {(len(content), len(content[0]))}...")
+        
         colemb = model.embedding_table(content, numeric_columns, blacklist)
         if colemb.shape[0] == 0:
             continue
+
         ids = np.expand_dims(np.repeat([_id_numeric], colemb.shape[0]), axis=0)
         xb_ids_batch = np.concatenate((xb_ids_batch, ids.T))
         xb_batch = np.concatenate((xb_batch, colemb), axis=0)
@@ -64,7 +67,8 @@ def worker_embedding_data_preparation(data) -> tuple[np.ndarray, np.ndarray]:
     xb_ids = np.concatenate((xb_ids, xb_ids_batch))
 
     dlh.close()
-    # print(f'Process {os.getpid()} completed current batch of size {chunk.stop - chunk.start} in {round(time() - start, 3)}s')
+    if os.getpid() % num_cpu == 0:
+        print(f'Debug process {os.getpid()} completed current batch of size {chunk.stop - chunk.start} in {round(time() - start, 3)}s')
     return xb, xb_ids
 
 
@@ -76,11 +80,11 @@ def chunks(sequence, chunk_size, *args):
         yield (sequence[j:j + chunk_size], *args)
 
 
-def init_pool(_datalake_location, _dataset, _size, _mapping_id_file, _numeric_columns_file, _blacklist, _num_cpu, _model_path, _tables_thresholds, _mode):
-    global datalake_location, dataset, size, mapping_id_file, numeric_columns_file, blacklist, num_cpu, model_path, tables_thresholds, mode
+def init_pool(_datalake_location, _dataset, _size, _mapping_id_file, _numeric_columns_file, _blacklist, _num_cpu, _model_path, _mode):
+    global datalake_location, dataset, size, mapping_id_file, numeric_columns_file, blacklist, num_cpu, model_path, mode
     
-    datalake_location, dataset, size, mapping_id_file, numeric_columns_file, blacklist, num_cpu, model_path, tables_thresholds, mode = \
-        _datalake_location, _dataset, _size, _mapping_id_file, _numeric_columns_file, _blacklist, _num_cpu, _model_path, _tables_thresholds, _mode
+    datalake_location, dataset, size, mapping_id_file, numeric_columns_file, blacklist, num_cpu, model_path, mode = \
+        _datalake_location, _dataset, _size, _mapping_id_file, _numeric_columns_file, _blacklist, _num_cpu, _model_path, _mode
 
 
 class EmbeddingTester(AlgorithmTester):
@@ -107,32 +111,41 @@ class EmbeddingTester(AlgorithmTester):
         initargs = (
             self.datalake_helper.datalake_location, self.dataset, self.size, 
             self.datalake_helper._mapping_id_path, self.datalake_helper._numeric_columns_path, 
-            self.blacklist, self.num_cpu, self.model_path, self.tables_thresholds, self.mode)
+            self.blacklist, self.num_cpu, self.model_path, self.mode)
 
         with mp.Pool(self.num_cpu, initializer=init_pool, initargs=initargs) as pool:
             logging.getLogger('TestLog').info(f'Start embedding tables, chunk-size={chunksize}...')
             results = pool.map(worker_embedding_data_preparation, 
                                chunks(range(total_docs), chunksize))            
             logging.getLogger('TestLog').info('Tables embedded.')
+
+            N = sum(xb.shape[0] for xb, _ in results)
+            K = 8 * int(math.sqrt(N))
+            M = 32
+            training_size = min(M * K, N)
+            HNSW_links_per_vertex = 32
+            logging.getLogger('TestLog').info(f'FAISS index parameters: N={N}, K={K}, M={M}, HNSW={HNSW_links_per_vertex}, training_size=M*K={training_size}')
+            
+            logging.getLogger('TestLog').info('Preparing index training set...')
             for result in tqdm(results, leave=False):
                 xb_batch, xb_ids_batch = result
                 xb = np.concatenate((xb, xb_batch))
                 xb_ids = np.concatenate((xb_ids, xb_ids_batch))
+                if xb.shape[0] >= training_size:
+                    break
                     
-        N = xb.shape[0]
-        K = 4 * int(math.sqrt(N))
-        training_size = min(64 * K, N)
-        HNSW_links_per_vertex = 32
-        logging.getLogger('TestLog').info(f'Vector shapes: xb={xb.shape}, xb_ids={xb_ids.shape}')
-        logging.getLogger('TestLog').info(f'FAISS index parameters: N={N}, K={K}, HNSW={HNSW_links_per_vertex}, training_size={training_size}')
 
         index = faiss.index_factory(d, f"IVF{K}_HNSW{HNSW_links_per_vertex},Flat")
         logging.getLogger('TestLog').info('Training column index...')
-        index.train(xb[:training_size])
+        start_training = time()
+        index.train(xb)
         self.cidx = faiss.IndexIDMap2(index)
+        end_training = time()
+        logging.getLogger('TestLog').info(f'Training column index time: {round(end_training - start_training, 3)}s')
 
         logging.getLogger('TestLog').info('Adding vectors with IDs...')
-        self.cidx.add_with_ids(xb, xb_ids[:, 0])
+        for xb, xb_ids in results:
+            self.cidx.add_with_ids(xb, xb_ids[:, 0])
 
         logging.getLogger('TestLog').info(f'Writing column index to {self.cidx_file}...')
         faiss.write_index(self.cidx, self.cidx_file)
@@ -186,25 +199,27 @@ class EmbeddingTester(AlgorithmTester):
                     results.append((qid, round(batch_mean_time, 3), [int(y[0]) for y in x if y[0] not in {qid, -1}][:k + 1], []))
                 xq, xq_ids = np.empty(shape=(0, d), dtype=np.float64), np.empty(shape=(0, 1), dtype=np.int32)
 
-            # doc = get_one_document_from_mongodb_by_key('_id_numeric', int(qid), *self.collections)
             doc = self.datalake_helper.get_table_by_numeric_id(int(qid))
             if doc == None:
                 print('Error here', qid)
-            colemb = self.model.embedding_table(doc['content'], doc['numeric_columns'], self.blacklist)
-            ids = np.expand_dims(np.repeat([qid], colemb.shape[0]), axis=0)
-            xq_ids = np.concatenate((xq_ids, ids.T))
-            xq = np.concatenate((xq, colemb), axis=0)
-
+            try:
+                colemb = self.model.embedding_table(doc['content'], doc['numeric_columns'], self.blacklist)
+                ids = np.expand_dims(np.repeat([qid], colemb.shape[0]), axis=0)
+                xq_ids = np.concatenate((xq_ids, ids.T))
+                xq = np.concatenate((xq, colemb), axis=0)
+            except ValueError:
+                print(qid, colemb.shape)
         start_s = time()
         _, I = self.cidx.search(xq, int(k))
-        batch_mean_time = (time() - start_s) / xq.shape[0]
-        
         res = np.concatenate((xq_ids, I), axis=1)
         res = np.split(res[:, 1:], np.unique(res[:, 0], return_index=True)[1][1:])
+        batch_mean_time = (time() - start_s) / xq.shape[0]
 
         for i, qid in enumerate(np.unique(xq_ids)):
+            start_sort = time()
             x = sorted(list(zip(*np.unique(res[i], return_counts=True))), key=lambda z: z[1], reverse=True)
-            results.append((qid, round(batch_mean_time, 3), [int(y[0]) for y in x if y[0] not in {qid, -1}][:k + 1], []))
+            sort_time = time() - start_time
+            results.append((qid, round(batch_mean_time + sort_time, 3), [int(y[0]) for y in x if y[0] not in {qid, -1}][:k + 1], []))
 
         pd.DataFrame(results, columns=['query_id', 'duration', 'results', 'results_overlap']).to_csv(results_file, index=False)    
         return round(time() - start, 5)
@@ -238,7 +253,6 @@ class EmbeddingTester(AlgorithmTester):
                     ]
                 ]
         
-        start = time()
         logging.getLogger('TestLog').info('Query mode: distance')
         logging.getLogger('TestLog').info('Loading model...')
         match self.mode:
@@ -260,6 +274,7 @@ class EmbeddingTester(AlgorithmTester):
         results = []
         logging.getLogger('TestLog').info('Start query time...')
        
+        start = time()
         # batch query processing, because it's significantly faster
         for qid in tqdm(query_ids, total=len(query_ids)):
             # when reached the batch threshold, execute the search for the 
@@ -268,10 +283,13 @@ class EmbeddingTester(AlgorithmTester):
             colemb = self.model.embedding_table(doc['content'], doc['numeric_columns'], self.blacklist)
             if colemb.shape[0] == 0:
                 continue
-            ids = np.expand_dims(np.repeat([qid], colemb.shape[0]), axis=0)
-            xq_ids = np.concatenate((xq_ids, ids.T))
-            xq = np.concatenate((xq, colemb), axis=0)
-            
+            try:
+                ids = np.expand_dims(np.repeat([qid], colemb.shape[0]), axis=0)
+                xq_ids = np.concatenate((xq_ids, ids.T))
+                xq = np.concatenate((xq, colemb), axis=0)
+            except ValueError:
+                # print(qid, colemb.shape)
+                continue    
             if xq.shape[0] > batch_size:
                 start_s = time()
                 # here it searches K vectors for each query vector, i.e. for each column vector,
@@ -289,12 +307,13 @@ class EmbeddingTester(AlgorithmTester):
         D, I = self.cidx.search(xq, int(k))
         batch_results = compute_results(xq_ids, D, I, k)
         batch_mean_time = (time() - start_s) / xq.shape[0]
-     
+        end_total_query = time()
+
         for i, qid in enumerate(np.unique(xq_ids)):
             results.append((qid, round(batch_mean_time, 3), batch_results[i], []))
 
         pd.DataFrame(results, columns=['query_id', 'duration', 'results', 'results_overlap']).to_csv(results_file, index=False)    
-        return round(time() - start, 5)
+        return round(end_total_query - start, 5)
 
 
     def clean(self):

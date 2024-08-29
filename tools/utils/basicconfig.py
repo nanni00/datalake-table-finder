@@ -1,3 +1,6 @@
+from enum import Enum, IntEnum
+
+
 ALGORITHMS = [
     'josie',
     'lshforest',
@@ -33,6 +36,16 @@ TABLES_THRESHOLDS = {
     'max_column':   999999,
     'max_area':     999999,
 }
+
+
+class TablesThresholds(IntEnum):
+    MIN_ROWS = 5
+    MAX_ROWS = 9999999
+    MIN_COLUMNS = 2
+    MAX_COLUMNS = 9999999
+    MIN_AREA = 0
+    MAX_AREA = 9999999
+    
 
 
 DATASETS = [

@@ -1,33 +1,29 @@
-import os
-import random
 import re
 import sys
 import time
 import json
+import random
 import logging
 import logging.handlers
+import multiprocessing as mp
 from collections import defaultdict
 
-from bidict import bidict
-import pymongo
-import pyspark
-import pyspark.rdd
-import numpy as np
 import pandas as pd
-import polars as pl
 from pyspark.sql import SparkSession
 
 from tools.sloth.sloth import sloth
 from tools.sloth.utils import parse_table
+from tools.utils.parallel_worker import chunks
 from tools.utils.datalake import SimpleDataLakeHelper
+from tools.utils.basicconfig import TablesThresholds as tab_thresh
 
 
 def print_info(**dec_kwargs):
     def decorator(func):
         def wrapper(*args, **kwargs):
-            if 'msg_before' in dec_kwargs: logging.info(dec_kwargs['msg_before'])
+            if 'msg_before' in dec_kwargs: logging.getLogger('TestLog').info(dec_kwargs['msg_before'])
             result = func(*args, **kwargs)
-            if 'msg_after' in dec_kwargs: logging.info(dec_kwargs['msg_after'])
+            if 'msg_after' in dec_kwargs: logging.getLogger('TestLog').info(dec_kwargs['msg_after'])
             return result
         return wrapper
     return decorator
@@ -38,33 +34,24 @@ def get_local_time():
 
 
 def convert_to_giga(x):
-    if x.endswith('MB'):
+    if x.endswith('GB'):
+        return int(re.match(r'\d+', x).group())
+    elif x.endswith('MB'):
         return int(re.match(r'\d+', x).group()) / 1024
     elif x.endswith('KB'):
         return int(re.match(r'\d+', x).group()) / (1024 ** 2)
 
 
-
-
-def check_table_is_in_thresholds(content, table_thresholds):
-    return table_thresholds['min_row'] <= len(content) <= table_thresholds['max_row'] and \
-        table_thresholds['min_column'] <= len(content[0]) <= table_thresholds['max_column'] and \
-        table_thresholds['min_area'] <= len(content) * len(content[0]) <= table_thresholds['max_area']
-
-
-
-def get_tables_thresholds_from(tables_thresholds):
-    return (
-        0 if 'min_row' not in tables_thresholds else tables_thresholds['min_row'], 
-        999999 if 'max_row' not in tables_thresholds else tables_thresholds['max_row'], 
-        0 if 'min_column' not in tables_thresholds else tables_thresholds['min_column'],
-        999999 if 'max_column' not in tables_thresholds else tables_thresholds['max_column'], 
-        0 if 'min_area' not in tables_thresholds else tables_thresholds['min_area'], 
-        999999 if 'max_area' not in tables_thresholds else tables_thresholds['max_area']
-    )
-
-
-
+def is_valid_table(table, numeric_columns):
+    if all(numeric_columns):
+        return False
+    table = [[row[i] for i, x in enumerate(numeric_columns) if x == 0] for row in table]
+    # return check_table_is_in_thresholds(table, tables_thresholds)
+    return  tab_thresh.MIN_ROWS     <= len(table)                   <= tab_thresh.MAX_ROWS and \
+            tab_thresh.MIN_COLUMNS  <= len(table[0])                <= tab_thresh.MAX_COLUMNS and \
+            tab_thresh.MIN_AREA     <= len(table) * len(table[0])   <= tab_thresh.MAX_AREA
+    
+    
 def naive_detect_table_numeric_and_null_columns(table: list[list], any_int:bool=False) -> list[int]:
     """ 
     :param table: a list of lists representing a table in row view
@@ -73,6 +60,16 @@ def naive_detect_table_numeric_and_null_columns(table: list[list], any_int:bool=
     :return a list of int, where the i-th element is set to 1 if the i-th column is detected as numeric or with only null values, 
         0 otherwise
     """
+
+    def is_number_tryexcept(s):
+        try: 
+            float(s)
+            return True
+        except ValueError:
+            return False
+        except TypeError:
+            return False
+        
     if len(table) == 0 or len(table[0]) == 0:
         return []
     
@@ -88,6 +85,9 @@ def naive_detect_table_numeric_and_null_columns(table: list[list], any_int:bool=
         ]
 
 
+
+
+
 def get_spark_session(num_cpu, spark_local_dir:str, spark_jars_packages=['org.mongodb.spark:mongo-spark-connector_2.12:10.3.0']) -> SparkSession:
     # fine tune of executor/driver.memory?
     builder = SparkSession.Builder()
@@ -97,25 +97,15 @@ def get_spark_session(num_cpu, spark_local_dir:str, spark_jars_packages=['org.mo
         .master(f"local[{num_cpu}]")
         .config('spark.jars.packages', ','.join(spark_jars_packages))
         .config('spark.executor.memory', '100g')
-        .config('spark.driver.memory', '10g')
+        .config('spark.driver.memory', '20g')
         .config('spark.local.dir', spark_local_dir)
         .config('spark.driver.maxResultSize', '12g')
         .getOrCreate()
     )
 
     # adjusting logging level to error, avoiding warnings
-    spark.sparkContext.setLogLevel("ERROR")
-    return spark    
-
-
-def is_number_tryexcept(s):
-    try: 
-        float(s)
-        return True
-    except ValueError:
-        return False
-    except TypeError:
-        return False
+    spark.sparkContext.setLogLevel("WARN")
+    return spark
 
 
 _TOKEN_TAG_SEPARATOR = '@#'
@@ -152,7 +142,6 @@ def create_token_set(table, mode, numeric_columns, encode=None, blacklist:set=se
 
 
 
-# TODO insert tokens blacklist here
 def apply_sloth(table1, table2, numeric_columns1, numeric_columns2, verbose=False, blacklist=[]) -> tuple[int, float]:
     num_null = 0
 
@@ -179,18 +168,42 @@ def apply_sloth(table1, table2, numeric_columns1, numeric_columns2, verbose=Fals
 
 
 
-def sample_queries(output_query_json, nsamples, tables_thresholds:dict[str, int], dlh:SimpleDataLakeHelper):
+def task(data):
+    chunk, data_lake_args = data[0], data[1:]
+    dlh = SimpleDataLakeHelper(*data_lake_args)
     s = set()
-    print('Sampling tables...')
-    while len(s) < nsamples:
-        r = random.randint(0, dlh.get_number_of_tables() - 1)
-        table = dlh.get_table_by_numeric_id(r)
-        if not check_table_is_in_thresholds(table['content'], tables_thresholds) or all(table['numeric_columns']):
+    for table_id in chunk:
+        # while len(s) < nsamples:
+        #    r = random.randint(0, dlh.get_number_of_tables() - 1)
+        table_obj = dlh.get_table_by_numeric_id(table_id)
+        if not is_valid_table(table_obj['content'], table_obj['numeric_columns']):
             continue
-        s.add(r)
-        print(f'Sampled {len(s)} ({round(len(s) * 100 / nsamples)}%)', end='\r')
-        if len(s) >= nsamples:            
-            break
+        
+        s.add(table_id)
+        # print(f'Sampled {len(s)} ({round(len(s) * 100 / nsamples)}%)', end='\r')
+        # if len(s) >= nsamples:            
+        #     break
+    return s
+
+def sample_queries(output_query_json, nsamples, num_cpu, *data_lake_args):
+    s = set()
+    dlh = SimpleDataLakeHelper(*data_lake_args)
+    N = dlh.get_number_of_tables()
+    dlh.close()
+    
+    print(f'Sampling {nsamples} tables from {N} total tables...')
+
+    with mp.Pool(num_cpu) as pool:
+        while len(s) < nsamples: 
+            work = random.sample(range(N), nsamples - len(s))
+            chunk_size = max((nsamples - len(s)) // num_cpu, 1)
+            results = pool.map(task, chunks(work, chunk_size, *data_lake_args))
+            for taskres in results:
+                for x in taskres:
+                    s.add(int(x))
+            print(f'Sampled {len(s)} ({round(len(s) * 100 / nsamples)}%)', end='\r')
+
+            # s = {x for taskres in results for x in taskres}
     
     samples = {'_id_numeric': list(s)[:nsamples]}
     
@@ -210,14 +223,18 @@ def get_query_ids_from_query_file(query_file):
 
 def logging_setup(logfile):
     logger = logging.getLogger('TestLog')
-    handler_sysout = logging.StreamHandler(sys.stdout)
-    handler_file = logging.FileHandler(logfile)
-    formatter = logging.Formatter("%(asctime)s [%(levelname)s] %(message)s", datefmt="%Y-%m-%d %H:%M:%S")
     
-    handler_sysout.setFormatter(formatter)
-    handler_file.setFormatter(formatter)
+    if not logger.handlers:
+        handler_sysout = logging.StreamHandler(sys.stdout)
+        handler_file = logging.FileHandler(logfile)
+        
+        formatter = logging.Formatter("%(asctime)s [%(levelname)s] %(message)s", datefmt="%Y-%m-%d %H:%M:%S")
+        
+        handler_sysout.setFormatter(formatter)
+        handler_file.setFormatter(formatter)
 
-    logger.addHandler(handler_sysout)
-    logger.addHandler(handler_file)
+        logger.addHandler(handler_sysout)
+        logger.addHandler(handler_file)
 
-    logger.setLevel(logging.INFO)
+        logger.setLevel(logging.INFO)
+        logger.propagate = False

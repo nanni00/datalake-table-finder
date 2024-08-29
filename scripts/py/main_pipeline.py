@@ -46,8 +46,7 @@ def main_pipeline(test_name, algorithm, mode, tasks:list[str],
                   fasttext_model_size:int=300,
                   ft_model_path:str=None,
 
-                  blacklist:list[str]=[],
-                  clean:bool=False):
+                  blacklist:list[str]=[]):
     
     # check configuration
     if (algorithm, mode) not in basicconfig.ALGORITHM_MODE_CONFIG:
@@ -72,9 +71,9 @@ def main_pipeline(test_name, algorithm, mode, tasks:list[str],
     str_num_query_samples = numerize(num_query_samples, asint=True)
     
     # tasks to complete in current run
-    DATA_PREPARATION =          'data_preparation' in tasks or 'all' in tasks
-    QUERY =                     'query' in tasks or 'all' in tasks
-    CLEAN =                     clean
+    DATA_PREPARATION =          'data_preparation' in tasks
+    QUERY =                     'query' in tasks
+    CLEAN =                     'clean' in tasks
 
 
     TEST_DATASET_DIR, query_file, logfile, \
@@ -98,7 +97,7 @@ def main_pipeline(test_name, algorithm, mode, tasks:list[str],
     
 
     forest_file =       f'{forest_dir}/forest_m{mode}.json' if not forest_file else forest_file
-    idx_tag = 'ft' if mode in ['ft', 'ftdist'] else 'cft' if mode in ['cft', 'cftdist'] else ''
+    idx_tag =           'ft' if mode in ['ft', 'ftdist'] else 'cft' if mode in ['cft', 'cftdist'] else ''
     cidx_file =         f'{embedding_dir}/col_idx_m{idx_tag}.index' 
     topk_results_file = f'{results_base_dir}/a{algorithm}_m{mode}.csv'
     db_stat_file =      statistics_dir + '/db.csv'
@@ -128,9 +127,14 @@ def main_pipeline(test_name, algorithm, mode, tasks:list[str],
             model_path = f'{defpath.model_path.fasttext}/cc.en.300.bin' if not ft_model_path else ft_model_path
             tester = embedding.EmbeddingTester(*default_args, model_path, cidx_file, fasttext_model_size)
 
+    
+    if CLEAN:
+        logging.getLogger('TestLog').info(f' CLEANING '.center(150, '-'))
+        tester.clean()
+
 
     if DATA_PREPARATION:
-        logging.getLogger('TestLog').info(f' DATA PREPARATION  '.center(150, '#'))    
+        logging.getLogger('TestLog').info(f' DATA PREPARATION  '.center(150, '-'))    
         exec_time, storage_size = tester.data_preparation()
         runtime_metrics.append((('data_preparation', None), exec_time, get_local_time()))
         append = os.path.exists(storage_stat_file)
@@ -139,16 +143,10 @@ def main_pipeline(test_name, algorithm, mode, tasks:list[str],
             
 
     if QUERY:
-        logging.getLogger('TestLog').info(f' QUERY - {k} - {str_num_query_samples} '.center(150, '#'))
-
+        logging.getLogger('TestLog').info(f' QUERY - {k} - {str_num_query_samples} '.center(150, '-'))
         query_ids = get_query_ids_from_query_file(query_file)
         exec_time = tester.query(topk_results_file, k, query_ids, results_directory=results_base_dir, token_table_on_memory=token_table_on_mem)
         runtime_metrics.append((('query', numerize(len(query_ids), asint=True)), exec_time, get_local_time()))
-        
-
-    if CLEAN:
-        logging.getLogger('TestLog').info(f' CLEANING '.center(150, '#'))
-        tester.clean()
 
 
     if DATA_PREPARATION or QUERY:
@@ -156,15 +154,11 @@ def main_pipeline(test_name, algorithm, mode, tasks:list[str],
         with open(runtime_stat_file, 'a') as rfw:
             if add_header:
                 rfw.write("local_time,algorithm,mode,task,k,num_queries,time(s)\n")
-            for ((t_name, num_queries), t_time, t_loctime) in runtime_metrics:
-                rfw.write(f"{t_loctime},{algorithm},{mode},{t_name},{k},{num_queries},{t_time}\n")
+            for ((t_name, num_queries), t_time, t_loctime) in runtime_metrics:               
+                rfw.write(f"{t_loctime},{algorithm},{mode},{t_name},{k if t_name == 'query' else ''},{num_queries if t_name == 'query' else ''},{t_time}\n")
 
-        
     datalake_helper.close()
-
     logging.getLogger('TestLog').info('All tasks have been completed.')
-
-
 
 
 

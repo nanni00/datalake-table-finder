@@ -10,7 +10,7 @@ from tqdm import tqdm
 from datasketch import MinHashLSHForest, MinHash
 
 from tools.utils.classes import AlgorithmTester
-from tools.utils.misc import create_token_set, check_table_is_in_thresholds
+from tools.utils.misc import create_token_set, is_valid_table
 
 
 
@@ -26,12 +26,13 @@ def create_table_minhash(table, mode, numeric_columns, num_perm, blacklist):
 
 
 def worker_lshforest_data_preparation(input):
-    tables_thresholds, mode, num_perm, blacklist, table = input
+    mode, num_perm, blacklist, table = input
     if table == None:
         return None, None
     _id_numeric, content, numeric_columns = table['_id_numeric'], table['content'], table['numeric_columns']
 
-    if check_table_is_in_thresholds(content, tables_thresholds) and not all(numeric_columns):
+    # if is_valid_table(content, numeric_columns, tables_thresholds):
+    if is_valid_table(content, numeric_columns):
         token_set = create_token_set(content, mode, numeric_columns, 'utf-8', blacklist)
         m = MinHash(num_perm, hashfunc=_mmh3_hashfunc)
         m.update_batch(token_set)
@@ -66,10 +67,10 @@ class LSHForestTester(AlgorithmTester):
         with mp.Pool(processes=self.num_cpu) as pool:
             for i, result in enumerate(pool.imap(worker_lshforest_data_preparation, 
                                             (
-                                                (self.tables_thresholds, self.mode, self.num_perm, self.blacklist, table)
+                                                (self.mode, self.num_perm, self.blacklist, table)
                                                 for table in self.datalake_helper.scan_tables()
                                             ), chunksize=100)):
-                if i % 1000:
+                if i % 100:
                     it_per_sec = round(i / (time() - start), 3)
                     print(f"{round(100 * i / total, 1)}%\t\t{it_per_sec}it/s      eta:{round((total - i) / it_per_sec, 3)}", end='\r')
                 if result[1] == None:
@@ -78,7 +79,7 @@ class LSHForestTester(AlgorithmTester):
         print(end='\r')
         logging.getLogger('TestLog').info("Indexing forest...")
         self.forest.index()
-
+        
         logging.getLogger('TestLog').info("Saving forest...")
         self._forest_handler('save')
         

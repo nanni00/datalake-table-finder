@@ -54,10 +54,16 @@ class SimpleDataLakeHelper:
     and the SANTOS Large data lake as a CSVs folder, this structure avoids boiler plates code (sperem) """
     def __init__(self, datalake_location:str, *args):
         self.datalake_location = datalake_location
-
+        self._dataset = None
+        self._size = None
+        self._mapping_id_path = None
+        self._numeric_columns_path = None
+        
         match self.datalake_location:
             case 'mongodb':
                 self._mongoclient, self._collections = get_mongodb_collections(*args[:2])
+                self._dataset = args[0]
+                self._size = args[1]
             case _:
                 self._mapping_id_path = args[2]
                 self._numeric_columns_path = args[3]
@@ -74,14 +80,14 @@ class SimpleDataLakeHelper:
             - numeric columns"""
         match self.datalake_location:
             case 'mongodb':
-                if doc := get_document_from_mongodb_by_numeric_id('_id_numeric', numeric_id, *self._collections):
+                if doc := get_document_from_mongodb_by_numeric_id(numeric_id, *self._collections):
                     content = doc['content']
                     numeric_columns = doc['numeric_columns']
                 else:
                     return None
             case _:
                 try:
-                    content = pl.read_csv(f'{self.datalake_location}/{self._mapping_id[numeric_id]}.csv', infer_schema_length=0, encoding='latin1').rows()
+                    content = pl.read_csv(f'{self.datalake_location}/{self._mapping_id[numeric_id]}.csv', has_header=False, infer_schema_length=0, encoding='latin1').rows()
                     numeric_columns = self._numeric_columns[numeric_id]
                 except KeyError:
                     return None
@@ -91,7 +97,7 @@ class SimpleDataLakeHelper:
     def get_number_of_tables(self):
         match self.datalake_location:
             case 'mongodb':
-                return sum(c.count_documents({}) for c in self._collections)
+                return sum(c.count_documents({}, hint='_id_') for c in self._collections)
             case _:
                 return len(self._mapping_id)
 
@@ -104,6 +110,9 @@ class SimpleDataLakeHelper:
             case _:
                 for _id_numeric in self._mapping_id.keys():
                     yield self.get_table_by_numeric_id(_id_numeric)
+
+    def copy(self):
+        return SimpleDataLakeHelper(self.datalake_location, self._dataset, self._size, self._mapping_id_path, self._numeric_columns_path)
 
     def close(self):
         match self.datalake_location:

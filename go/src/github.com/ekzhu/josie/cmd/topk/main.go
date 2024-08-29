@@ -17,6 +17,7 @@ var (
 	cpuProfile       				bool
 	useMemTokenTable				bool
 	k								int
+	verbose							bool
 )
 
 func main() {
@@ -29,6 +30,7 @@ func main() {
 	flag.StringVar(&resultsFile,"resultsFile",	"resultsFile",	"The file where the final results will be stored")
 	flag.BoolVar(&useMemTokenTable, "useMemTokenTable", true, "")
 	flag.BoolVar(&cpuProfile, 	"cpu-profile", 	false, 			"Enable CPU profiling")
+	flag.BoolVar(&verbose, "verbose", false, "")
 	flag.Parse()
 	
 	db, err := sql.Open("postgres", fmt.Sprintf("host=%s port=%s dbname=%s sslmode=disable", pgServer, pgPort, pgDatabase))
@@ -37,7 +39,7 @@ func main() {
 	}
 	defer db.Close()
 	
-	joise.NanniExperiments(db, k, test_tag, outputDir, resultsFile, cpuProfile, useMemTokenTable)
+	joise.NanniExperiments(db, k, test_tag, outputDir, resultsFile, cpuProfile, useMemTokenTable, verbose)
 	
 	// if benchmark == "canada_us_uk" {
 	// 	joise.RunOpenDataExperiments(db, filepath.Join(output, benchmark), cpuProfile, true)

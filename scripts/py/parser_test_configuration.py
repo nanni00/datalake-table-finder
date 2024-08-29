@@ -9,7 +9,6 @@ from main_pipeline import main_pipeline
 from tools.utils.misc import sample_queries
 from tools.utils.datalake import SimpleDataLakeHelper
 from tools.utils.settings import get_all_paths 
-from tools.utils.basicconfig import TABLES_THRESHOLDS
 from numerize_denumerize.numerize import numerize
 
 
@@ -47,7 +46,7 @@ if __name__ == '__main__':
         if sq_config['exec_now']:
             num_query_samples = g_config['num_query_samples']
 
-            dlh = SimpleDataLakeHelper(g_config['datalake_location'], 
+            data_lake_args = (g_config['datalake_location'], 
                                        g_config['dataset'], g_config['size'], 
                                        g_config['mapping_id_file'], g_config['numeric_columns_file'])
             
@@ -57,12 +56,10 @@ if __name__ == '__main__':
                 _, _, _, _, _, _, _, _ = get_all_paths(g_config['test_name'], g_config['dataset'], g_config['k'], str_num_query_samples)
 
             if not os.path.exists(query_file):
-                num_samples = sample_queries(query_file, num_query_samples, TABLES_THRESHOLDS, dlh)
+                num_samples = sample_queries(query_file, num_query_samples, g_config['num_cpu'], *data_lake_args)
             else:
                 print(f'Query file for {num_query_samples} already exists: {query_file}')
             
-            dlh.close()
-
 
     if 'query' in configuration:
         q_config = configuration['query']
@@ -76,6 +73,21 @@ if __name__ == '__main__':
             for algorithm in algorithms:
                 for mode in modes:
                     main_pipeline(algorithm=algorithm, mode=mode, tasks=['query'], 
+                                **g_config,
+                                **q_config)
+                    
+    if 'clean' in configuration:
+        q_config = configuration['clean']
+        if q_config['exec_now']:
+            algorithms = q_config['algorithms']
+            del q_config['algorithms']
+            modes = q_config['modes']
+            del q_config['modes']
+            del q_config['exec_now']
+
+            for algorithm in algorithms:
+                for mode in modes:
+                    main_pipeline(algorithm=algorithm, mode=mode, tasks=['clean'], 
                                 **g_config,
                                 **q_config)
 

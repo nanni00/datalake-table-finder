@@ -47,7 +47,7 @@ def worker_result_extractor(data):
     rv = []
     hit = 0
     
-    for (algorithm, mode, query_id, result_id) in tqdm(chunk, leave=False, total=len(chunk), disable=False if os.getpid() % num_cpu == 0 else True):
+    for (algorithm, mode, query_id, result_id) in tqdm(chunk, total=len(chunk), leave=False, disable=False if os.getpid() % num_cpu == 0 else True):
         match mode: # problem with previous versions...
             case 'fasttext': mode = 'ft'
             case 'fasttextdist': mode = 'ftdist'
@@ -79,8 +79,8 @@ def worker_result_extractor(data):
         
         sloth_overlap, sloth_time = (dboverlap, lookuptime) if dboverlap != None else apply_sloth(table_q, table_r, numeric_columns_q, numeric_columns_r, blacklist=blacklist)
         
-        if sloth_overlap == -1 and dboverlap == None:
-            logging.getLogger('TestLog').warning(f"Pair {query_id} - {result_id} SLOTH failed")
+        # if sloth_overlap == -1 and dboverlap == None:
+        #     logging.getLogger('TestLog').warning(f"Pair {query_id} - {result_id} SLOTH failed")
 
         # the intersection size is used for computing Jaccard Similarity or other metrics like containment, 
         # so compute using the set semantic, since it considers the intersection of the table "basic" values
@@ -249,8 +249,8 @@ def extract_results(test_name, k, num_query_samples, num_cpu, pg_dbname,
             logging.getLogger('TestLog').info(f'hit = {hit} ({round(100 * hit / len(data), 3)}%)')
             hit_rates.append(hit / len(data))
             final_results = pl.concat([final_results, pl.DataFrame(data, schema=final_results.schema, infer_schema_length=10)])
+            final_results.write_csv(final_results_file)
 
-    final_results.write_csv(final_results_file)
     logging.getLogger('TestLog').info(f"Hit rates: {hit_rates}")
 
     # save the statistics about the analysis time

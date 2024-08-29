@@ -34,7 +34,7 @@ class CompressFastTextTableEmbedder(TableEmbedder):
         table = [column for i, column in enumerate(parse_table(table, len(table[0]), 0)) if numeric_columns[i] == 0 and any(column)]
         return np.array([
             self.model.get_sentence_vector(
-                ' '.join([str(token) for token in column if token not in blacklist])
+                ' '.join([prepare_token(token) for token in column if token not in blacklist])
                 ) for column in table
             ]
         )
@@ -60,7 +60,7 @@ class FastTextTableEmbedder(TableEmbedder):
         table = [column for i, column in enumerate(parse_table(table, len(table[0]), 0)) if numeric_columns[i] == 0 and any(column)]
         return np.array([
             self.model.get_sentence_vector(
-                ' '.join([str(token) for token in column if token not in blacklist])
+                ' '.join([prepare_token(token) for token in column if token not in blacklist])
                 ) for column in table
             ]
         )

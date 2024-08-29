@@ -37,7 +37,7 @@ func readSetCostReduction(size, truncation int) float64 {
 }
 
 // resetCostFunctionParameters re-computes the slopes and intercepts of cost functions
-func resetCostFunctionParameters(db *sql.DB, pgTableReadListCostSamples, pgTableReadSetCostSamples string) {
+func resetCostFunctionParameters(db *sql.DB, pgTableReadListCostSamples, pgTableReadSetCostSamples string, verbose bool) {
 	var slope, intercept float64
 	err := db.QueryRow(fmt.Sprintf(`
 	SELECT regr_slope(cost, frequency), regr_intercept(cost, frequency) from %s;`,
@@ -45,8 +45,10 @@ func resetCostFunctionParameters(db *sql.DB, pgTableReadListCostSamples, pgTable
 	if err != nil {
 		panic(err)
 	}
-	log.Printf("Reseting read list cost slope %.4f -> %.4f", readListCostSlope, slope)
-	log.Printf("Reseting read list cost intercept %.4f -> %.4f", readListCostIntercept, intercept)
+	if verbose {
+		log.Printf("Reseting read list cost slope %.4f -> %.4f", readListCostSlope, slope)
+		log.Printf("Reseting read list cost intercept %.4f -> %.4f", readListCostIntercept, intercept)
+	}
 	readListCostSlope = slope
 	readListCostIntercept = intercept
 
@@ -56,8 +58,10 @@ func resetCostFunctionParameters(db *sql.DB, pgTableReadListCostSamples, pgTable
 	if err != nil {
 		panic(err)
 	}
-	log.Printf("Reseting read set cost slope %.4f -> %.4f", readSetCostSlope, slope)
-	log.Printf("Reseting read set cost intercept %.4f -> %.4f", readSetCostIntercept, intercept)
+	if verbose {
+		log.Printf("Reseting read set cost slope %.4f -> %.4f", readSetCostSlope, slope)
+		log.Printf("Reseting read set cost intercept %.4f -> %.4f", readSetCostIntercept, intercept)
+	}
 	readSetCostSlope = slope
 	readSetCostIntercept = intercept
 }

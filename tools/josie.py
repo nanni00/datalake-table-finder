@@ -18,7 +18,7 @@ import psycopg
 
 from tools.utils.classes import AlgorithmTester
 from tools.utils.misc import (
-    get_tables_thresholds_from,
+    is_valid_table,
     print_info, 
     create_token_set, 
     convert_to_giga, 
@@ -64,7 +64,7 @@ class JosieDB:
 
     @_commit_decorator
     @print_info(msg_before='Dropping PostgreSQL database tables...', msg_after='PostgreSQL tables dropped.')
-    def drop_tables(self):    
+    def drop_tables(self):
         self._dbconn.execute(
             f"""
             DROP TABLE IF EXISTS {self._INVERTED_LISTS_TABLE_NAME};
@@ -117,12 +117,19 @@ class JosieDB:
             
     @_commit_decorator
     @print_info(msg_before='Inserting queries into PostgreSQL table...', msg_after='Queries inserted into PostgreSQL table.')
-    def insert_data_into_query_table(self, table_ids:list[int]):
-        self._dbconn.execute(
-            f"""
-            INSERT INTO {self._QUERY_TABLE_NAME} SELECT id, tokens FROM {self._SET_TABLE_NAME} WHERE id in {tuple(table_ids)};
-            """
-        )
+    def insert_data_into_query_table(self, table_ids:list[int]=None, table_id:int=None, tokens_ids:list[int]=None):
+        if table_ids:
+            self._dbconn.execute(
+                f"""
+                INSERT INTO {self._QUERY_TABLE_NAME} SELECT id, tokens FROM {self._SET_TABLE_NAME} WHERE id in {tuple(table_ids)};
+                """
+            )
+        elif table_id and tokens_ids:
+            self._dbconn.execute(
+                f"""
+                INSERT INTO {self._QUERY_TABLE_NAME} VALUES {table_id, tokens_ids};
+                """
+            )
 
     @_commit_decorator
     @print_info(msg_before='Creating PostgreSQL table sets index...', msg_after='Sets table index created.')
@@ -171,7 +178,7 @@ class JosieDB:
         """
 
         with self._dbconn.cursor(row_factory=psycopg.rows.dict_row) as cur:
-            return cur.execute(q).fetchall()[0]['exists'] == True
+            return cur.execute(q).fetchall()[0]['exists']
 
 
 
@@ -188,13 +195,14 @@ class JOSIETester(AlgorithmTester):
         
         self.josiedb = JosieDB(self.dbname, self.tables_prefix)
         self.josiedb.open()
-        logging.info(f"Status PostgreSQL connection: {self.josiedb.is_open()}")
+        logging.getLogger('TestLog').info(f"Status PostgreSQL connection: {self.josiedb.is_open()}")
 
     @print_info(msg_before='Creating PostegreSQL integer sets and inverted index tables...', msg_after='Completed JOSIE data preparation.')
     def data_preparation(self):
         start = time()
         self.josiedb.drop_tables()
         self.josiedb.create_tables()
+        
 
         # PostgreSQL write parameters
         url = f"jdbc:postgresql://localhost:5442/{self.dbname}"
@@ -212,8 +220,8 @@ class JOSIETester(AlgorithmTester):
         
         mode, blacklist, dlh = self.mode, self.blacklist, self.datalake_helper
         
+        logging.getLogger('TestLog').info('Preparing inverted index and integer set tables...')
         spark = get_spark_session(self.num_cpu, self.spark_local_dir, spark_jars_packages)
-        MIN_ROW, MAX_ROW, MIN_COLUMN, MAX_COLUMN, MIN_AREA, MAX_AREA = get_tables_thresholds_from(self.tables_thresholds)
 
         match self.datalake_helper.datalake_location:
             # in the end we must have a RDD with tuples (table_id, table_content, table_numeric_columns)
@@ -252,10 +260,6 @@ class JOSIETester(AlgorithmTester):
                             .option("collection", collection_name) 
                             .load() 
                             .select('_id_numeric', 'content', 'numeric_columns') 
-                            .filter(f"""
-                                size(content) BETWEEN {MIN_ROW} AND {MAX_ROW}
-                                AND size(content[0]) BETWEEN {MIN_COLUMN} AND {MAX_COLUMN}
-                                AND size(content) * size(content[0]) BETWEEN {MIN_AREA} AND {MAX_AREA}""")
                             .rdd
                             .map(list)
                         )
@@ -266,14 +270,12 @@ class JOSIETester(AlgorithmTester):
 
                     initial_rdd = initial_rdd.map(
                         lambda tabid_tabf: (tabid_tabf[0], pl.read_csv(f'{dlh.datalake_location}/{tabid_tabf[1]}.csv', infer_schema_length=0, encoding='latin1').rows())
-                    ).filter(
-                        lambda tid_tab: (MIN_ROW <= len(tid_tab[1]) <= MAX_ROW) \
-                            and (MIN_COLUMN <= len(tid_tab[1][0]) <= MAX_COLUMN) \
-                            and (MIN_AREA <= len(tid_tab[1]) * len(tid_tab[1][0]) <= MAX_AREA)            
                     ).map(
                         lambda tid_tab: (tid_tab[0], tid_tab[1], dlh._numeric_columns[tid_tab[0]])
                     )
         
+
+
         def prepare_tuple(t):
             nonlocal mode, blacklist
             # t = (_id_numeric, content, numeric_columns)
@@ -281,13 +283,19 @@ class JOSIETester(AlgorithmTester):
         
         token_sets = (
             initial_rdd
+                # .sample(False, 0.001)
+                .filter(
+                    # (_id_numeric, content, numeric_columns)
+                    # lambda t: is_valid_table(t[1], t[2], tables_thresholds)
+                    lambda t: is_valid_table(t[1], t[2])
+                )
                 .map(
                     # from MongoDB directly
                     # (_id_numeric, content, numeric_columns) -> (_id_numeric, [token1, token2, token3, ...])
                     lambda t: prepare_tuple(t)
                 ).flatMap(
                         # (set_id, [tok1, tok2, tok3, ...]) -> [(tok1, set_id), (tok2, set_id), ...]
-                        lambda t: [ (token, t[0]) for token in t[1]]
+                        lambda t: [(token, t[0]) for token in t[1]]
                     )
         )
 
@@ -424,32 +432,39 @@ class JOSIETester(AlgorithmTester):
         def _postinglist_format_psql(t):
             token, raw_token, gid, sets = t
             byteatoken = binascii.hexlify(bytes(str(raw_token), 'utf-8'))
-            set_ids =  [s[0] for s in sets]
-            set_sizes = [s[1] for s in sets]
-            set_pos = [s[2] for s in sets]
+            set_ids =  [int(s[0]) for s in sets]
+            set_sizes = [int(s[1]) for s in sets]
+            set_pos = [int(s[2]) for s in sets]
 
-            return (token, len(sets), gid, 1, byteatoken, set_ids, set_sizes, set_pos)
+            return (int(token), len(sets), int(gid), 1, byteatoken, set_ids, set_sizes, set_pos)
 
         integer_sets.map(
             lambda t: _set_format_psql(t)
         ).toDF(schema=['id', 'size', 'num_non_singular_token', 'tokens']).write.jdbc(url, self.tables_prefix + '_sets', 'overwrite', properties)
 
-        posting_lists.map(
+        logging.getLogger('TestLog').info(f"Total posting lists: {posting_lists.count()}")
+        logging.getLogger('TestLog').info(f"Total number of partitions: {posting_lists.getNumPartitions()}")
+        
+
+        posting_lists = posting_lists.map(
             lambda t: _postinglist_format_psql(t)
         ).toDF(schema=[
             'token', 'frequency', 'duplicate_group_id', 'duplicate_group_count', 
             'raw_token', 'set_ids', 'set_sizes', 'match_positions'
             ]
-        ).write.jdbc(url, self.tables_prefix + '_inverted_lists', 'overwrite', properties)
+        )
+
+        posting_lists.write.jdbc(url, self.tables_prefix + '_inverted_lists', 'overwrite', properties)
 
         self.josiedb.create_sets_index()
         self.josiedb.create_inverted_list_index()
-
+        
         # database statistics
         append = os.path.exists(self.db_stat_file)
         dbstat = pd.DataFrame(self.josiedb.get_statistics())
         dbstat.to_csv(self.db_stat_file, index=False, mode='a' if append else 'w', header=False if append else True)
-        
+        self.josiedb.close()
+
         return round(time() - start, 3), dbstat['total_size'].apply(convert_to_giga).sum()
         
     @print_info(msg_before='Starting JOSIE tests...', msg_after='Completed JOSIE tests.')
@@ -457,20 +472,23 @@ class JOSIETester(AlgorithmTester):
         results_directory = kwargs['results_directory']
         token_table_on_memory = kwargs['token_table_on_memory']
 
+        start_query = time()
+        self.josiedb.open()
         self.josiedb.clear_query_table()
         self.josiedb.insert_data_into_query_table(query_ids)
 
         GOPATH = os.environ['GOPATH']
         josie_cmd_dir = f'{GOPATH}/src/github.com/ekzhu/josie/cmd'
         os.chdir(josie_cmd_dir)
-
+        
+        logging.getLogger('TestLog').info(f'Check if sample tables already exist...')
         # if cost sampling tables already exist we assume they are correct and won't recreate them
         sample_costs_tables_exist = self.josiedb.cost_tables_exist()
-        logging.info(f'Sample costs: {not sample_costs_tables_exist}')
+        logging.getLogger('TestLog').info(f'Sample costs tables exist? {not sample_costs_tables_exist}')
         self.josiedb.close()
 
         if not sample_costs_tables_exist:
-            logging.info('Sampling costs...')
+            logging.getLogger('TestLog').info('Sampling costs...')
             os.system(f'go run {josie_cmd_dir}/sample_costs/main.go \
                         --pg-database={self.dbname} \
                         --test_tag={self.tables_prefix} \
@@ -478,10 +496,9 @@ class JOSIETester(AlgorithmTester):
 
         # we are not considering the query preparation steps, since in some cases this will 
         # include also the cost sampling phase and in other cases it won't
-        start_query = time()
-        logging.info('Running top-K...')
+        logging.getLogger('TestLog').info('Running top-K...')
         x = 'true' if token_table_on_memory else 'false'
-        logging.info('Using token table on memory: ' + x)
+        logging.getLogger('TestLog').info('Using token table on memory: ' + x)
         os.system(f'go run {josie_cmd_dir}/topk/main.go \
                     --pg-database={self.dbname} \
                     --test_tag={self.tables_prefix} \
@@ -518,3 +535,4 @@ class JOSIETester(AlgorithmTester):
             self.josiedb.open()
         self.josiedb.drop_tables()
         self.josiedb.close()
+        

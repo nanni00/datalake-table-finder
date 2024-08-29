@@ -184,7 +184,7 @@ func RunOpenDataExperiments(db *sql.DB, outputDir string, cpuProfile bool, useMe
 		readListCostSampleTable := openDataReadListCostSampleTables[pct]
 		readSetCostSampleTable := openDataReadSetCostSampleTables[pct]
 		// Reset cost parameters
-		resetCostFunctionParameters(db, readListCostSampleTable, readSetCostSampleTable)
+		resetCostFunctionParameters(db, readListCostSampleTable, readSetCostSampleTable, true)
 		// Start experiments
 		runExperiments(db, listTable, setTable, minhashTable, openDataQueryTables,
 			ks, outputSubDir, cpuProfile, useMemTokenTable, pct == 100)
@@ -203,14 +203,14 @@ func RunWebTableExperiments(db *sql.DB, outputDir string, cpuProfile bool, useMe
 		readListCostSampleTable := webtableReadListCostSampleTables[pct]
 		readSetCostSampleTable := webtableReadSetCostSampleTables[pct]
 		// Reset cost parameters
-		resetCostFunctionParameters(db, readListCostSampleTable, readSetCostSampleTable)
+		resetCostFunctionParameters(db, readListCostSampleTable, readSetCostSampleTable, true)
 		// Start experiments
 		runExperiments(db, listTable, setTable, minhashTable, webtableQueryTables,
 			ks, outputSubDir, cpuProfile, useMemTokenTable, pct == 100)
 	}
 }
 
-func NanniExperiments(db *sql.DB, k_value int, test_tag string, outputDir string, resultsFile string, cpuProfile bool, useMemTokenTable bool) {
+func NanniExperiments(db *sql.DB, k_value int, test_tag string, outputDir string, resultsFile string, cpuProfile bool, useMemTokenTable bool, verbose bool) {
 	listTable := 				test_tag + "_" + "inverted_lists"
 	setTable := 				test_tag + "_" + "sets"
 	queryTable := 				test_tag + "_" + "queries"
@@ -218,21 +218,26 @@ func NanniExperiments(db *sql.DB, k_value int, test_tag string, outputDir string
 	readSetCostSampleTable :=  	test_tag + "_" + "read_set_cost_samples"
 	k := []int {k_value}
 
-	resetCostFunctionParameters(db, readListCostSampleTable, readSetCostSampleTable)
-	NanniRunExperiments(db, listTable, setTable, queryTable, k, outputDir, resultsFile, cpuProfile, useMemTokenTable, true)
+	resetCostFunctionParameters(db, readListCostSampleTable, readSetCostSampleTable, verbose)
+	NanniRunExperiments(db, listTable, setTable, queryTable, k, outputDir, resultsFile, cpuProfile, useMemTokenTable, true, verbose)
 }
 
-func NanniRunExperiments(db *sql.DB, listTable string, setTable string, queryTable string, ks []int, outputDir string, resultsFile string, cpuProfile bool, useMemTokenTable bool, queryIgnoreSelf bool) {
+func NanniRunExperiments(db *sql.DB, listTable string, setTable string, queryTable string, ks []int, outputDir string, resultsFile string, cpuProfile bool, useMemTokenTable bool, queryIgnoreSelf bool, verbose bool) {
 	var tb tokenTable
-	log.Println("Counting total number of sets")
+	if verbose {
+		log.Println("Counting total number of sets")
+	}
 	totalNumberOfSets = float64(countTotalNumberOfSets(db, setTable))
-	log.Printf("Total number of sets is %.0f", totalNumberOfSets)
+	if verbose {
+		log.Printf("Total number of sets is %.0f", totalNumberOfSets)
+	}
+
 	// log.Println("Creating token table...")
 	if useMemTokenTable {
-		log.Println("Creating token table on memory...")
+		// log.Println("Creating token table on memory...")
 		tb = createTokenTableMem(db, listTable, queryIgnoreSelf)
 	} else {
-		log.Println("Creating token table on disk...")
+		// log.Println("Creating token table on disk...")
 		tb = createTokenTableDisk(db, listTable, queryIgnoreSelf)
 	}
 
@@ -266,11 +271,11 @@ func NanniRunExperiments(db *sql.DB, listTable string, setTable string, queryTab
 			}
 			log.Printf("Running algorithm [%s], output to %s", name, outputFilename)
 			runExperiment(db, listTable, setTable, tb, queries, k, queryIgnoreSelf, searchFunc, outputFilename, cpuProfileFilename)
-			log.Printf("Finished running algorithm [%s]", name)
+			// log.Printf("Finished running algorithm [%s]", name)
 		}
-		log.Printf("Finished experiments for k = %d", k)
+		// log.Printf("Finished experiments for k = %d", k)
 	}
-	log.Println("Conguratuation! You have finished all experiments!")
+	// log.Println("Conguratuation! You have finished all experiments!")
 
 }
 
