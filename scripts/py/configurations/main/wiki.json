@@ -31,29 +31,29 @@
     },
 
     "sample_queries": {
-        "exec_now": true
+        "exec_now": false
     },
 
     "query": {
         "algorithms": [
-            "josie", "lshforest", "embedding"
+            "josie"
         ],
         "modes": [
-            "set", "bag", "ft", "ftdist"
+            "set"
         ],
-        "exec_now": true
+        "exec_now": false
     },
 
     "extract": {
         "clear_results_table": false,
-        "exec_now": true
+        "exec_now": false
     },
 
     "analyses": {
         "p_values": [
-            1, 3, 5, 10
+            1, 5, 10, 20
         ],
-        "exec_now": true
+        "exec_now": false
     },
 
     "clean": {

@@ -5,7 +5,7 @@ PY_ID_NUMERIC_SCRIPT=$THESIS_PATH/scripts/py/preproc/create_numeric_index_on_col
 PY_DETECT_NUMERIC_COLUMNS_SCRIPT=$THESIS_PATH/scripts/py/preproc/detect_numeric_columns.py
 
 TASK="set"
-DATASET="gittables"
+DATASET="wikiturlsnap"
 SIZE="standard"
 
 # only for numeric columns detection

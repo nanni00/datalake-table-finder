@@ -244,7 +244,9 @@ func NanniRunExperiments(db *sql.DB, listTable string, setTable string, queryTab
 	queries := querySets(db, listTable, queryTable)
 	// queries := allTablesAsQuerySets(db, listTable, setTable)
 	for _, k := range ks {
-		log.Printf("==== Begin experiments for k = %d", k)
+		if verbose {
+			log.Printf("==== Begin experiments for k = %d", k)
+		}
 		for name, searchFunc := range algorithms {
 			if name != "merge_probe_cost_model_greedy" { // working only on JOSIE
 				continue
@@ -269,11 +271,13 @@ func NanniRunExperiments(db *sql.DB, listTable string, setTable string, queryTab
 				cpuProfileFilename = filepath.Join(outputDir, name,
 					fmt.Sprintf("k_%d.prof", k))
 			}
-			log.Printf("Running algorithm [%s], output to %s", name, outputFilename)
-			runExperiment(db, listTable, setTable, tb, queries, k, queryIgnoreSelf, searchFunc, outputFilename, cpuProfileFilename)
-			// log.Printf("Finished running algorithm [%s]", name)
+			// log.Printf("Running algorithm [%s], output to %s", name, outputFilename)
+			runExperiment(db, listTable, setTable, tb, queries, k, queryIgnoreSelf, searchFunc, outputFilename, cpuProfileFilename, verbose)
 		}
-		// log.Printf("Finished experiments for k = %d", k)
+
+		if verbose {
+			log.Printf("Finished experiments for k = %d", k)
+		}
 	}
 	// log.Println("Conguratuation! You have finished all experiments!")
 
@@ -317,7 +321,7 @@ func runExperiments(db *sql.DB, listTable, setTable, minhashTable string, queryT
 						fmt.Sprintf("%s_%d.prof", scale, k))
 				}
 				log.Printf("Running algorithm [%s], output to %s", name, outputFilename)
-				runExperiment(db, listTable, setTable, tb, queries, k, queryIgnoreSelf, searchFunc, outputFilename, cpuProfileFilename)
+				runExperiment(db, listTable, setTable, tb, queries, k, queryIgnoreSelf, searchFunc, outputFilename, cpuProfileFilename, true)
 				log.Printf("Finished running algorithm [%s]", name)
 			}
 			var groundTruths map[int64][]searchResult
@@ -366,7 +370,7 @@ func runExperiment(
 	queryIgnoreSelf bool,
 	searchFunc func(db *sql.DB, listTable, setTable string, tb tokenTable, q rawTokenSet, k int, queryIgnoreSelf bool) ([]searchResult, experimentResult),
 	outputFilename, cpuProfileFilename string,
-) {
+	verbose bool) {
 	// I can't do this...
 	// log.Println("Dropping system file cache...")
 	// if err := exec.Command("sudo", "/usr/local/bin/drop_caches").Run(); err != nil {
@@ -393,10 +397,14 @@ func runExperiment(
 		if len(perfs)%100 == 0 {
 			writeExperimentResults(perfs, outputFilename)
 		}
-		fmt.Printf("\r%d / %d queries", i+1, len(queries))
+		if verbose {
+			fmt.Printf("\r%d / %d queries", i+1, len(queries))
+		}
 	}
-	fmt.Println()
-	log.Printf("Finished all queries in %d minutes", time.Since(start) /time.Minute) // time.Now().Sub(start)/time.Minute)
+	if verbose {
+		fmt.Println()
+		log.Printf("Finished all queries in %d minutes", time.Since(start) /time.Minute) // time.Now().Sub(start)/time.Minute)
+	}
 	writeExperimentResults(perfs, outputFilename)
 }
 

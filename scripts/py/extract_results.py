@@ -48,11 +48,6 @@ def worker_result_extractor(data):
     hit = 0
     
     for (algorithm, mode, query_id, result_id) in tqdm(chunk, total=len(chunk), leave=False, disable=False if os.getpid() % num_cpu == 0 else True):
-        match mode: # problem with previous versions...
-            case 'fasttext': mode = 'ft'
-            case 'fasttextdist': mode = 'ftdist'
-            case '_': mode = mode
-
         # here we need eval because on the csv file the values are stored as strings
         # result_ids, algorithm_overlaps = eval(result_ids), eval(algorithm_overlaps)
         
@@ -192,7 +187,7 @@ def extract_results(test_name, k, num_query_samples, num_cpu, pg_dbname,
 
 
     logging_setup(logfile)
-    logging.getLogger('TestLog').info(f'{"#" * 10} {test_name.upper()} - {dataset.upper()} - {size.upper()} - {k} - {num_query_samples} - EXTRACTION {"#" * 10}')
+    logging.getLogger('TestLog').info(f' {test_name.upper()} - {dataset.upper()} - {size.upper()} - {k} - {num_query_samples} - EXTRACTION '.center(150, '#'))
 
     blacklist = set(blacklist)
     logging.getLogger('TestLog').info(f'Tokens blacklist: {blacklist}')

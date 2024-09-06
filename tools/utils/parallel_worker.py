@@ -1,6 +1,8 @@
 from math import log2
 from collections import Counter as multiset
 
+from tools.utils.metrics import ndcg_at_p
+
 
 
 
@@ -54,15 +56,6 @@ def worker_precision(inp):
     return results
 
 
-def ndcg_at_p(true_relevances, result_relevances, p):
-    p = min(p, len(true_relevances), len(result_relevances))
-    if p <= 0: # because computing nDCG is meaningful only if there is more than one document 
-        return 0, 1
-    idcg = sum(rel / log2(i + 1) for i, rel in enumerate(true_relevances[:p], start=1))
-    dcg = sum(rel / log2(i + 1) for i, rel in enumerate(result_relevances[:p], start=1))
-    if idcg < dcg:
-        raise ValueError()
-    return dcg / idcg, p
 
 
 def worker_ndcg(inp):

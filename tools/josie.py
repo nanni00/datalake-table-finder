@@ -49,7 +49,7 @@ class JosieDB:
         self._dbconn = psycopg.connect(f"port=5442 host=/tmp dbname={self.dbname}")
 
     def is_open(self):
-        return not self._dbconn._closed
+        return bool(self._dbconn) and not self._dbconn._closed
 
     @print_info(msg_before='Closing PostgreSQL database connection...', msg_after='PostgreSQL connection closed.')
     def close(self):

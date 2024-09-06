@@ -32,7 +32,7 @@
     },
 
     "sample_queries": {
-        "exec_now": true
+        "exec_now": false
     },
 
     "query": {
@@ -40,21 +40,21 @@
             "josie", "lshforest", "embedding"
         ],
         "modes": [
-            "set", "bag", "ft", "ftdist"
+            "set", "bag", "ft"
         ],
-        "exec_now": true
+        "exec_now": false
     },
 
     "extract": {
         "clear_results_table": false,
-        "exec_now": true
+        "exec_now": false
     },
 
     "analyses": {
         "p_values": [
             1, 3, 5, 10
         ],
-        "exec_now": true
+        "exec_now": false
     },
 
     "clean": {

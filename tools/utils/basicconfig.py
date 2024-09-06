@@ -21,9 +21,9 @@ ALGORITHM_MODE_CONFIG = [
     ('lshforest', 'set'),
     ('lshforest', 'bag'),
     ('embedding', 'ft'),
-    ('embedding', 'ftdist'),
-    ('embedding', 'cft'),
-    ('embedding', 'cftdist'),
+    # ('embedding', 'ftdist'),
+    # ('embedding', 'cft'),
+    # ('embedding', 'cftdist'),
 ]
 
 

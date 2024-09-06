@@ -52,8 +52,8 @@ def worker_embedding_data_preparation(data) -> tuple[np.ndarray, np.ndarray]:
             xb_ids = np.concatenate((xb_ids, xb_ids_batch))
             xb_batch, xb_ids_batch = np.empty(shape=(0, d)), np.empty(shape=(0, 1))
         
-        if os.getpid() % num_cpu == 0:
-            print(f"\tdebug process working on table with shape {(len(content), len(content[0]))}...")
+        # if os.getpid() % num_cpu == 0:
+        #     print(f"\tdebug process working on table with shape {(len(content), len(content[0]))}...")
         
         colemb = model.embedding_table(content, numeric_columns, blacklist)
         if colemb.shape[0] == 0:
@@ -218,7 +218,7 @@ class EmbeddingTester(AlgorithmTester):
         for i, qid in enumerate(np.unique(xq_ids)):
             start_sort = time()
             x = sorted(list(zip(*np.unique(res[i], return_counts=True))), key=lambda z: z[1], reverse=True)
-            sort_time = time() - start_time
+            sort_time = time() - start_sort
             results.append((qid, round(batch_mean_time + sort_time, 3), [int(y[0]) for y in x if y[0] not in {qid, -1}][:k + 1], []))
 
         pd.DataFrame(results, columns=['query_id', 'duration', 'results', 'results_overlap']).to_csv(results_file, index=False)    

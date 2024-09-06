@@ -1,3 +1,4 @@
+import random
 import fasttext
 import compress_fasttext
 import numpy as np
@@ -29,9 +30,12 @@ class CompressFastTextTableEmbedder(TableEmbedder):
 
     def embedding_table(self, table, numeric_columns, *args):
         blacklist = args
+        max_token_per_column = 10 ** 4
         
         # with the any(column) we avoid that empty columns are embedded (btw they should have already been filtered previously)
         table = [column for i, column in enumerate(parse_table(table, len(table[0]), 0)) if numeric_columns[i] == 0 and any(column)]
+        table = [column if len(column) <= max_token_per_column else random.sample(column, max_token_per_column) for column in table]
+
         return np.array([
             self.model.get_sentence_vector(
                 ' '.join([prepare_token(token) for token in column if token not in blacklist])
@@ -55,15 +59,14 @@ class FastTextTableEmbedder(TableEmbedder):
         """
 
         blacklist = args
-        
+        max_token_per_column = 10 ** 4
+
         # with the any(column) we avoid that empty columns are embedded
         table = [column for i, column in enumerate(parse_table(table, len(table[0]), 0)) if numeric_columns[i] == 0 and any(column)]
-        return np.array([
-            self.model.get_sentence_vector(
-                ' '.join([prepare_token(token) for token in column if token not in blacklist])
-                ) for column in table
-            ]
-        )
+        table = [column if len(column) <= max_token_per_column else random.sample(column, max_token_per_column) for column in table]
+        table = [{prepare_token(token) for token in column if token not in blacklist} for column in table]
+
+        return np.array([self.model.get_sentence_vector(' '.join(column)) for column in table])
 
     def get_dimension(self):
         return self.model.get_dimension()

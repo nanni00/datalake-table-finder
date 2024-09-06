@@ -52,20 +52,22 @@ def analyses(test_name, k, num_query_samples, num_cpu, dataset, size, p_values,
     logging_setup(logfile)
     logging.getLogger('TestLog').info(f' {test_name.upper()} - {dataset.upper()} - {size.upper()} - ANALYSES - {k} - {q} '.center(150, '-'))
 
-    colors = list(mcolors.TABLEAU_COLORS.keys())
+    all_colors = colors = list(mcolors.TABLEAU_COLORS.keys())
     methods = basicconfig.ALGORITHM_MODE_CONFIG
+    markers = {m: 'o' if m[0] == 'josie' else 'x' if m[0] == 'lshforest' else 'd' for m in methods}
     methods = {m: c for m, c in zip(methods, colors[:len(methods)])}
 
     alpha = 1
     showfliers = False
 
     results = pl.read_csv(f'{results_extr_dir}/final_results_k{k}_q{q}.csv')
-    
+    results = results.filter(pl.struct(['algorithm', 'mode']).is_in(list(map(lambda am: {'algorithm': am[0], 'mode': am[1]}, methods.keys()))))
+
     results = results.drop_nulls() # queries without any results
     results = results.filter(pl.col('sloth_overlap') != -1) # pairs that have had a SLOTH failure while computing the overlap
 
     results = results.with_columns((pl.col('algorithm_overlap') - pl.col('sloth_overlap')).alias('difference_overlap'))
-    results = results.with_columns((pl.col('algorithm_overlap') / (pl.col('sloth_overlap') + 1)).alias('algorithm_overlap_norm'))
+    # results = results.with_columns((pl.col('algorithm_overlap') / (pl.col('sloth_overlap') + 1)).alias('algorithm_overlap_norm'))
 
     logging.getLogger('TestLog').info(f'Filtering those groups where any method has returned less than K={k} values...')
     start_filtering = time()
@@ -81,9 +83,6 @@ def analyses(test_name, k, num_query_samples, num_cpu, dataset, size, p_values,
     
     runtime_metrics.append((get_local_time(), 'filtering_groups', round(end_filtering - start_filtering, 3)))
     logging.getLogger('TestLog').info(f'Filtered {len(bad_groups)} groups in {round(end_filtering - start_filtering, 3)}s')
-
-    def fix_mode(mode:str):
-        return mode.replace('fasttext', 'ft') if mode.startswith('fasttext') else mode
 
 
 
@@ -123,7 +122,7 @@ def analyses(test_name, k, num_query_samples, num_cpu, dataset, size, p_values,
     #############################################################################
     ##################### Algorithm Overlap VS Real Overlap #####################
     #############################################################################
-    data = [(am[0], fix_mode(am[1]), group) for am, group in results.group_by('algorithm', 'mode')]
+    data = [(am[0], am[1], group) for am, group in results.group_by('algorithm', 'mode')]
     labels = [f'{a}-{m}' for a, m, _ in data]
     colors = [methods[(a, m)] for a, m, _ in data]
 
@@ -153,11 +152,13 @@ def analyses(test_name, k, num_query_samples, num_cpu, dataset, size, p_values,
     ##################### Algorithm Overlap VS Real Overlap (Normalised) #####################
     ##########################################################################################
 
-    # In this graph it may seems that JOSIE-bag underestimate the overlap, but this is due to the +1;
-    # TODO handle this in some better way?
     fig, ax = plt.subplots(1, 1, sharey='row', figsize=(15, 5))
     xmin, xmax, step = 0, 20.04, 0.5
-
+    positive_overlaps = results.filter(pl.col('sloth_overlap') > 0).with_columns((pl.col('algorithm_overlap') / (pl.col('sloth_overlap'))).alias('algorithm_overlap_norm'))
+    data = [(am[0], am[1], group) for am, group in positive_overlaps.group_by('algorithm', 'mode')]
+    
+    logging.getLogger('TestLog').info(f'Total results: {results.shape[0]}; results with positive overlaps: {positive_overlaps.shape[0]}')
+    
     ax.hist([d[2]['algorithm_overlap_norm'] for d in data], 
             bins=np.arange(xmin, xmax, step), alpha=alpha, 
             label=labels, color=colors,
@@ -165,7 +166,7 @@ def analyses(test_name, k, num_query_samples, num_cpu, dataset, size, p_values,
     ax.set_xlim(xmin, xmax)
     ax.set_xticks(np.arange(xmin, xmax, step))
     ax.grid()
-    ax.set_xlabel('ALGORITHM_overlap / (SLOTH_overlap + 1)')
+    ax.set_xlabel(r'$\frac{overlap_{algoritmo}}{largestOverlap}$')
     ax.set_ylabel('frequency')
     ax.set_yscale('log')
     ax.tick_params(axis='x', rotation=45)
@@ -232,15 +233,17 @@ def analyses(test_name, k, num_query_samples, num_cpu, dataset, size, p_values,
     runtime_metrics.append((get_local_time(), 'prec-rec-f1', round(end_prec - start_prec, 3)))
 
     prec_rec_results = [x for qres in prec_rec_results for x in qres]
-    prec_rec_results = pd.DataFrame(prec_rec_results, columns=['query_id', 'silver_std_size', 'algorithm', 'mode', 'p', 'precision', 'precision_v2', 'recall', 'f1'])
+    prec_rec_results = pd.DataFrame(prec_rec_results, columns=['query_id', 'silver_std_size', 'algorithm', 'mode', 'p', 'precision', 'RP', 'recall', 'f1'])
 
-    res_pivot = pd.pivot_table(prec_rec_results, values=['precision', 'precision_v2', 'recall', 'f1'], index=['algorithm', 'mode'], columns=['p'], aggfunc=['mean', 'std', 'max'])
+    res_pivot = pd.pivot_table(prec_rec_results, values=['precision', 'RP', 'recall', 'f1'], index=['algorithm', 'mode'], columns=['p'], aggfunc=['mean', 'std', 'max'])
     res_pivot.to_csv(analyses_dir + f'/precision_recall@p.csv')
 
     # basic plot
-    for measure in ['precision', 'precision_v2', 'recall', 'f1']:
+    # for measure in ['precision', 'precision_v2', 'recall', 'f1']:
+    measures = ['RP']
+    for measure in measures:
         for row, label in zip(res_pivot['mean', measure].values, res_pivot.index):
-            plt.plot(p_values, row, 'o-', label=f'{label[0]}-{fix_mode(label[1])}', color=methods[(label[0], fix_mode(label[1]))])
+            plt.plot(p_values, row, f'{markers[(label)]}-', label=f'{label[0]}-{label[1]}', color=methods[(label[0], label[1])])
         plt.xticks(p_values, p_values)
         plt.xlabel('P')
         plt.ylabel(f'mean {measure}@P')
@@ -251,8 +254,8 @@ def analyses(test_name, k, num_query_samples, num_cpu, dataset, size, p_values,
         plt.close()
 
     # boxplots with precision@p
-    data = [(amp[0], fix_mode(amp[1]), amp[2], group) for amp, group in prec_rec_results.groupby(by=['algorithm', 'mode', 'p'])]
-    for measure in ['precision', 'precision_v2', 'recall']:
+    data = [(amp[0], amp[1], amp[2], group) for amp, group in prec_rec_results.groupby(by=['algorithm', 'mode', 'p'])]
+    for measure in measures:
         fig, axes = plt.subplots(1, len(p_values), figsize=(15, 7), sharey=True)
         for i, p in enumerate(p_values):
             labels = [f'{d[0]}\n{d[1]}' for d in data if d[2] == p]
@@ -265,6 +268,11 @@ def analyses(test_name, k, num_query_samples, num_cpu, dataset, size, p_values,
                         meanline=True,
                         labels=labels)
             
+            for median in bplot['medians']:
+                median.set_color(all_colors[-1])
+            for median in bplot['means']:
+                median.set_color(all_colors[-2])                
+
             for patch, color in zip(bplot['boxes'], colors):
                 patch.set_facecolor(color)
                 patch.set_alpha(alpha)
@@ -301,7 +309,7 @@ def analyses(test_name, k, num_query_samples, num_cpu, dataset, size, p_values,
     ndcg_pivot.to_csv(analyses_dir + f'/ndcg@p.csv')
 
     for row, label in zip(ndcg_pivot['mean', 'ndcg_p'].values, ndcg_pivot.index):
-        plt.plot(p_values, row, 'o-', label=f'{label[0]}-{fix_mode(label[1])}', color=methods[(label[0], fix_mode(label[1]))])
+        plt.plot(p_values, row, f'{markers[(label)]}-', label=f'{label[0]}-{label[1]}', color=methods[(label[0], label[1])])
     plt.xticks(p_values, p_values)
     plt.xlabel("P")
     plt.ylabel("mean nDCG@P")
@@ -313,7 +321,7 @@ def analyses(test_name, k, num_query_samples, num_cpu, dataset, size, p_values,
     plt.close()
     
     # boxplots with nDCG@p
-    data = [(amp[0], fix_mode(amp[1]), amp[2], group) for amp, group in df.groupby(by=['algorithm', 'mode', 'p'])]
+    data = [(amp[0], amp[1], amp[2], group) for amp, group in df.groupby(by=['algorithm', 'mode', 'p'])]
     
     fig, axes = plt.subplots(1, len(p_values), figsize=(15, 7), sharey=True)
     for i, p in enumerate(p_values):
@@ -326,6 +334,12 @@ def analyses(test_name, k, num_query_samples, num_cpu, dataset, size, p_values,
                     meanline=True,
                     showfliers=showfliers,
                     labels=labels)
+
+        for median in bplot['medians']:
+            median.set_color(all_colors[-1])
+        for median in bplot['means']:
+            median.set_color(all_colors[-2])                
+
         for patch, color in zip(bplot['boxes'], colors):
             patch.set_facecolor(color)
             patch.set_alpha(alpha)

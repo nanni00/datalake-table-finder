@@ -101,14 +101,17 @@ class SimpleDataLakeHelper:
             case _:
                 return len(self._mapping_id)
 
-    def scan_tables(self):
+    def scan_tables(self, ignore_firsts:int=None):
         match self.datalake_location:
             case 'mongodb':
+                query = {} if not ignore_firsts else {'_id_numeric': {'$gt': ignore_firsts}}
                 for collection in self._collections:
-                    for doc in collection.find({}):
+                    for doc in collection.find(query):
                         yield {'_id_numeric': doc['_id_numeric'], 'content': doc['content'], 'numeric_columns': doc['numeric_columns']}
             case _:
                 for _id_numeric in self._mapping_id.keys():
+                    if ignore_firsts and _id_numeric < ignore_firsts:
+                        continue
                     yield self.get_table_by_numeric_id(_id_numeric)
 
     def copy(self):

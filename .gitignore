@@ -16,11 +16,13 @@ go/*
 **test**
 
 src
-experiments
 TaBERT
+
 documentation
 
 models
+notebooks
+
 **__pycache__**
 .git
 .vscode

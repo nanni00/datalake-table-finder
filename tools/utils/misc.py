@@ -45,13 +45,28 @@ def convert_to_giga(x):
 def is_valid_table(table, numeric_columns):
     if all(numeric_columns):
         return False
+    # here is kept a row-view for the table
     table = [[row[i] for i, x in enumerate(numeric_columns) if x == 0] for row in table]
-    # return check_table_is_in_thresholds(table, tables_thresholds)
     return  tab_thresh.MIN_ROWS     <= len(table)                   <= tab_thresh.MAX_ROWS and \
             tab_thresh.MIN_COLUMNS  <= len(table[0])                <= tab_thresh.MAX_COLUMNS and \
             tab_thresh.MIN_AREA     <= len(table) * len(table[0])   <= tab_thresh.MAX_AREA
     
-    
+
+
+def is_number_tryexcept(s):
+    try: 
+        float(s)
+        return True
+    except ValueError:
+        return False
+    except TypeError:
+        return False
+
+
+def is_bad_column(column:list):
+    return sum(map(lambda cell: is_number_tryexcept(cell) or pd.isna(cell), column)) >= len(column) // 2 + 1
+
+
 def naive_detect_table_numeric_and_null_columns(table: list[list], any_int:bool=False) -> list[int]:
     """ 
     :param table: a list of lists representing a table in row view
@@ -60,15 +75,6 @@ def naive_detect_table_numeric_and_null_columns(table: list[list], any_int:bool=
     :return a list of int, where the i-th element is set to 1 if the i-th column is detected as numeric or with only null values, 
         0 otherwise
     """
-
-    def is_number_tryexcept(s):
-        try: 
-            float(s)
-            return True
-        except ValueError:
-            return False
-        except TypeError:
-            return False
         
     if len(table) == 0 or len(table[0]) == 0:
         return []
@@ -80,7 +86,7 @@ def naive_detect_table_numeric_and_null_columns(table: list[list], any_int:bool=
         ]
     else:
         return [
-            int(sum(is_number_tryexcept(cell) for cell in column) >= len(column) // 2 + 1 or not any(cell for cell in column))
+            int(sum(not cell or is_number_tryexcept(cell) for cell in column) >= len(column) // 2 + 1 or not any(cell for cell in column if not is_number_tryexcept(cell)))
             for column in parse_table(table, len(table[0]), 0)
         ]
 

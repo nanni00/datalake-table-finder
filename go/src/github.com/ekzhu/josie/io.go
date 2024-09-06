@@ -130,30 +130,3 @@ func querySets(db *sql.DB, listTable, queryTable string) []rawTokenSet {
 	}
 	return queries
 }
-
-
-func allTablesAsQuerySets(db *sql.DB, listTable, setTable string) []rawTokenSet {
-	rows, err := db.Query(fmt.Sprintf(`
-		SELECT id, (
-			SELECT array_agg(raw_token)
-			FROM %s
-			WHERE token = any(tokens)
-		), tokens FROM %s`, pq.QuoteIdentifier(listTable), pq.QuoteIdentifier(setTable)))
-	if err != nil {
-		panic(err)
-	}
-	queries := make([]rawTokenSet, 0)
-	for rows.Next() {
-		var query rawTokenSet
-		var ba pq.ByteaArray
-		if err := rows.Scan(&query.ID, &ba, pq.Array(&query.Tokens)); err != nil {
-			panic(err)
-		}
-		query.RawTokens = ba
-		queries = append(queries, query)
-	}
-	if err := rows.Err(); err != nil {
-		panic(err)
-	}
-	return queries
-}

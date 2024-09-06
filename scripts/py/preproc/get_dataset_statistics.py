@@ -9,12 +9,12 @@ from tools.utils.settings import DefaultPath as defpath
 from tools.utils.parallel_worker import chunks
 import multiprocessing as mp
 
-dataset = 'santoslarge'
-size = 'standard'
-datalake_location = "/data4/nanni/data/santos_large/datalake"
-# dataset = "gittables"
-# size = "standard"
-# datalake_location = "mongodb"
+# dataset = 'santoslarge'
+# size = 'standard'
+# datalake_location = "/data4/nanni/data/santos_large/datalake"
+dataset = "wikiturlsnap"
+size = "standard"
+datalake_location = "mongodb"
 
 mapping_id_file = "/data4/nanni/data/santos_large/mapping_id.pickle"
 numeric_columns_file = "/data4/nanni/data/santos_large/numeric_columns.pickle"

@@ -16,10 +16,10 @@
     
     "data_preparation": {
         "algorithms": [
-            "lshforest"
+            "embedding"
         ],
         "modes": [
-            "bag"
+            "ft"
         ],
         "spark_local_dir": "/data4/nanni/spark",
         "token_table_on_mem": false,
@@ -36,10 +36,10 @@
 
     "query": {
         "algorithms": [
-            "josie", "lshforest"
+            "embedding"
         ],
         "modes": [
-            "set", "bag"
+            "ft"
         ],
         "exec_now": false
     },
