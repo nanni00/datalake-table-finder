@@ -22,6 +22,8 @@ documentation
 
 models
 notebooks
+!experiments/multi_key_join/josie_find_joins.py
+experiments/multi_key_join
 
 **__pycache__**
 .git

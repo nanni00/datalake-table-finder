@@ -44,14 +44,14 @@ class JosieDB:
         self._READ_LIST_COST_SAMPLES_TABLE_NAME = f'{self.tables_prefix}_read_list_cost_samples'
         self._READ_SET_COST_SAMPLES_TABLE_NAME = f'{self.tables_prefix}_read_set_cost_samples'
 
-    @print_info(msg_before='Opening connection to the PostgreSQL database...')
+    # @print_info(msg_before='Opening connection to the PostgreSQL database...')
     def open(self):
         self._dbconn = psycopg.connect(f"port=5442 host=/tmp dbname={self.dbname}")
 
     def is_open(self):
         return bool(self._dbconn) and not self._dbconn._closed
 
-    @print_info(msg_before='Closing PostgreSQL database connection...', msg_after='PostgreSQL connection closed.')
+    # @print_info(msg_before='Closing PostgreSQL database connection...', msg_after='PostgreSQL connection closed.')
     def close(self):
         self._dbconn.close()
 
@@ -106,8 +106,8 @@ class JosieDB:
             """
         )
 
+    # @print_info(msg_before='Clearing PostgreSQL query table...', msg_after='PostgreSQL query table cleaned')
     @_commit_decorator
-    @print_info(msg_before='Clearing PostgreSQL query table...', msg_after='PostgreSQL query table cleaned')
     def clear_query_table(self):
         self._dbconn.execute(
             f"""
@@ -115,8 +115,8 @@ class JosieDB:
             """
         )
             
+    # @print_info(msg_before='Inserting queries into PostgreSQL table...', msg_after='Queries inserted into PostgreSQL table.')
     @_commit_decorator
-    @print_info(msg_before='Inserting queries into PostgreSQL table...', msg_after='Queries inserted into PostgreSQL table.')
     def insert_data_into_query_table(self, table_ids:list[int]=None, table_id:int=None, tokens_ids:list[int]=None):
         if table_ids:
             self._dbconn.execute(

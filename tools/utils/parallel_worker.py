@@ -1,7 +1,4 @@
-from math import log2
-from collections import Counter as multiset
-
-from tools.utils.metrics import ndcg_at_p
+from tools.utils.metrics import *
 
 
 
@@ -23,35 +20,30 @@ def worker_fp_per_query(inp):
     return y
 
 
+
 def worker_precision(inp):
     query_id, data, p_values, query_silver_standard = inp
 
     results = []
-    
-    true_relevances = [x[1] for x in query_silver_standard]
-    
+    true_relevances = [x[1] for x in query_silver_standard]    
     tr = multiset(true_relevances)
-    true_relevances_multisets = {_p: multiset(true_relevances[:_p]) for _p in p_values}
     
     for (algorithm, mode), data in data.groupby(['algorithm', 'mode']):
-        predicted_relevances = data['sloth_overlap'].values.tolist()
+        result_relevances = data['sloth_overlap'].values.tolist()
         
         for _p in p_values:
             if _p > len(true_relevances):
                 continue
-            rr = multiset(predicted_relevances[:_p])
-            num_rel_res_in_top_p = sum(x[1] for x in (tr & rr).items())
-            precision = num_rel_res_in_top_p / _p
             
-            num_rel_res_in_top_p_v2 = sum(x[1] for x in (true_relevances_multisets[_p] & rr).items())
-            precision_v2 = num_rel_res_in_top_p_v2 / _p
-            recall = num_rel_res_in_top_p / len(true_relevances)
+            rec = recall(true_relevances, result_relevances[:_p], _p)
+            prec = precision(true_relevances, result_relevances[:_p], _p)
+            rel_prec = relevance_precision(true_relevances[:_p], result_relevances[:_p], _p)
 
             try:
-                f1 = (2 * precision * recall) / (precision + recall)
+                f1 = f_score(prec, rec)
             except ZeroDivisionError:
                 f1 = 0
-            results.append([query_id, len(query_silver_standard), algorithm, mode, _p, precision, precision_v2, recall, f1])
+            results.append([query_id, len(query_silver_standard), algorithm, mode, _p, prec, rel_prec, rec, f1])
     
     return results
 

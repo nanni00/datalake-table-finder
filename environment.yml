@@ -10,7 +10,8 @@ dependencies:
   - mmh3
   - tqdm
   - nltk
-  -pip:
+  - pip:
+    - matplotlib
     - psycopg
     - pymongo
     - timeout_decorator

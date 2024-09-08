@@ -1,4 +1,28 @@
-from math import log2
+from math import log2, pow
+from collections import Counter as multiset
+
+
+
+def relevance_precision(true_relevances:list, result_relevances:list, p):
+    true_relevances = multiset(true_relevances)
+    result_relevances = multiset(result_relevances)
+    return sum(x[1] for x in (true_relevances & result_relevances).items()) / p
+    
+
+def precision(true_relevances:list, result_relevances:list, p):
+    true_relevances = multiset(true_relevances)
+    result_relevances = multiset(result_relevances)
+    return sum(x[1] for x in (true_relevances & result_relevances).items()) / p
+            
+
+def recall(true_relevances:list, result_relevances:list, p):
+    true_relevances = multiset(true_relevances)
+    result_relevances = multiset(result_relevances)
+    return sum(x[1] for x in (true_relevances & result_relevances).items()) / len(true_relevances)
+
+
+def f_score(p, r, beta=1):
+    return (1 + pow(beta, 2)) * (p * r) / (pow(beta, 2) * p  + r)
 
 
 def ndcg_at_p(true_relevances, result_relevances, p):
@@ -10,3 +34,7 @@ def ndcg_at_p(true_relevances, result_relevances, p):
     if idcg < dcg:
         raise ValueError()
     return dcg / idcg, p
+
+
+
+
