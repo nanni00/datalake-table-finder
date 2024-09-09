@@ -12,7 +12,7 @@ from matplotlib import pyplot as plt
 
 from tools.josie import JosieDB
 from tools.utils.datalake import SimpleDataLakeHelper
-from tools.utils.misc import is_valid_table, create_token_set, apply_sloth, logging_setup
+from tools.utils.misc import is_valid_table, table_to_tokens_set, apply_sloth, logging_setup
 from tools.utils.classes import ResultDatabase
 from tools.utils.metrics import ndcg_at_p, relevance_precision
 from tools.utils.settings import DefaultPath as dp
@@ -156,7 +156,7 @@ for i, names in enumerate(list_names):
     if not os.path.exists(queries_file):
         for table_obj in dlh.scan_tables(ignore_firsts=10**5):
             if is_valid_table(table_obj['content'], table_obj['numeric_columns']):
-                tabset = set(create_token_set(table_obj['content'], 'set', table_obj['numeric_columns']))
+                tabset = set(table_to_tokens_set(table_obj['content'], 'set', table_obj['numeric_columns']))
                 if sum(token in tabset for token in names) == len(names):
                     queries.append(table_obj)
                     ids.add(table_obj['_id_numeric'])
@@ -186,7 +186,7 @@ for i, names in enumerate(list_names):
     info('Apply JOSIE with single-column queries (baseline)')
     if not os.path.exists(josie_single_results_file):
         josiedb.open()
-        single_column_bags = {qid: [create_token_set([column], 'bag', [0] * len(column)) for column in query_columns[qid]] for qid in query_columns.keys()}
+        single_column_bags = {qid: [table_to_tokens_set([column], 'bag', [0] * len(column)) for column in query_columns[qid]] for qid in query_columns.keys()}
         queries_set = []
 
         info('\tCreate query sets...')
@@ -239,7 +239,7 @@ for i, names in enumerate(list_names):
     if not os.path.exists(josie_multi_results_file):
         info('\tCreate multi-column results (only for queries from the previous filtering)')
         josiedb.open()
-        multi_column_bags = {qid: create_token_set(columns, 'bag', [0] * len(columns[0])) for qid, columns in query_columns.items() if qid in single_column_results.keys()}
+        multi_column_bags = {qid: table_to_tokens_set(columns, 'bag', [0] * len(columns[0])) for qid, columns in query_columns.items() if qid in single_column_results.keys()}
         queries_set = []
         for qid, qbag in tqdm(multi_column_bags.items(), leave=False):
             q = set()

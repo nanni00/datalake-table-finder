@@ -13,9 +13,6 @@ from tools.utils.parallel_worker import chunks
 from tools.utils.datalake import SimpleDataLakeHelper
 from tools.utils.misc import is_valid_table
 
-from tools.utils.deepjoin_utils import *
-
-
 model = SentenceTransformer.load('/data4/nanni/tesi-magistrale/models/mpnet-base-all-nli-triplet/final')
 
 

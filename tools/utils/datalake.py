@@ -21,7 +21,7 @@ def get_mongodb_collections(dataset:str, size:str) -> tuple[pymongo.MongoClient,
                 collections.append('mongoclient.sloth.latest_snapshot_tables')
             case 'gittables':
                 collections.append('mongoclient.sloth.gittables')
-            case '_':
+            case _:
                 raise ValueError(f'Unknown dataset: {dataset}')
     elif 'datasets' in mongoclient.list_database_names():
         match dataset:
@@ -29,6 +29,8 @@ def get_mongodb_collections(dataset:str, size:str) -> tuple[pymongo.MongoClient,
                 collections.append('mongoclient.datasets.wikitables')
             case 'gittables':
                 collections.append('mongoclient.datasets.gittables')
+            case _:
+                raise ValueError(f'Unknown dataset: {dataset}')
     else:
         raise ValueError('Current MongoDB not configured')
     
@@ -42,8 +44,15 @@ def get_document_from_mongodb_by_numeric_id(id_numeric, *collections:pymongo.col
         if (document := collection.find_one({'_id_numeric': id_numeric})) != None:
             return document
 
+
 def get_one_document_from_mongodb_by_key(*args):
     raise DeprecationWarning()
+
+
+
+def format_wikitables_header(header:list):
+    txt_headers = [[h['text'] for h in header_row] for header_row in header]
+    return [' '.join([h[i] for h in txt_headers]) for i in range(len(txt_headers[0]))]
 
 
 
@@ -83,16 +92,20 @@ class SimpleDataLakeHelper:
                 if doc := get_document_from_mongodb_by_numeric_id(numeric_id, *self._collections):
                     content = doc['content']
                     numeric_columns = doc['numeric_columns']
+                    header = doc['headers'] if 'headers' in doc else None
+                    if self._dataset == 'wikitables':
+                        header = format_wikitables_header(header)  # on MongoDB these headers aren't formatted as the WikiTurlSnap ones
                 else:
                     return None
-            case _:
+            case 'santoslarge':
                 try:
                     content = pl.read_csv(f'{self.datalake_location}/{self._mapping_id[numeric_id]}.csv', has_header=False, infer_schema_length=0, encoding='latin1').rows()
                     numeric_columns = self._numeric_columns[numeric_id]
+                    header = content[0]
                 except KeyError:
                     return None
         
-        return {'_id_numeric': numeric_id, 'content': content, 'numeric_columns': numeric_columns}
+        return {'_id_numeric': numeric_id, 'content': content, 'numeric_columns': numeric_columns, 'header': header}
 
     def get_number_of_tables(self):
         match self.datalake_location:

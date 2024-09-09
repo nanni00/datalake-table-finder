@@ -13,6 +13,7 @@ import pymongo
 import pyspark
 import pyspark.rdd
 import psycopg.rows
+from pyspark.sql import SparkSession
 
 import psycopg
 
@@ -20,9 +21,8 @@ from tools.utils.classes import AlgorithmTester
 from tools.utils.misc import (
     is_valid_table,
     print_info, 
-    create_token_set, 
-    convert_to_giga, 
-    get_spark_session, 
+    table_to_tokens_set, 
+    convert_to_giga
 )
 
 
@@ -182,6 +182,27 @@ class JosieDB:
 
 
 
+def get_spark_session(num_cpu, spark_local_dir:str, spark_jars_packages=['org.mongodb.spark:mongo-spark-connector_2.12:10.3.0']) -> SparkSession:
+    # fine tune of executor/driver.memory?
+    builder = SparkSession.Builder()
+    spark = (
+        builder
+        .appName("Data Preparation for JOSIE")
+        .master(f"local[{num_cpu}]")
+        .config('spark.jars.packages', ','.join(spark_jars_packages))
+        .config('spark.executor.memory', '100g')
+        .config('spark.driver.memory', '20g')
+        .config('spark.local.dir', spark_local_dir)
+        .config('spark.driver.maxResultSize', '12g')
+        .getOrCreate()
+    )
+
+    # adjusting logging level to error, avoiding warnings
+    spark.sparkContext.setLogLevel("WARN")
+    return spark
+
+
+
 class JOSIETester(AlgorithmTester):
     def __init__(self, mode, dataset, size, tables_thresholds, num_cpu, blacklist, datalake_helper, *args) -> None:
         super().__init__(mode, dataset, size, tables_thresholds, num_cpu, blacklist, datalake_helper)
@@ -279,7 +300,7 @@ class JOSIETester(AlgorithmTester):
         def prepare_tuple(t):
             nonlocal mode, blacklist
             # t = (_id_numeric, content, numeric_columns)
-            return [t[0], create_token_set(t[1], mode, t[2], blacklist=blacklist)]    
+            return [t[0], table_to_tokens_set(t[1], mode, t[2], blacklist=blacklist)]    
         
         token_sets = (
             initial_rdd
