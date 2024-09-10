@@ -7,9 +7,9 @@ import pymongo
 from tqdm import tqdm
 
 from tools.sloth.utils import parse_table
-from tools.utils.misc import naive_detect_table_numeric_and_null_columns
+from tools.utils.misc import naive_detect_bad_columns
 from tools.utils.datalake import get_mongodb_collections
-from tools.utils.basicconfig import DATASETS, DATASETS_SIZES
+from tools.utils.basicconfig import DATALAKES, DATALAKE_SIZES
 
 
 NUMERICAL_NER_TAGS = {
@@ -65,7 +65,7 @@ def spacy_detect_table_numeric_columns(table: list[list], nlp, nsamples: int) ->
 
 def worker(t: tuple[str, list[list]]):
     if mode == 'naive':
-        return (t[0], naive_detect_table_numeric_and_null_columns(t[1]))
+        return (t[0], naive_detect_bad_columns(t[1]))
     elif mode == 'spacy':
         return (t[0], spacy_detect_table_numeric_columns(t[1], nlp[os.getpid() % ncpu], nsamples))
     else:
@@ -82,8 +82,8 @@ def init_pool(nlp_array, ncpu, nsamples, mode):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--task', 
-                        required=True, choices=['set', 'unset'], 
+    parser.add_argument('task', 
+                        choices=['set', 'unset'], 
                         help='if "set", add a new field "numeric_columns" to each document, i.e. table,  \
                             an array of lenght #columns where if the ith value of the array is 1 then the \
                             ith column of the table is numeric, 0 otherwise. \
@@ -99,9 +99,9 @@ if __name__ == '__main__':
                         help='defines how many cell(s) must be sampled in spacy mode from each column to detect wheter or not the column is numeric, \
                             default is 3. If set to -1 analyses the whole column.')
     parser.add_argument('--dataset', 
-                        required=True, choices=DATASETS)
+                        required=True, choices=DATALAKES)
     parser.add_argument('--size',
-                        required=False, default='standard', choices=DATASETS_SIZES,
+                        required=False, default='standard', choices=DATALAKE_SIZES,
                         help='works on small collection versions (only for testing)')
 
     args = parser.parse_args()

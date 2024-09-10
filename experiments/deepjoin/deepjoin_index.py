@@ -5,21 +5,31 @@ import faiss
 import numpy as np
 from datasets import Dataset
 
-from sentence_transformers import SentenceTransformer, SentenceTransformerTrainer, SentenceTransformerTrainingArguments, losses
-from sentence_transformers.evaluation import TripletEvaluator
-from sentence_transformers.training_args import BatchSamplers
 
-from tools.utils.parallel_worker import chunks
 from tools.utils.datalake import SimpleDataLakeHelper
-from tools.utils.misc import is_valid_table
+from tools.utils.misc import is_valid_table, whitespace_translator, lowercase_translator, punctuation_translator
+from tools.utils.table_embedder import DeepJoinTableEmbedder
 
-model = SentenceTransformer.load('/data4/nanni/tesi-magistrale/models/mpnet-base-all-nli-triplet/final')
+# model = SentenceTransformer.load('models/mpnet-base-all-nli-triplet/final')
+
+def main():
+    tabemb = DeepJoinTableEmbedder('models/mpnet-base-all-nli-triplet/final')
+
+    dlh = SimpleDataLakeHelper('mongodb', 'wikitables', 'standard')
+
+    table_obj = dlh.get_table_by_numeric_id(0)
+
+    table = table_obj['content']
+    bad_columns = table_obj['numeric_columns']
+
+    print(tabemb.get_dimension())
+
+    print()
+    print(len(table[0]), bad_columns)
+    print()
+    print(tabemb.embed_table(table, bad_columns, [], whitespace_translator, lowercase_translator, punctuation_translator).shape)
 
 
-dlh = SimpleDataLakeHelper('mongodb', 'wikiturlsnap', 'standard')
-
-
-
-model.encode_multi_process()
-
+if __name__ == '__main__':
+    main()
 

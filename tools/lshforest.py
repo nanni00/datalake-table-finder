@@ -1,4 +1,3 @@
-import logging
 import os
 import pickle
 from time import time
@@ -11,7 +10,7 @@ from datasketch import MinHashLSHForest, MinHash
 
 from tools.utils.classes import AlgorithmTester
 from tools.utils.misc import table_to_tokens_set, is_valid_table
-
+from tools.utils.logging import info
 
 
 def _mmh3_hashfunc(d):
@@ -63,7 +62,7 @@ class LSHForestTester(AlgorithmTester):
         self.forest = MinHashLSHForest(self.num_perm, self.l)
 
         total = self.datalake_helper.get_number_of_tables()
-        logging.getLogger('TestLog').info(f"Start processing {total} tables...")
+        info(f"Start processing {total} tables...")
         with mp.Pool(processes=self.num_cpu) as pool:
             for i, result in enumerate(pool.imap(worker_lshforest_data_preparation, 
                                             (
@@ -77,13 +76,13 @@ class LSHForestTester(AlgorithmTester):
                     continue
                 self.forest.add(result[0], result[1])
         print(end='\r')
-        logging.getLogger('TestLog').info("Indexing forest...")
+        info("Indexing forest...")
         self.forest.index()
         
-        logging.getLogger('TestLog').info("Saving forest...")
+        info("Saving forest...")
         self._forest_handler('save')
         
-        logging.getLogger('TestLog').info("Completed LSH-Forest data preparation.")
+        info("Completed LSH-Forest data preparation.")
         return round(time() - start, 5), os.path.getsize(self.forest_file) / (1024 ** 3)
 
 
@@ -93,9 +92,9 @@ class LSHForestTester(AlgorithmTester):
         results = []
 
         if not self.forest:
-            logging.getLogger('TestLog').info('Loading forest...')
+            info('Loading forest...')
             self._forest_handler('load')
-            logging.getLogger('TestLog').info('Forest loaded.')
+            info('Forest loaded.')
         for query_id in tqdm(query_ids):
             try:
                 hashvalues_q = self.forest.get_minhash_hashvalues(query_id)
@@ -118,7 +117,7 @@ class LSHForestTester(AlgorithmTester):
             
             results.append([query_id, round(end_query - start_query, 3), str(topk_res[:k]), str([])])
 
-        logging.getLogger('TestLog').info(f' Saving results to {results_file}...')
+        info(f' Saving results to {results_file}...')
         pl.DataFrame(results, schema=['query_id', 'duration', 'results_id', 'results_overlap'], orient='row').write_csv(results_file)
         return round(time() - start, 5)
 

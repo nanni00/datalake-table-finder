@@ -21,6 +21,7 @@ ALGORITHM_MODE_CONFIG = [
     ('lshforest', 'set'),
     ('lshforest', 'bag'),
     ('embedding', 'ft'),
+    ('embedding', 'deepjoin')
     # ('embedding', 'ftdist'),
     # ('embedding', 'cft'),
     # ('embedding', 'cftdist'),
@@ -48,21 +49,21 @@ class TablesThresholds(IntEnum):
     
 
 
-DATASETS = [
+DATALAKES = [
     'gittables',
     'wikitables',
     'wikiturlsnap',
     'santoslarge'
 ]
 
-MONGODB_DATASETS = [
+MONGODB_DATALAKES = [
     'gittables',
     'wikitables',
     'wikiturlsnap',
 ]
 
 
-DATASETS_SIZES = [
+DATALAKE_SIZES = [
     'small',
     'standard'
 ]

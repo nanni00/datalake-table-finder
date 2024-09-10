@@ -77,12 +77,12 @@ def make_parser(*arguments):
                                     help='number of CPUs that will be used in the experiment')
             case 'size':
                 parser.add_argument('--size', 
-                                    type=str, choices=basicconfig.DATASETS_SIZES,
+                                    type=str, choices=basicconfig.DATALAKE_SIZES,
                                     required=False, default='standard',
                                     help='works on small collection versions (only for testing)')
             case 'dataset':
                 parser.add_argument('--dataset', 
-                                    required=True, choices=basicconfig.DATASETS)
+                                    required=True, choices=basicconfig.DATALAKES)
             case 'blacklist':
                 parser.add_argument('--blacklist', 
                                     required=False, nargs='*',

@@ -14,8 +14,9 @@ import matplotlib.colors as mcolors
 from numerize_denumerize.numerize import numerize
 
 from tools.utils import basicconfig
+from tools.utils.logging import logging_setup, info
 from tools.utils.settings import make_parser, get_all_paths
-from tools.utils.misc import get_local_time, logging_setup
+# from tools.utils.misc import get_local_time
 from tools.utils.parallel_worker import worker_fp_per_query, worker_ndcg, worker_precision
 
 
@@ -25,8 +26,8 @@ def analyses(test_name, k, num_query_samples, num_cpu, dataset, size, p_values,
              save_silver_standard_to:str=None, load_silver_standard_from:str=None, *args, **kwargs):
     assert int(k) > 0
     assert int(num_cpu) > 0
-    assert dataset in basicconfig.DATASETS
-    assert size in basicconfig.DATASETS_SIZES
+    assert dataset in basicconfig.DATALAKES
+    assert size in basicconfig.DATALAKE_SIZES
     
     test_name = test_name.lower()
     q = numerize(num_query_samples, asint=True)
@@ -39,7 +40,7 @@ def analyses(test_name, k, num_query_samples, num_cpu, dataset, size, p_values,
     analyses_query_dir =    f'{analyses_dir}/k{k}_q{q}'
     
 
-    runtime_metrics = []
+    # runtime_metrics = []
 
     if not os.path.exists(analyses_dir):
         os.mkdir(analyses_dir)
@@ -50,7 +51,7 @@ def analyses(test_name, k, num_query_samples, num_cpu, dataset, size, p_values,
     analyses_dir = analyses_query_dir
 
     logging_setup(logfile)
-    logging.getLogger('TestLog').info(f' {test_name.upper()} - {dataset.upper()} - {size.upper()} - ANALYSES - {k} - {q} '.center(150, '-'))
+    info(f' {test_name.upper()} - {dataset.upper()} - {size.upper()} - ANALYSES - {k} - {q} '.center(150, '-'))
 
     all_colors = colors = list(mcolors.TABLEAU_COLORS.keys())
     methods = basicconfig.ALGORITHM_MODE_CONFIG
@@ -69,7 +70,7 @@ def analyses(test_name, k, num_query_samples, num_cpu, dataset, size, p_values,
     results = results.with_columns((pl.col('algorithm_overlap') - pl.col('sloth_overlap')).alias('difference_overlap'))
     # results = results.with_columns((pl.col('algorithm_overlap') / (pl.col('sloth_overlap') + 1)).alias('algorithm_overlap_norm'))
 
-    logging.getLogger('TestLog').info(f'Filtering those groups where any method has returned less than K={k} values...')
+    info(f'Filtering those groups where any method has returned less than K={k} values...')
     start_filtering = time()
     bad_groups = []
     for query_id, q_group in tqdm(results.to_pandas().groupby('query_id'), total=results.select('query_id').unique().shape[0]):
@@ -81,8 +82,8 @@ def analyses(test_name, k, num_query_samples, num_cpu, dataset, size, p_values,
     end_filtering = time()
     print(len(bad_groups), num_query_samples, results.select('query_id').unique().shape[0])
     
-    runtime_metrics.append((get_local_time(), 'filtering_groups', round(end_filtering - start_filtering, 3)))
-    logging.getLogger('TestLog').info(f'Filtered {len(bad_groups)} groups in {round(end_filtering - start_filtering, 3)}s')
+    # runtime_metrics.append((get_local_time(), 'filtering_groups', round(end_filtering - start_filtering, 3)))
+    info(f'Filtered {len(bad_groups)} groups in {round(end_filtering - start_filtering, 3)}s')
 
 
 
@@ -90,7 +91,7 @@ def analyses(test_name, k, num_query_samples, num_cpu, dataset, size, p_values,
     ##################### False positive #####################
     ##########################################################
     
-    logging.getLogger('TestLog').info('Computing False Positives...')
+    info('Computing False Positives...')
     
     # False Positives per single query result
     start_zr = time()
@@ -112,8 +113,8 @@ def analyses(test_name, k, num_query_samples, num_cpu, dataset, size, p_values,
     end_zr = time()
 
     # Saving the results
-    logging.getLogger('TestLog').info(f'Finished. Total time: {round(end_zr - start_zr, 3)}s')
-    runtime_metrics.append((get_local_time(), 'false_positives', round(end_zr-start_zr, 3)))
+    info(f'Finished. Total time: {round(end_zr - start_zr, 3)}s')
+    # runtime_metrics.append((get_local_time(), 'false_positives', round(end_zr-start_zr, 3)))
     fp_per_query_pivot.to_csv(analyses_dir + f'/false_positives_per_group.csv')
     fp_per_algmode.to_csv(analyses_dir + f'/false_positives_per_alg_mode.csv')
     
@@ -157,7 +158,7 @@ def analyses(test_name, k, num_query_samples, num_cpu, dataset, size, p_values,
     positive_overlaps = results.filter(pl.col('sloth_overlap') > 0).with_columns((pl.col('algorithm_overlap') / (pl.col('sloth_overlap'))).alias('algorithm_overlap_norm'))
     data = [(am[0], am[1], group) for am, group in positive_overlaps.group_by('algorithm', 'mode')]
     
-    logging.getLogger('TestLog').info(f'Total results: {results.shape[0]}; results with positive overlaps: {positive_overlaps.shape[0]}')
+    info(f'Total results: {results.shape[0]}; results with positive overlaps: {positive_overlaps.shape[0]}')
     
     ax.hist([d[2]['algorithm_overlap_norm'] for d in data], 
             bins=np.arange(xmin, xmax, step), alpha=alpha, 
@@ -181,11 +182,11 @@ def analyses(test_name, k, num_query_samples, num_cpu, dataset, size, p_values,
     ###################################################################
     
     if load_silver_standard_from:
-        logging.getLogger('TestLog').info(f'Loading silver standard from {load_silver_standard_from}...')
+        info(f'Loading silver standard from {load_silver_standard_from}...')
         with open(load_silver_standard_from, 'rb') as fp:
             silver_standard = pickle.load(fp)
     else:
-        logging.getLogger('TestLog').info('Creating Silver Standards...')
+        info('Creating Silver Standards...')
         
         start_ss = time()
         silver_standard = defaultdict(set)
@@ -207,11 +208,11 @@ def analyses(test_name, k, num_query_samples, num_cpu, dataset, size, p_values,
             silver_standard[query_id[0]] = sorted([x for x in list(s) if x[1] > 0], key=lambda x: x[1], reverse=True)
         end_ss = time()
 
-        logging.getLogger('TestLog').info(f'Finished. Total time: {round(end_ss - start_ss, 3)}s')
-        runtime_metrics.append((get_local_time(), 'create_silver_standard', round(end_ss - start_ss, 3)))
+        info(f'Finished. Total time: {round(end_ss - start_ss, 3)}s')
+        #runtime_metrics.append((get_local_time(), 'create_silver_standard', round(end_ss - start_ss, 3)))
 
     if save_silver_standard_to:
-        logging.getLogger('TestLog').info(f'Saving silver standard to {save_silver_standard_to}...')
+        info(f'Saving silver standard to {save_silver_standard_to}...')
         with open(save_silver_standard_to, 'wb') as wp:
             pickle.dump(silver_standard, wp)
 
@@ -223,14 +224,14 @@ def analyses(test_name, k, num_query_samples, num_cpu, dataset, size, p_values,
 
     # Parallel version
     with mp.Pool(processes=num_cpu) as pool:
-        logging.getLogger('TestLog').info('Computing precision@p...')
+        info('Computing precision@p...')
         start_prec = time()
         prec_rec_results = pool.map(
             worker_precision, 
             ((name, data, p_values, silver_standard[name]) for name, data in query_groups))
         end_prec = time()
-        logging.getLogger('TestLog').info(f'Finished. Total time: {round(end_prec - start_prec, 3)}s')
-    runtime_metrics.append((get_local_time(), 'prec-rec-f1', round(end_prec - start_prec, 3)))
+        info(f'Finished. Total time: {round(end_prec - start_prec, 3)}s')
+    # runtime_metrics.append((get_local_time(), 'prec-rec-f1', round(end_prec - start_prec, 3)))
 
     prec_rec_results = [x for qres in prec_rec_results for x in qres]
     prec_rec_results = pd.DataFrame(prec_rec_results, columns=['query_id', 'silver_std_size', 'algorithm', 'mode', 'p', 'precision', 'RP', 'recall', 'f1'])
@@ -291,13 +292,13 @@ def analyses(test_name, k, num_query_samples, num_cpu, dataset, size, p_values,
     work = ((query_id, data, p_values, silver_standard[query_id]) for query_id, data in query_groups)
 
     with mp.Pool(num_cpu) as pool:
-        logging.getLogger('TestLog').info('Computing nDCG@p...')
+        info('Computing nDCG@p...')
         start_ndcg = time()
         ndcg_results = pool.map(worker_ndcg, work, chunksize=results.select('query_id').unique().shape[0] // num_cpu)
         end_ndcg = time()
-        logging.getLogger('TestLog').info(f'Finished. Total time: {round(end_ndcg - start_ndcg, 3)}s')
+        info(f'Finished. Total time: {round(end_ndcg - start_ndcg, 3)}s')
         ndcg_results = [x for qres in ndcg_results for x in qres]
-    runtime_metrics.append([get_local_time(), 'ndcg', round(end_ndcg - start_ndcg, 3)])
+    # runtime_metrics.append([get_local_time(), 'ndcg', round(end_ndcg - start_ndcg, 3)])
 
     df = pd.DataFrame(ndcg_results, columns=['query_id', 'silver_standard_size', 'algorithm', 'mode', 'p', 'missing_p', 'ndcg_p'])
 
@@ -353,13 +354,12 @@ def analyses(test_name, k, num_query_samples, num_cpu, dataset, size, p_values,
 
 
     # Saving time statistics
-    add_header = not os.path.exists(runtime_stat_file)
-    with open(runtime_stat_file, 'a') as rfw:
-        if add_header:
-            rfw.write("local_time,algorithm,mode,task,k,num_queries,time(s)\n")
-
-        for (t_loctime, t_task, t_time) in runtime_metrics:
-            rfw.write(f"{t_loctime},analysis,,{t_task},{k},{q},{t_time}\n")
+    # add_header = not os.path.exists(runtime_stat_file)
+    # with open(runtime_stat_file, 'a') as rfw:
+    #     if add_header:
+    #         rfw.write("local_time,algorithm,mode,task,k,num_queries,time(s)\n")
+    #     for (t_loctime, t_task, t_time) in runtime_metrics:
+    #         rfw.write(f"{t_loctime},analysis,,{t_task},{k},{q},{t_time}\n")
 
 
 

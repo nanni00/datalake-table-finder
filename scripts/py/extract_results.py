@@ -20,8 +20,8 @@ from tools.utils.misc import (
     apply_sloth,
     get_local_time,
     table_to_tokens_set,
-    logging_setup
 )
+from tools.utils.logging import logging_setup, info
 
 
 
@@ -75,7 +75,7 @@ def worker_result_extractor(data):
         sloth_overlap, sloth_time = (dboverlap, lookuptime) if dboverlap != None else apply_sloth(table_q, table_r, numeric_columns_q, numeric_columns_r, blacklist=blacklist)
         
         # if sloth_overlap == -1 and dboverlap == None:
-        #     logging.getLogger('TestLog').warning(f"Pair {query_id} - {result_id} SLOTH failed")
+        #     warning(f"Pair {query_id} - {result_id} SLOTH failed")
 
         # the intersection size is used for computing Jaccard Similarity or other metrics like containment, 
         # so compute using the set semantic, since it considers the intersection of the table "basic" values
@@ -146,8 +146,8 @@ def extract_results(test_name, k, num_query_samples, num_cpu, pg_dbname,
     assert int(k) > 0
     assert int(num_cpu) > 0
     assert datalake_location == 'mongodb' or os.path.exists(datalake_location)
-    assert not dataset  or dataset in basicconfig.DATASETS
-    assert not size or size in basicconfig.DATASETS_SIZES
+    assert not dataset  or dataset in basicconfig.DATALAKES
+    assert not size or size in basicconfig.DATALAKE_SIZES
     assert not mapping_id_file or os.path.exists(mapping_id_file)
     assert not numeric_columns_file or os.path.exists(numeric_columns_file)
     
@@ -187,10 +187,10 @@ def extract_results(test_name, k, num_query_samples, num_cpu, pg_dbname,
 
 
     logging_setup(logfile)
-    logging.getLogger('TestLog').info(f' {test_name.upper()} - {dataset.upper()} - {size.upper()} - {k} - {num_query_samples} - EXTRACTION '.center(150, '#'))
+    info(f' {test_name.upper()} - {dataset.upper()} - {size.upper()} - {k} - {num_query_samples} - EXTRACTION '.center(150, '#'))
 
     blacklist = set(blacklist)
-    logging.getLogger('TestLog').info(f'Tokens blacklist: {blacklist}')
+    info(f'Tokens blacklist: {blacklist}')
 
     table_name = f'results_d{dataset}_s{size}'
     if len(blacklist) > 1:
@@ -218,7 +218,7 @@ def extract_results(test_name, k, num_query_samples, num_cpu, pg_dbname,
             results = pl.read_csv(f'{results_base_dir}/{result_file}')
             algorithm, mode = [x[1:] for x in result_file[:-4].split('_')]
             
-            logging.getLogger('TestLog').info(f'Extracting results from {result_file} ({algorithm}-{mode})...')
+            info(f'Extracting results from {result_file} ({algorithm}-{mode})...')
             
             sss = time()
             # keeping the same order leads to longer time
@@ -231,9 +231,9 @@ def extract_results(test_name, k, num_query_samples, num_cpu, pg_dbname,
             # smaller chunk-size offer the possibility to better parallelization, because
             # SLOTH often takes time and some processes finish while others still have many computations to do 
             chunksize = max(min(len(work) // num_cpu, 1000) // 4, 1)
-            logging.getLogger('TestLog').info(f'Total work length: {len(work)}, total workers: {num_cpu}, chunk-size: {chunksize}. Starting extraction...')
+            info(f'Total work length: {len(work)}, total workers: {num_cpu}, chunk-size: {chunksize}. Starting extraction...')
             extr_res = pool.map(worker_result_extractor, chunks(work, chunksize))
-            logging.getLogger('TestLog').info(f"Completed extraction in {round(time() - sss)}s")
+            info(f"Completed extraction in {round(time() - sss)}s")
             
             hit = 0
             for h, r in extr_res:
@@ -241,12 +241,12 @@ def extract_results(test_name, k, num_query_samples, num_cpu, pg_dbname,
                 data += r
                 resultsdb.insert_results([[x[0], x[1], x[4]] if x[0] < x[1] else [x[1], x[0], x[4]] for x in r if x[4] != None])
 
-            logging.getLogger('TestLog').info(f'hit = {hit} ({round(100 * hit / len(data), 3)}%)')
+            info(f'hit = {hit} ({round(100 * hit / len(data), 3)}%)')
             hit_rates.append(hit / len(data))
             final_results = pl.concat([final_results, pl.DataFrame(data, schema=final_results.schema, infer_schema_length=10)])
             final_results.write_csv(final_results_file)
 
-    logging.getLogger('TestLog').info(f"Hit rates: {hit_rates}")
+    info(f"Hit rates: {hit_rates}")
 
     # save the statistics about the analysis time
     add_header = not os.path.exists(runtime_stat_file)

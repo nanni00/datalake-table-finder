@@ -4,12 +4,12 @@ import polars as pl
 import pymongo
 import pymongo.collection
 
-from tools.utils.basicconfig import MONGODB_DATASETS, DATASETS_SIZES
+from tools.utils.basicconfig import MONGODB_DATALAKES, DATALAKE_SIZES
 
 
 def get_mongodb_collections(dataset:str, size:str) -> tuple[pymongo.MongoClient, list[pymongo.collection.Collection]]:
-    assert dataset in MONGODB_DATASETS
-    assert size in DATASETS_SIZES
+    assert dataset in MONGODB_DATALAKES
+    assert size in DATALAKE_SIZES
     
     mongoclient = pymongo.MongoClient(directConnection=True)
     collections = []

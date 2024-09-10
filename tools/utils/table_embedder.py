@@ -3,19 +3,21 @@ import fasttext
 import compress_fasttext
 import numpy as np
 
+from sentence_transformers import SentenceTransformer
+
 from tools.sloth.utils import parse_table
-from tools.utils.misc import prepare_token
+from tools.utils.misc import prepare_token, table_rows_to_columns, tokenize_column, column_to_text
 
 
 class TableEmbedder:
     def __init__(self, model_path) -> None:
-        self.mode_path = model_path
+        self.model_path = model_path
 
 
     def get_dimension(self) -> int:
         pass
 
-    def embedding_table(self, table, numeric_columns, *args):
+    def embed_table(self, table, numeric_columns, *args):
         pass
 
 
@@ -28,7 +30,7 @@ class CompressFastTextTableEmbedder(TableEmbedder):
     def get_dimension(self) -> int:
         return self.model.vector_size
 
-    def embedding_table(self, table, numeric_columns, *args):
+    def embed_table(self, table, numeric_columns, *args):
         blacklist = args
         max_token_per_column = 10 ** 4
         
@@ -49,7 +51,7 @@ class FastTextTableEmbedder(TableEmbedder):
         super().__init__(model_path)
         self.model = fasttext.load_model(model_path)
 
-    def embedding_table(self, table, numeric_columns, *args):
+    def embed_table(self, table, numeric_columns, *args):
         """ 
         Return columns embeddings as a np.array of shape (#table_columns, #model_vector_size)
 
@@ -70,6 +72,24 @@ class FastTextTableEmbedder(TableEmbedder):
 
     def get_dimension(self):
         return self.model.get_dimension()
+    
+
+
+class DeepJoinTableEmbedder(TableEmbedder):
+    def __init__(self, model_path) -> None:
+        super().__init__(model_path)
+        self.model = SentenceTransformer(model_path)
+
+    def embed_table(self, table, numeric_columns, *args):
+        blacklist, translators = args[0], args[1:]
+        table = table_rows_to_columns(table, 0, len(table[0]), numeric_columns)
+        table = [column_to_text([token for token in column if token not in blacklist], *translators) for column in table]
+        if len(table) > 0:
+            return self.model.encode(table, batch_size=16, device='cuda', normalize_embeddings=True)
+
+    def get_dimension(self) -> int:
+        return self.model.get_sentence_embedding_dimension()
+
 
 
 class TaBERTTableEmbedder(TableEmbedder):
@@ -88,7 +108,7 @@ class TaBERTTableEmbedder(TableEmbedder):
             data=[[prepare_token(cell) for i, cell in enumerate(row) if numeric_columns[i] == 0] for row in table]
         ).tokenize(self.model.tokenizer)
 
-    def embedding_table(self, table, numeric_columns, context=""):
+    def embed_table(self, table, numeric_columns, context=""):
         _, column_embedding, _ = self.model.encode(
             contexts=[self.model.tokenizer.tokenize(context)],
             tables=[self._prepare_table(table, numeric_columns)])

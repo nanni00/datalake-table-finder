@@ -1,5 +1,4 @@
 from itertools import groupby
-import logging
 import os
 import math
 import multiprocessing as mp
@@ -14,9 +13,11 @@ import pandas as pd
 
 
 from tools.utils.misc import is_valid_table
+from tools.utils.logging import info
 from tools.utils.classes import AlgorithmTester
 from tools.utils.datalake import SimpleDataLakeHelper
-from tools.utils.table_embedder import FastTextTableEmbedder, TaBERTTableEmbedder, CompressFastTextTableEmbedder
+from tools.utils.parallel_worker import chunks
+from tools.utils.table_embedder import FastTextTableEmbedder, TaBERTTableEmbedder, CompressFastTextTableEmbedder, DeepJoinTableEmbedder
 
 
 
@@ -30,7 +31,9 @@ def worker_embedding_data_preparation(data) -> tuple[np.ndarray, np.ndarray]:
             model = FastTextTableEmbedder(model_path)
         case 'cft'|"cftdist":
             model = CompressFastTextTableEmbedder(model_path)
-    
+        case 'deepjoin':
+            model = DeepJoinTableEmbedder(model_path)
+            
     chunk = data[0]
     if os.getpid() % num_cpu == 0:
         print(f'Debug process {os.getpid()} works on {chunk} total batch size {chunk.stop - chunk.start}')
@@ -44,8 +47,8 @@ def worker_embedding_data_preparation(data) -> tuple[np.ndarray, np.ndarray]:
 
     for qid in tqdm(chunk, total=chunk.stop - chunk.start, leave=False, disable=False if os.getpid() % num_cpu == 0 else True):
         table_obj = dlh.get_table_by_numeric_id(qid)
-        _id_numeric, content, numeric_columns = table_obj['_id_numeric'], table_obj['content'], table_obj['numeric_columns']
-        if not is_valid_table(content, numeric_columns):
+        _id_numeric, content, bad_columns = table_obj['_id_numeric'], table_obj['content'], table_obj['numeric_columns']
+        if not is_valid_table(content, bad_columns):
             continue
         if xb_batch.shape[0] > batch_size:
             xb = np.concatenate((xb, xb_batch))
@@ -55,7 +58,7 @@ def worker_embedding_data_preparation(data) -> tuple[np.ndarray, np.ndarray]:
         # if os.getpid() % num_cpu == 0:
         #     print(f"\tdebug process working on table with shape {(len(content), len(content[0]))}...")
         
-        colemb = model.embedding_table(content, numeric_columns, blacklist)
+        colemb = model.embed_table(content, bad_columns, blacklist)
         if colemb.shape[0] == 0:
             continue
 
@@ -73,13 +76,6 @@ def worker_embedding_data_preparation(data) -> tuple[np.ndarray, np.ndarray]:
 
 
 
-
-def chunks(sequence, chunk_size, *args):
-    # Chunks of chunk_size documents at a time.
-    for j in range(0, len(sequence), chunk_size):
-        yield (sequence[j:j + chunk_size], *args)
-
-
 def init_pool(_datalake_location, _dataset, _size, _mapping_id_file, _numeric_columns_file, _blacklist, _num_cpu, _model_path, _mode):
     global datalake_location, dataset, size, mapping_id_file, numeric_columns_file, blacklist, num_cpu, model_path, mode
     
@@ -90,21 +86,19 @@ def init_pool(_datalake_location, _dataset, _size, _mapping_id_file, _numeric_co
 class EmbeddingTester(AlgorithmTester):
     def __init__(self, mode, dataset, size, tables_thresholds, num_cpu, blacklist, datalake_helper, *args) -> None:
         super().__init__(mode, dataset, size, tables_thresholds, num_cpu, blacklist, datalake_helper)
-        self.model_path, self.cidx_file, self.fasttext_model_dim = args
+        self.model_path, self.cidx_file, self.embedding_model_dim, self.embedding_translators = args
         self.cidx = None
         
     def data_preparation(self):
         start = time()
         # index "Flat,IDMap2" no good for this case, since we have to deal with more
-        # than 10M vectors the search time is not acceptable
-        logging.getLogger('TestLog').info(f'Embedding model: {self.model_path}')
-        d = self.fasttext_model_dim
+        # than 1M vectors the search time is not acceptable
+        info(f'Embedding model: {self.model_path}')
+        d = self.embedding_model_dim
         
         xb = np.empty(shape=(0, d))
         xb_ids = np.empty(shape=(0, 1))
 
-        # the FastText original model is a huge model of 7.4GB, loading it for each core 
-        # is expensive, so reduce the number of actual CPUs...
         total_docs = self.datalake_helper.get_number_of_tables()
         chunksize = max(total_docs // self.num_cpu, 1)
 
@@ -114,19 +108,19 @@ class EmbeddingTester(AlgorithmTester):
             self.blacklist, self.num_cpu, self.model_path, self.mode)
 
         with mp.Pool(self.num_cpu, initializer=init_pool, initargs=initargs) as pool:
-            logging.getLogger('TestLog').info(f'Start embedding tables, chunk-size={chunksize}...')
+            info(f'Start embedding tables, chunk-size={chunksize}...')
             results = pool.map(worker_embedding_data_preparation, 
                                chunks(range(total_docs), chunksize))            
-            logging.getLogger('TestLog').info('Tables embedded.')
+            info('Tables embedded.')
 
             N = sum(xb.shape[0] for xb, _ in results)
             K = 8 * int(math.sqrt(N))
             M = 32
             training_size = min(M * K, N)
             HNSW_links_per_vertex = 32
-            logging.getLogger('TestLog').info(f'FAISS index parameters: N={N}, K={K}, M={M}, HNSW={HNSW_links_per_vertex}, training_size=M*K={training_size}')
+            info(f'FAISS index parameters: N={N}, K={K}, M={M}, HNSW={HNSW_links_per_vertex}, training_size=M*K={training_size}')
             
-            logging.getLogger('TestLog').info('Preparing index training set...')
+            info('Preparing index training set...')
             for result in tqdm(results, leave=False):
                 xb_batch, xb_ids_batch = result
                 xb = np.concatenate((xb, xb_batch))
@@ -136,32 +130,32 @@ class EmbeddingTester(AlgorithmTester):
                     
 
         index = faiss.index_factory(d, f"IVF{K}_HNSW{HNSW_links_per_vertex},Flat")
-        logging.getLogger('TestLog').info('Training column index...')
+        info('Training column index...')
         start_training = time()
         index.train(xb)
         self.cidx = faiss.IndexIDMap2(index)
         end_training = time()
-        logging.getLogger('TestLog').info(f'Training column index time: {round(end_training - start_training, 3)}s')
+        info(f'Training column index time: {round(end_training - start_training, 3)}s')
 
-        logging.getLogger('TestLog').info('Adding vectors with IDs...')
+        info('Adding vectors with IDs...')
         for xb, xb_ids in results:
             self.cidx.add_with_ids(xb, xb_ids[:, 0])
 
-        logging.getLogger('TestLog').info(f'Writing column index to {self.cidx_file}...')
+        info(f'Writing column index to {self.cidx_file}...')
         faiss.write_index(self.cidx, self.cidx_file)
         return round(time() - start, 5), os.path.getsize(self.cidx_file) / (1024 ** 3)
 
 
     def query(self, results_file, k, query_ids, **kwargs):
         match self.mode:
-            case 'ft'|'cft':
+            case 'ft'|'cft' | 'deepjoin':
                 return self.query_naive(results_file, k, query_ids, **kwargs)
             case 'ftdist'|'cftdist':
                 return self.query_dist(results_file, k, query_ids, **kwargs)
 
     def query_naive(self, results_file, k, query_ids, **kwargs):
         start = time()
-        logging.getLogger('TestLog').info('Loading model...')
+        info('Loading model...')
         match self.mode:
             case 'ft'|'ftdist':
                 self.model = FastTextTableEmbedder(self.model_path)
@@ -169,10 +163,12 @@ class EmbeddingTester(AlgorithmTester):
                 self.model = CompressFastTextTableEmbedder(self.model_path)
             case 'tabert':
                 self.model = TaBERTTableEmbedder(self.model_path)
+            case 'deepjoin':
+                self.model = DeepJoinTableEmbedder(self.model_path)
             case _:
                 raise ValueError('Unknown mode for table embedder with naive query mode: ' + self.mode)
         if not self.cidx:
-            logging.getLogger('TestLog').info(f'Reading column index from {self.cidx_file}...')
+            info(f'Reading column index from {self.cidx_file}...')
             self.cidx = faiss.read_index(self.cidx_file)
         
         
@@ -180,7 +176,7 @@ class EmbeddingTester(AlgorithmTester):
         xq, xq_ids = np.empty(shape=(0, d), dtype=np.float64), np.empty(shape=(0, 1), dtype=np.int32)
         batch_size = 1000
         results = []
-        logging.getLogger('TestLog').info('Start query time...')
+        info('Start query time...')
         
         # batch query processing, because it's significantly faster
         for i, qid in tqdm(enumerate(query_ids), total=len(query_ids)):
@@ -202,8 +198,9 @@ class EmbeddingTester(AlgorithmTester):
             doc = self.datalake_helper.get_table_by_numeric_id(int(qid))
             if doc == None:
                 print('Error here', qid)
-            try:
-                colemb = self.model.embedding_table(doc['content'], doc['numeric_columns'], self.blacklist)
+            try:                
+                args = (self.blacklist, self.embedding_translators) if self.embedding_translators else self.blacklist
+                colemb = self.model.embed_table(doc['content'], doc['numeric_columns'], *args)
                 ids = np.expand_dims(np.repeat([qid], colemb.shape[0]), axis=0)
                 xq_ids = np.concatenate((xq_ids, ids.T))
                 xq = np.concatenate((xq, colemb), axis=0)
@@ -253,8 +250,8 @@ class EmbeddingTester(AlgorithmTester):
                     ]
                 ]
         
-        logging.getLogger('TestLog').info('Query mode: distance')
-        logging.getLogger('TestLog').info('Loading model...')
+        info('Query mode: distance')
+        info('Loading model...')
         match self.mode:
             case 'ft'|'ftdist':
                 self.model = FastTextTableEmbedder(self.model_path)
@@ -265,14 +262,14 @@ class EmbeddingTester(AlgorithmTester):
             case _:
                 raise ValueError('Unknown mode for table embedder with naive query mode: ' + self.mode)
         if not self.cidx:
-            logging.getLogger('TestLog').info(f'Reading column index from {self.cidx_file}...')
+            info(f'Reading column index from {self.cidx_file}...')
             self.cidx = faiss.read_index(self.cidx_file)
         
         d = self.model.get_dimension()
         xq, xq_ids = np.empty(shape=(0, d), dtype=np.float64), np.empty(shape=(0, 1), dtype=np.int32)
         batch_size = 1000
         results = []
-        logging.getLogger('TestLog').info('Start query time...')
+        info('Start query time...')
        
         start = time()
         # batch query processing, because it's significantly faster
@@ -280,7 +277,7 @@ class EmbeddingTester(AlgorithmTester):
             # when reached the batch threshold, execute the search for the 
             # current batch 
             doc = self.datalake_helper.get_table_by_numeric_id(int(qid))
-            colemb = self.model.embedding_table(doc['content'], doc['numeric_columns'], self.blacklist)
+            colemb = self.model.embed_table(doc['content'], doc['numeric_columns'], self.blacklist)
             if colemb.shape[0] == 0:
                 continue
             try:

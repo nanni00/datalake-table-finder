@@ -1,10 +1,7 @@
 import re
-import sys
 import time
 import json
 import random
-import logging
-import logging.handlers
 from functools import reduce
 import multiprocessing as mp
 from collections import defaultdict
@@ -15,6 +12,7 @@ from datasketch.minhash import MinHash
 
 from tools.sloth.sloth import sloth
 from tools.sloth.utils import parse_table
+from tools.utils.logging import info
 from tools.utils.parallel_worker import chunks
 from tools.utils.datalake import SimpleDataLakeHelper
 from tools.utils.basicconfig import TablesThresholds as tab_thresh
@@ -29,6 +27,7 @@ lowercase_translator =      str.maketrans(ascii_uppercase, ascii_lowercase)
 
 
 def jaccard(X:set, Y:set):
+    # set.union seems to be quite unefficient, more than computing in this way the union
     intersection_size = 0
     union_size = 0
     for x in X:
@@ -90,9 +89,9 @@ def are_joinable_columns(c1: list, c2:list, t:float, metric:str):
 def print_info(**dec_kwargs):
     def decorator(func):
         def wrapper(*args, **kwargs):
-            if 'msg_before' in dec_kwargs: logging.getLogger('TestLog').info(dec_kwargs['msg_before'])
+            if 'msg_before' in dec_kwargs: info(dec_kwargs['msg_before'])
             result = func(*args, **kwargs)
-            if 'msg_after' in dec_kwargs: logging.getLogger('TestLog').info(dec_kwargs['msg_after'])
+            if 'msg_after' in dec_kwargs: info(dec_kwargs['msg_after'])
             return result
         return wrapper
     return decorator
@@ -130,11 +129,11 @@ def is_number_tryexcept(s):
 
 
 def is_bad_column(column:list, tokenize=lambda cell: cell):
-    column = map(tokenize, column)
+    column = list(map(tokenize, column))
     return sum(map(lambda cell: is_number_tryexcept(cell) or pd.isna(cell), column)) >= len(column) // 2 + 1
 
 
-def naive_detect_table_numeric_and_null_columns(table: list[list], tokenize=lambda cell: cell) -> list[int]:
+def naive_detect_bad_columns(table: list[list], tokenize=lambda cell: cell) -> list[int]:
     """ 
     :param table: a list of lists representing a table in row view
     :param any_int: if set to True, a column is detected as an numeric column wheter any of its values is 
@@ -249,20 +248,3 @@ def get_query_ids_from_query_file(query_file):
         return json.load(fr)['_id_numeric']
 
 
-def logging_setup(logfile):
-    logger = logging.getLogger('TestLog')
-    
-    if not logger.handlers:
-        handler_sysout = logging.StreamHandler(sys.stdout)
-        handler_file = logging.FileHandler(logfile)
-        
-        formatter = logging.Formatter("%(asctime)s [%(levelname)s] %(message)s", datefmt="%Y-%m-%d %H:%M:%S")
-        
-        handler_sysout.setFormatter(formatter)
-        handler_file.setFormatter(formatter)
-
-        logger.addHandler(handler_sysout)
-        logger.addHandler(handler_file)
-
-        logger.setLevel(logging.INFO)
-        logger.propagate = False

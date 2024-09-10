@@ -5,7 +5,7 @@ from tqdm import tqdm
 
 import polars as pl
 
-from tools.utils.misc import naive_detect_table_numeric_and_null_columns
+from tools.utils.misc import naive_detect_bad_columns
 
 # TODO customize paths
 data_dir = '/data4/nanni/data/santos_large/datalake'
@@ -27,7 +27,7 @@ for table_file in tqdm(os.listdir(data_dir), total=ntables):
         table = pl.read_csv(f'{data_dir}/{table_file}', infer_schema_length=0, encoding='latin8', has_header=False).rows()
         nrows += len(table)
         ncols += len(table[0])
-        numeric_columns[counter] = naive_detect_table_numeric_and_null_columns(table)
+        numeric_columns[counter] = naive_detect_bad_columns(table)
         counter += 1
     except:
         ignored_tables += 1

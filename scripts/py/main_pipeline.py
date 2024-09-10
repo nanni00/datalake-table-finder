@@ -8,18 +8,18 @@ parameters are not introduced in naming (e.g. no embedding-ft300 vs embedding-ft
 test folder
 """
 import os
-import logging
 from pprint import pprint
 
 import pandas as pd
 from numerize_denumerize.numerize import numerize
 
+from tools.utils.logging import info, logging_setup
 from tools.utils.settings import DefaultPath as defpath, get_all_paths, make_parser
 from tools.utils.basicconfig import TABLES_THRESHOLDS
 from tools.utils.misc import (
     get_local_time,
     get_query_ids_from_query_file, 
-    logging_setup
+    whitespace_translator, punctuation_translator, lowercase_translator
 )
 from tools.utils.datalake import SimpleDataLakeHelper
 from tools.utils import basicconfig
@@ -43,8 +43,9 @@ def main_pipeline(test_name, algorithm, mode, tasks:list[str],
                   num_perm:int=256, l:int=16, forest_file=None,
 
                   # fastText-FAISS specific parameters
-                  fasttext_model_size:int=300,
-                  ft_model_path:str=None,
+                  embedding_model_path:str=None,
+                  embedding_model_size:int=300,
+                  embedding_translators=[whitespace_translator, punctuation_translator, lowercase_translator],
 
                   blacklist:list[str]=[]):
     
@@ -55,15 +56,15 @@ def main_pipeline(test_name, algorithm, mode, tasks:list[str],
     assert int(k) > 0
     assert int(num_cpu) > 0
     assert datalake_location == 'mongodb' or os.path.exists(datalake_location)
-    assert not dataset or dataset in basicconfig.DATASETS
-    assert not size or size in basicconfig.DATASETS_SIZES
+    assert not dataset or dataset in basicconfig.DATALAKES
+    assert not size or size in basicconfig.DATALAKE_SIZES
     assert not mapping_id_file or os.path.exists(mapping_id_file)
     assert not numeric_columns_file or os.path.exists(numeric_columns_file)
     assert not spark_local_dir or os.path.exists(spark_local_dir)
     assert int(num_perm) > 0
     assert int(l) > 0
-    assert int(fasttext_model_size) > 0
-    assert not ft_model_path or os.path.exists(ft_model_path)
+    assert int(embedding_model_size) > 0
+    assert not embedding_model_path or os.path.exists(embedding_model_path)
 
     
     test_name = test_name.lower()
@@ -86,13 +87,13 @@ def main_pipeline(test_name, algorithm, mode, tasks:list[str],
 
     logging_setup(logfile=logfile)
 
-    logging.getLogger('TestLog').info(f" MAIN PIPELINE - {test_name.upper()} - {algorithm.upper()} - {mode.upper()} - {dataset.upper()} - {size.upper()} ".center(150, '#'))
+    info(f" MAIN PIPELINE - {test_name.upper()} - {algorithm.upper()} - {mode.upper()} - {dataset.upper()} - {size.upper()} ".center(150, '#'))
 
     # create folders
     if DATA_PREPARATION or QUERY:
         for directory in [statistics_dir, results_base_dir, results_extr_dir, forest_dir, embedding_dir]:
             if not os.path.exists(directory): 
-                logging.getLogger('TestLog').info(f'Creating directory {directory}...')
+                info(f'Creating directory {directory}...')
                 os.makedirs(directory)
     
 
@@ -105,7 +106,7 @@ def main_pipeline(test_name, algorithm, mode, tasks:list[str],
 
     # tokens that will be filtered
     blacklist = set(blacklist)
-    logging.getLogger('TestLog').info(f"Blacklist: {blacklist}")
+    info(f"Blacklist: {blacklist}")
     
     # a list containing information about timing of each step
     runtime_metrics = []
@@ -124,17 +125,17 @@ def main_pipeline(test_name, algorithm, mode, tasks:list[str],
         case 'lshforest':
             tester = lshforest.LSHForestTester(*default_args, forest_file, num_perm, l)
         case 'embedding':
-            model_path = f'{defpath.model_path.fasttext}/cc.en.300.bin' if not ft_model_path else ft_model_path
-            tester = embedding.EmbeddingTester(*default_args, model_path, cidx_file, fasttext_model_size)
+            model_path = f'{defpath.model_path.fasttext}/cc.en.300.bin' if not embedding_model_path else embedding_model_path
+            tester = embedding.EmbeddingTester(*default_args, model_path, cidx_file, embedding_model_size, embedding_translators)
 
     
     if CLEAN:
-        logging.getLogger('TestLog').info(f' CLEANING '.center(150, '-'))
+        info(f' CLEANING '.center(150, '-'))
         tester.clean()
 
 
     if DATA_PREPARATION:
-        logging.getLogger('TestLog').info(f' DATA PREPARATION  '.center(150, '-'))    
+        info(f' DATA PREPARATION  '.center(150, '-'))    
         exec_time, storage_size = tester.data_preparation()
         runtime_metrics.append((('data_preparation', None), exec_time, get_local_time()))
         append = os.path.exists(storage_stat_file)
@@ -143,7 +144,7 @@ def main_pipeline(test_name, algorithm, mode, tasks:list[str],
             
 
     if QUERY:
-        logging.getLogger('TestLog').info(f' QUERY - {k} - {str_num_query_samples} '.center(150, '-'))
+        info(f' QUERY - {k} - {str_num_query_samples} '.center(150, '-'))
         query_ids = get_query_ids_from_query_file(query_file)
         exec_time = tester.query(topk_results_file, k, query_ids, results_directory=results_base_dir, token_table_on_memory=token_table_on_mem)
         runtime_metrics.append((('query', numerize(len(query_ids), asint=True)), exec_time, get_local_time()))
@@ -158,7 +159,7 @@ def main_pipeline(test_name, algorithm, mode, tasks:list[str],
                 rfw.write(f"{t_loctime},{algorithm},{mode},{t_name},{k if t_name == 'query' else ''},{num_queries if t_name == 'query' else ''},{t_time}\n")
 
     datalake_helper.close()
-    logging.getLogger('TestLog').info('All tasks have been completed.')
+    info('All tasks have been completed.')
 
 
 
