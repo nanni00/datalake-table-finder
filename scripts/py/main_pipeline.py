@@ -8,14 +8,12 @@ parameters are not introduced in naming (e.g. no embedding-ft300 vs embedding-ft
 test folder
 """
 import os
-from pprint import pprint
 
 import pandas as pd
 from numerize_denumerize.numerize import numerize
 
 from tools.utils.logging import info, logging_setup
 from tools.utils.settings import DefaultPath as defpath, get_all_paths, make_parser
-from tools.utils.basicconfig import TABLES_THRESHOLDS
 from tools.utils.misc import (
     get_local_time,
     get_query_ids_from_query_file, 
@@ -43,7 +41,7 @@ def main_pipeline(test_name, algorithm, mode, tasks:list[str],
                   num_perm:int=256, l:int=16, forest_file=None,
 
                   # fastText-FAISS specific parameters
-                  embedding_model_path:str=None,
+                  embedding_model_path:str=f'{defpath.model_path.fasttext}/cc.en.300.bin',
                   embedding_model_size:int=300,
                   embedding_translators=[whitespace_translator, punctuation_translator, lowercase_translator],
 
@@ -118,15 +116,14 @@ def main_pipeline(test_name, algorithm, mode, tasks:list[str],
 
     # selecting the right tester accordingly to the specified algorithm and mode
     tester = None
-    default_args = (mode, dataset, size, TABLES_THRESHOLDS, num_cpu, blacklist, datalake_helper)
+    default_args = (mode, dataset, size, num_cpu, blacklist, datalake_helper)
     match algorithm:
         case 'josie':
             tester = josie.JOSIETester(*default_args, pg_dbname, table_prefix, db_stat_file, pg_user, pg_password, spark_local_dir)
         case 'lshforest':
             tester = lshforest.LSHForestTester(*default_args, forest_file, num_perm, l)
         case 'embedding':
-            model_path = f'{defpath.model_path.fasttext}/cc.en.300.bin' if not embedding_model_path else embedding_model_path
-            tester = embedding.EmbeddingTester(*default_args, model_path, cidx_file, embedding_model_size, embedding_translators)
+            tester = embedding.EmbeddingTester(*default_args, embedding_model_path, cidx_file, embedding_model_size, embedding_translators)
 
     
     if CLEAN:

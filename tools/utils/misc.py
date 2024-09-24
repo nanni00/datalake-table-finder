@@ -4,7 +4,7 @@ import json
 import random
 from functools import reduce
 import multiprocessing as mp
-from collections import defaultdict
+from collections import defaultdict, Counter
 from string import whitespace, digits, punctuation, ascii_uppercase, ascii_lowercase
 
 import pandas as pd
@@ -13,7 +13,7 @@ from datasketch.minhash import MinHash
 from tools.sloth.sloth import sloth
 from tools.sloth.utils import parse_table
 from tools.utils.logging import info
-from tools.utils.parallel_worker import chunks
+from tools.utils.parallel import chunks
 from tools.utils.datalake import SimpleDataLakeHelper
 from tools.utils.basicconfig import TablesThresholds as tab_thresh
 
@@ -62,15 +62,29 @@ def token_to_str(token, *translators):
     return reduce(lambda to, tr: str(to).translate(tr), translators, str(token)).strip()
 
 
-def tokenize_column(column, *translators):
+def clean_str(s, *translators):
+    return reduce(lambda si, tr: str(si).translate(tr), translators, str(s)).strip()
+
+
+def tokenize_column(column, *translators, blacklist=[]):
     """Extract distinct tokens from the column, apply on them the translators and remove empty strings """
-    column = [token_to_str(token, *translators) for token in set(column)]
+    column = [token_to_str(token, *translators) for token in set(column) if token not in blacklist]
     return [token for token in column if set(token)]
 
 
-def column_to_text(column, *translators):
-    return ' '.join(tokenize_column(column, *translators))
 
+def column_to_text(column, *translators, blacklist=[], max_seq_len=512):
+    def most_frequent_tokens(column):
+        column = [token for token in column if token not in blacklist]
+        if len(column) < max_seq_len: 
+            return column
+        return [x[0] for x in sorted(list(Counter(column).items()), key=lambda x: x[1], reverse=True)][:max_seq_len]
+    # return ' '.join(tokenize_column(column, *translators))
+    return clean_str(' '.join([str(token) for token in most_frequent_tokens(column)]), *translators)
+
+
+def table_columns_to_rows(columns):
+    return [row for row in zip(*columns)]
 
 def table_rows_to_columns(table, num_headers, num_cols, bad_columns:list=[]):
     """ Restructure the table as the list of its columns, ignoring the headers """
@@ -83,6 +97,7 @@ def table_rows_to_rows(table, num_headers, num_cols, bad_columns:list=[]):
 
 
 def are_joinable_columns(c1: list, c2:list, t:float, metric:str):
+    """ Return true if the applied metric between columns c1 and c2 crosses the threshold t"""
     return int(metrics[metric](set(c1), set(c2)) >= t)
 
 
@@ -130,7 +145,7 @@ def is_number_tryexcept(s):
 
 def is_bad_column(column:list, tokenize=lambda cell: cell):
     column = list(map(tokenize, column))
-    return sum(map(lambda cell: is_number_tryexcept(cell) or pd.isna(cell), column)) >= len(column) // 2 + 1
+    return sum(map(lambda cell: is_number_tryexcept(cell) or pd.isna(cell) or not cell, column)) >= len(column) // 2 + 1
 
 
 def naive_detect_bad_columns(table: list[list], tokenize=lambda cell: cell) -> list[int]:
@@ -153,7 +168,7 @@ def naive_detect_bad_columns(table: list[list], tokenize=lambda cell: cell) -> l
 
 
 
-def table_to_tokens_set(table, mode, numeric_columns, encode=None, blacklist:set=set()):
+def table_to_tokens(table, mode, numeric_columns, encode=None, blacklist:set=set()):
     """ Create the token set for the given table 
     :param table: a list of list (row-view) of the table content 
     :param mode: how to create the token set, with "set" or "bag" semantic
@@ -180,7 +195,7 @@ def table_to_tokens_set(table, mode, numeric_columns, encode=None, blacklist:set
 
 
 
-def apply_sloth(table1, table2, numeric_columns1, numeric_columns2, verbose=False, blacklist=[]) -> tuple[int, float]:
+def largest_overlap_sloth(table1, table2, numeric_columns1, numeric_columns2, verbose=False, blacklist=[], **sloth_args) -> tuple[int, float]:
     num_null = 0
 
     def format_value_for_excluding_nan(t):
@@ -197,12 +212,37 @@ def apply_sloth(table1, table2, numeric_columns1, numeric_columns2, verbose=Fals
     metrics = []
     start_sloth = time.time()
     try:
-        _, metrics = sloth(table1, table2, metrics=metrics, verbose=verbose)
-        tot_sloth_time = round(time.time() - start_sloth, 3)
+        results, metrics = sloth(table1, table2, metrics=metrics, verbose=verbose, **sloth_args)
+        if results == []:
+            return -2, round(time.time() - start_sloth, 3)
         largest_ov_sloth = metrics[-2]
-        return largest_ov_sloth, tot_sloth_time
+        return largest_ov_sloth, round(time.time() - start_sloth, 3)
     except TimeoutError:
         return -1, round(time.time() - start_sloth, 3)
+    except IndexError:        
+        return -2, round(time.time() - start_sloth, 3)
+
+
+
+def apply_sloth(table1, table2, numeric_columns1, numeric_columns2, blacklist=[],  **sloth_args) -> tuple[int, float]:
+    num_null = 0
+
+    def format_value_for_excluding_nan(t):
+        nonlocal num_null
+        if not t or pd.isna(t) or t in blacklist:
+            num_null += 1
+            return f'{t}@{num_null}'
+        t = prepare_token(t)
+        return t
+    
+    table1 = [[format_value_for_excluding_nan(row[i]) for row in table1] for i in range(len(table1[0])) if numeric_columns1[i] == 0]
+    table2 = [[format_value_for_excluding_nan(row[i]) for row in table2] for i in range(len(table2[0])) if numeric_columns2[i] == 0]
+
+    metrics = []
+    try:
+        return sloth(table1, table2, metrics=metrics, **sloth_args)        
+    except TimeoutError:
+        return None
 
 
 

@@ -14,12 +14,11 @@ from tools.utils.datalake import SimpleDataLakeHelper
 
 
 class AlgorithmTester(ABC):
-    def __init__(self, mode, dataset, size, tables_thresholds, num_cpu, blacklist, datalake_helper:SimpleDataLakeHelper) -> None:
+    def __init__(self, mode, dataset, size, num_cpu, blacklist, datalake_helper:SimpleDataLakeHelper) -> None:
         self.mode = mode
         self.dataset = dataset
         self.size = size
         self.num_cpu = num_cpu
-        self.tables_thresholds = tables_thresholds
         self.blacklist = blacklist
         self.datalake_helper = datalake_helper
 
@@ -82,7 +81,7 @@ class ResultDatabase:
                 .executemany(f"INSERT INTO {self.table_name} VALUES(%s, %s, %s) ON CONFLICT (r_id, s_id) DO NOTHING RETURNING (r_id);", values)
         self._dbconn.commit()
 
-    def lookup_result_table(self, r_id, s_id) -> int|None:
+    def lookup(self, r_id, s_id) -> int|None:
         """ Where the r_id < s_id """
 
         result = self._dbconn.execute(

@@ -1,4 +1,4 @@
-from enum import Enum, IntEnum
+from enum import IntEnum
 
 
 ALGORITHMS = [
@@ -21,9 +21,9 @@ ALGORITHM_MODE_CONFIG = [
     ('lshforest', 'set'),
     ('lshforest', 'bag'),
     ('embedding', 'ft'),
-    ('embedding', 'deepjoin')
+    ('embedding', 'deepjoin'),
+    ('embedding', 'cft')
     # ('embedding', 'ftdist'),
-    # ('embedding', 'cft'),
     # ('embedding', 'cftdist'),
 ]
 

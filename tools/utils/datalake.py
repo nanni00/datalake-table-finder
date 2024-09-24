@@ -64,7 +64,7 @@ class SimpleDataLakeHelper:
     def __init__(self, datalake_location:str, *args):
         self.datalake_location = datalake_location
         self._dataset = None
-        self._size = None
+        self._size = 'standard'
         self._mapping_id_path = None
         self._numeric_columns_path = None
         
@@ -86,26 +86,33 @@ class SimpleDataLakeHelper:
         """Return a dictionary with fields:
             - _id_numeric
             - content
-            - numeric columns"""
+            - numeric columns
+            - headers """
         match self.datalake_location:
             case 'mongodb':
                 if doc := get_document_from_mongodb_by_numeric_id(numeric_id, *self._collections):
                     content = doc['content']
                     numeric_columns = doc['numeric_columns']
-                    header = doc['headers'] if 'headers' in doc else None
+                    headers = doc['headers'] if 'headers' in doc else None
                     if self._dataset == 'wikitables':
-                        header = format_wikitables_header(header)  # on MongoDB these headers aren't formatted as the WikiTurlSnap ones
+                        headers = format_wikitables_header(headers)  # on MongoDB WikiTables these headers aren't formatted as the WikiTurlSnap ones
                 else:
                     return None
-            case 'santoslarge':
+            case _:
                 try:
+                    # print('Ci prova...')
                     content = pl.read_csv(f'{self.datalake_location}/{self._mapping_id[numeric_id]}.csv', has_header=False, infer_schema_length=0, encoding='latin1').rows()
+                    # print('...e ci riesce!')
                     numeric_columns = self._numeric_columns[numeric_id]
-                    header = content[0]
+                    headers = content[0]
                 except KeyError:
+                    print('Nada')
                     return None
-        
-        return {'_id_numeric': numeric_id, 'content': content, 'numeric_columns': numeric_columns, 'header': header}
+        try:
+            return {'_id_numeric': numeric_id, 'content': content, 'numeric_columns': numeric_columns, 'headers': headers}
+        except UnboundLocalError:
+            print(numeric_id)
+            raise UnboundLocalError()
 
     def get_number_of_tables(self):
         match self.datalake_location:
@@ -120,7 +127,10 @@ class SimpleDataLakeHelper:
                 query = {} if not ignore_firsts else {'_id_numeric': {'$gt': ignore_firsts}}
                 for collection in self._collections:
                     for doc in collection.find(query):
-                        yield {'_id_numeric': doc['_id_numeric'], 'content': doc['content'], 'numeric_columns': doc['numeric_columns']}
+                        headers = doc['headers'] if 'headers' in doc else doc['content'][0] if len(doc['content']) > 0 else None
+                        if self._dataset == 'wikitables':
+                            headers = format_wikitables_header(headers)  # on MongoDB WikiTables these headers aren't formatted as the WikiTurlSnap ones
+                        yield {'_id_numeric': doc['_id_numeric'], 'content': doc['content'], 'numeric_columns': doc['numeric_columns'], 'headers': headers}
             case _:
                 for _id_numeric in self._mapping_id.keys():
                     if ignore_firsts and _id_numeric < ignore_firsts:

@@ -27,7 +27,7 @@ def main():
     print()
     print(len(table[0]), bad_columns)
     print()
-    print(tabemb.embed_table(table, bad_columns, [], whitespace_translator, lowercase_translator, punctuation_translator).shape)
+    print(tabemb.embed_columns(table, bad_columns, [], whitespace_translator, lowercase_translator, punctuation_translator).shape)
 
 
 if __name__ == '__main__':

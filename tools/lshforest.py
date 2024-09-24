@@ -9,7 +9,7 @@ from tqdm import tqdm
 from datasketch import MinHashLSHForest, MinHash
 
 from tools.utils.classes import AlgorithmTester
-from tools.utils.misc import table_to_tokens_set, is_valid_table
+from tools.utils.misc import table_to_tokens, is_valid_table
 from tools.utils.logging import info
 
 
@@ -19,7 +19,7 @@ def _mmh3_hashfunc(d):
 
 def create_table_minhash(table, mode, numeric_columns, num_perm, blacklist):
     m = MinHash(num_perm=num_perm, hashfunc=_mmh3_hashfunc)
-    token_set = table_to_tokens_set(table, mode, numeric_columns, encode='utf-8', blacklist=blacklist)
+    token_set = table_to_tokens(table, mode, numeric_columns, encode='utf-8', blacklist=blacklist)
     m.update_batch(token_set)
     return m
 
@@ -30,9 +30,8 @@ def worker_lshforest_data_preparation(input):
         return None, None
     _id_numeric, content, numeric_columns = table['_id_numeric'], table['content'], table['numeric_columns']
 
-    # if is_valid_table(content, numeric_columns, tables_thresholds):
     if is_valid_table(content, numeric_columns):
-        token_set = table_to_tokens_set(content, mode, numeric_columns, 'utf-8', blacklist)
+        token_set = table_to_tokens(content, mode, numeric_columns, 'utf-8', blacklist)
         m = MinHash(num_perm, hashfunc=_mmh3_hashfunc)
         m.update_batch(token_set)
         return _id_numeric, m
@@ -40,8 +39,8 @@ def worker_lshforest_data_preparation(input):
 
 
 class LSHForestTester(AlgorithmTester):
-    def __init__(self, mode, dataset, size, tables_thresholds, num_cpu, blacklist, datalake_helper, *args) -> None:
-        super().__init__(mode, dataset, size, tables_thresholds, num_cpu, blacklist, datalake_helper)
+    def __init__(self, mode, dataset, size, num_cpu, blacklist, datalake_helper, *args) -> None:
+        super().__init__(mode, dataset, size, num_cpu, blacklist, datalake_helper)
         self.forest_file, self.num_perm, self.l = args
 
         self.forest = None
@@ -103,7 +102,7 @@ class LSHForestTester(AlgorithmTester):
                 table_q = self.datalake_helper.get_table_by_numeric_id(query_id)
                 numeric_columns_q, content_q = table_q['numeric_columns'], table_q['content']
                 
-                token_set_q = table_to_tokens_set(content_q, self.mode, numeric_columns_q, blacklist=self.blacklist)
+                token_set_q = table_to_tokens(content_q, self.mode, numeric_columns_q, blacklist=self.blacklist)
 
                 minhash_q = MinHash(num_perm=self.num_perm, hashfunc=_mmh3_hashfunc)
                 minhash_q.update_batch(token_set_q)

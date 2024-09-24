@@ -21,7 +21,7 @@ from tools.utils.classes import AlgorithmTester
 from tools.utils.misc import (
     is_valid_table,
     print_info, 
-    table_to_tokens_set, 
+    table_to_tokens, 
     convert_to_giga
 )
 
@@ -204,8 +204,8 @@ def get_spark_session(num_cpu, spark_local_dir:str, spark_jars_packages=['org.mo
 
 
 class JOSIETester(AlgorithmTester):
-    def __init__(self, mode, dataset, size, tables_thresholds, num_cpu, blacklist, datalake_helper, *args) -> None:
-        super().__init__(mode, dataset, size, tables_thresholds, num_cpu, blacklist, datalake_helper)
+    def __init__(self, mode, dataset, size, num_cpu, blacklist, datalake_helper, *args) -> None:
+        super().__init__(mode, dataset, size, num_cpu, blacklist, datalake_helper)
         (
             self.dbname, 
             self.tables_prefix, 
@@ -300,7 +300,7 @@ class JOSIETester(AlgorithmTester):
         def prepare_tuple(t):
             nonlocal mode, blacklist
             # t = (_id_numeric, content, numeric_columns)
-            return [t[0], table_to_tokens_set(t[1], mode, t[2], blacklist=blacklist)]    
+            return [t[0], table_to_tokens(t[1], mode, t[2], blacklist=blacklist)]    
         
         token_sets = (
             initial_rdd

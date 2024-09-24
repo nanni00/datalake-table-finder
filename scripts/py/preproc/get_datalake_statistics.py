@@ -3,39 +3,38 @@ import numpy as np
 import pandas as pd
 from tqdm import tqdm
 
-from tools.utils.misc import is_valid_table
+from tools.utils.misc import is_valid_table, table_rows_to_rows
 from tools.utils.datalake import SimpleDataLakeHelper
 from tools.utils.settings import DefaultPath as defpath
-from tools.utils.parallel_worker import chunks
+from tools.utils.parallel import chunks
 import multiprocessing as mp
 
-# dataset = 'santoslarge'
-# size = 'standard'
-# datalake_location = "/data4/nanni/data/santos_large/datalake"
 dataset = "wikiturlsnap"
-size = "standard"
-datalake_location = "mongodb"
+size = 'standard'
+num_cpu = os.cpu_count()
 
-mapping_id_file = "/data4/nanni/data/santos_large/mapping_id.pickle"
-numeric_columns_file = "/data4/nanni/data/santos_large/numeric_columns.pickle"
+match dataset:
+    case 'wikiturlsnap' | 'gittables':
+        datalake_location = "mongodb"
+        mapping_id_file = numeric_columns_file = None
+    case 'santoslarge':
+        datalake_location = "/data4/nanni/data/santos_large/datalake"
+        mapping_id_file = "/data4/nanni/data/santos_large/mapping_id.pickle"
+        numeric_columns_file = "/data4/nanni/data/santos_large/numeric_columns.pickle"
+    case _:
+        raise ValueError()
 
-statistics_path = f'{defpath.data_path.base}/dataset_stat/stat_{size}_2.csv'
 
+dlh = SimpleDataLakeHelper(datalake_location, dataset, size, mapping_id_file, numeric_columns_file)
+ntables = dlh.get_number_of_tables()
+
+statistics_path = f'{defpath.data_path.base}/dataset_stat/stat_{size}.csv'
 if not os.path.exists(os.path.dirname(statistics_path)):
     os.mkdir(os.path.dirname(statistics_path))
 
-dlh = SimpleDataLakeHelper(datalake_location, dataset, size, mapping_id_file, numeric_columns_file)
 
-num_cpu = 72
-ntables = dlh.get_number_of_tables()
-
-
-# for table_obj in tqdm(dlh.scan_tables(), total=ntables):
 def task(data):
     global datalake_location, dataset, size, mapping_id_file, numeric_columns_file, num_cpu
-    # if os.getpid() % num_cpu == 0:
-    #     print(data)
-
     accepted_tables = 0
     nrows = []
     nrows_final = []
@@ -52,17 +51,17 @@ def task(data):
     for table_id in tqdm(table_ids, disable=False if os.getpid() % num_cpu == 0 else True):
         table_obj = dlh.get_table_by_numeric_id(table_id)
         table = table_obj['content']
-        numeric_columns = table_obj['numeric_columns']
+        bad_columns = table_obj['numeric_columns']
 
         nrows.append(len(table))        
         ncols.append(len(table[0]) if len(table) > 0 else 0)
         area.append(len(table[0]) * len(table) if len(table) > 0 else 0)
         
-        if not is_valid_table(table, numeric_columns):
+        if not is_valid_table(table, bad_columns):
             continue
 
         # filter the numerical columns
-        table = [[row[i] for i, x in enumerate(numeric_columns) if x == 0] for row in table]
+        table = table_rows_to_rows(table, 0, len(table[0]), bad_columns) # [[row[i] for i, x in enumerate(numeric_columns) if x == 0] for row in table]
         
         t = pd.DataFrame(table)
         r, c = t.shape
@@ -75,7 +74,7 @@ def task(data):
         # because there are many values like '' in data, which are actually NaN but once encoded into MongoDB
         # turn into empty string(?) 
         nan.append(int(t.replace('', pd.NA).isna().sum().sum()) / area_final[-1])
-        n_numeric_cols.append(sum(numeric_columns) / len(numeric_columns))
+        n_numeric_cols.append(sum(bad_columns) / len(bad_columns))
     return accepted_tables, nrows, nrows_final, ncols, ncols_final, area, area_final, n_numeric_cols, nan
 
 

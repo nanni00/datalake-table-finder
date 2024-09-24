@@ -16,24 +16,18 @@ from tools.utils.misc import is_valid_table
 from tools.utils.logging import info
 from tools.utils.classes import AlgorithmTester
 from tools.utils.datalake import SimpleDataLakeHelper
-from tools.utils.parallel_worker import chunks
-from tools.utils.table_embedder import FastTextTableEmbedder, TaBERTTableEmbedder, CompressFastTextTableEmbedder, DeepJoinTableEmbedder
+from tools.utils.parallel import chunks
+from tools.utils.table_embedder import table_embedder_factory
 
 
 
 
 def worker_embedding_data_preparation(data) -> tuple[np.ndarray, np.ndarray]:
-    global datalake_location, dataset, size, mapping_id_file, numeric_columns_file, blacklist, num_cpu, model_path, mode
+    global datalake_location, dataset, size, mapping_id_file, numeric_columns_file, blacklist, translators, num_cpu, model_path, mode
 
     dlh = SimpleDataLakeHelper(datalake_location, dataset, size, mapping_id_file, numeric_columns_file)
-    match mode:
-        case 'ft'|'ftdist':
-            model = FastTextTableEmbedder(model_path)
-        case 'cft'|"cftdist":
-            model = CompressFastTextTableEmbedder(model_path)
-        case 'deepjoin':
-            model = DeepJoinTableEmbedder(model_path)
-            
+    model = table_embedder_factory(mode, model_path)
+
     chunk = data[0]
     if os.getpid() % num_cpu == 0:
         print(f'Debug process {os.getpid()} works on {chunk} total batch size {chunk.stop - chunk.start}')
@@ -55,10 +49,7 @@ def worker_embedding_data_preparation(data) -> tuple[np.ndarray, np.ndarray]:
             xb_ids = np.concatenate((xb_ids, xb_ids_batch))
             xb_batch, xb_ids_batch = np.empty(shape=(0, d)), np.empty(shape=(0, 1))
         
-        # if os.getpid() % num_cpu == 0:
-        #     print(f"\tdebug process working on table with shape {(len(content), len(content[0]))}...")
-        
-        colemb = model.embed_table(content, bad_columns, blacklist)
+        colemb = model.embed_columns(content, bad_columns, blacklist, *translators)
         if colemb.shape[0] == 0:
             continue
 
@@ -76,16 +67,16 @@ def worker_embedding_data_preparation(data) -> tuple[np.ndarray, np.ndarray]:
 
 
 
-def init_pool(_datalake_location, _dataset, _size, _mapping_id_file, _numeric_columns_file, _blacklist, _num_cpu, _model_path, _mode):
-    global datalake_location, dataset, size, mapping_id_file, numeric_columns_file, blacklist, num_cpu, model_path, mode
+def init_pool(_datalake_location, _dataset, _size, _mapping_id_file, _numeric_columns_file, _blacklist, _translators, _num_cpu, _model_path, _mode):
+    global datalake_location, dataset, size, mapping_id_file, numeric_columns_file, blacklist, translators, num_cpu, model_path, mode
     
-    datalake_location, dataset, size, mapping_id_file, numeric_columns_file, blacklist, num_cpu, model_path, mode = \
-        _datalake_location, _dataset, _size, _mapping_id_file, _numeric_columns_file, _blacklist, _num_cpu, _model_path, _mode
+    datalake_location, dataset, size, mapping_id_file, numeric_columns_file, blacklist, translators, num_cpu, model_path, mode = \
+        _datalake_location, _dataset, _size, _mapping_id_file, _numeric_columns_file, _blacklist, _translators, _num_cpu, _model_path, _mode
 
 
 class EmbeddingTester(AlgorithmTester):
-    def __init__(self, mode, dataset, size, tables_thresholds, num_cpu, blacklist, datalake_helper, *args) -> None:
-        super().__init__(mode, dataset, size, tables_thresholds, num_cpu, blacklist, datalake_helper)
+    def __init__(self, mode, dataset, size, num_cpu, blacklist, datalake_helper, *args) -> None:
+        super().__init__(mode, dataset, size, num_cpu, blacklist, datalake_helper)
         self.model_path, self.cidx_file, self.embedding_model_dim, self.embedding_translators = args
         self.cidx = None
         
@@ -105,7 +96,7 @@ class EmbeddingTester(AlgorithmTester):
         initargs = (
             self.datalake_helper.datalake_location, self.dataset, self.size, 
             self.datalake_helper._mapping_id_path, self.datalake_helper._numeric_columns_path, 
-            self.blacklist, self.num_cpu, self.model_path, self.mode)
+            self.blacklist, self.embedding_translators, self.num_cpu, self.model_path, self.mode)
 
         with mp.Pool(self.num_cpu, initializer=init_pool, initargs=initargs) as pool:
             info(f'Start embedding tables, chunk-size={chunksize}...')
@@ -147,32 +138,20 @@ class EmbeddingTester(AlgorithmTester):
 
 
     def query(self, results_file, k, query_ids, **kwargs):
-        match self.mode:
-            case 'ft'|'cft' | 'deepjoin':
-                return self.query_naive(results_file, k, query_ids, **kwargs)
-            case 'ftdist'|'cftdist':
-                return self.query_dist(results_file, k, query_ids, **kwargs)
-
+        if 'dist' in self.mode:
+            return self.query_naive(results_file, k, query_ids, **kwargs)
+        else:
+            return self.query_dist(results_file, k, query_ids, **kwargs)
+        
     def query_naive(self, results_file, k, query_ids, **kwargs):
         start = time()
         info('Loading model...')
-        match self.mode:
-            case 'ft'|'ftdist':
-                self.model = FastTextTableEmbedder(self.model_path)
-            case 'cft'|'cftdist':
-                self.model = CompressFastTextTableEmbedder(self.model_path)
-            case 'tabert':
-                self.model = TaBERTTableEmbedder(self.model_path)
-            case 'deepjoin':
-                self.model = DeepJoinTableEmbedder(self.model_path)
-            case _:
-                raise ValueError('Unknown mode for table embedder with naive query mode: ' + self.mode)
+        model = table_embedder_factory(self.mode, self.model_path)
         if not self.cidx:
             info(f'Reading column index from {self.cidx_file}...')
-            self.cidx = faiss.read_index(self.cidx_file)
+            self.cidx = faiss.read_index(self.cidx_file)        
         
-        
-        d = self.model.get_dimension()
+        d = model.get_dimension()
         xq, xq_ids = np.empty(shape=(0, d), dtype=np.float64), np.empty(shape=(0, 1), dtype=np.int32)
         batch_size = 1000
         results = []
@@ -199,8 +178,7 @@ class EmbeddingTester(AlgorithmTester):
             if doc == None:
                 print('Error here', qid)
             try:                
-                args = (self.blacklist, self.embedding_translators) if self.embedding_translators else self.blacklist
-                colemb = self.model.embed_table(doc['content'], doc['numeric_columns'], *args)
+                colemb = model.embed_columns(doc['content'], doc['numeric_columns'], self.blacklist, *self.embedding_translators)
                 ids = np.expand_dims(np.repeat([qid], colemb.shape[0]), axis=0)
                 xq_ids = np.concatenate((xq_ids, ids.T))
                 xq = np.concatenate((xq, colemb), axis=0)
@@ -252,20 +230,12 @@ class EmbeddingTester(AlgorithmTester):
         
         info('Query mode: distance')
         info('Loading model...')
-        match self.mode:
-            case 'ft'|'ftdist':
-                self.model = FastTextTableEmbedder(self.model_path)
-            case 'cft'|'cftdist':
-                self.model = CompressFastTextTableEmbedder(self.model_path)
-            case 'tabert':
-                self.model = TaBERTTableEmbedder(self.model_path)
-            case _:
-                raise ValueError('Unknown mode for table embedder with naive query mode: ' + self.mode)
+        model = table_embedder_factory(self.mode, self.model_path)
         if not self.cidx:
             info(f'Reading column index from {self.cidx_file}...')
             self.cidx = faiss.read_index(self.cidx_file)
         
-        d = self.model.get_dimension()
+        d = model.get_dimension()
         xq, xq_ids = np.empty(shape=(0, d), dtype=np.float64), np.empty(shape=(0, 1), dtype=np.int32)
         batch_size = 1000
         results = []
@@ -277,7 +247,7 @@ class EmbeddingTester(AlgorithmTester):
             # when reached the batch threshold, execute the search for the 
             # current batch 
             doc = self.datalake_helper.get_table_by_numeric_id(int(qid))
-            colemb = self.model.embed_table(doc['content'], doc['numeric_columns'], self.blacklist)
+            colemb = model.embed_columns(doc['content'], doc['numeric_columns'], self.blacklist, *self.embedding_translators)
             if colemb.shape[0] == 0:
                 continue
             try:

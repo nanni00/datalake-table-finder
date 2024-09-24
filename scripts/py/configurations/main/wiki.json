@@ -8,7 +8,7 @@
         "numeric_columns_file": "",
         "blacklist": [
         ],
-        "k": 10,
+        "k": 20,
         "num_query_samples": 50000,
         "num_cpu": 72,
         "pg_dbname": "nanni"
@@ -46,7 +46,7 @@
 
     "extract": {
         "clear_results_table": false,
-        "exec_now": false
+        "exec_now": true
     },
 
     "analyses": {

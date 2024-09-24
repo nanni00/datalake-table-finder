@@ -17,7 +17,7 @@ from tools.utils import basicconfig
 from tools.utils.logging import logging_setup, info
 from tools.utils.settings import make_parser, get_all_paths
 # from tools.utils.misc import get_local_time
-from tools.utils.parallel_worker import worker_fp_per_query, worker_ndcg, worker_precision
+from tools.utils.parallel import worker_fp_per_query, worker_ndcg, worker_precision
 
 
 

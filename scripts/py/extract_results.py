@@ -2,6 +2,8 @@ import os
 import logging
 import random
 import warnings
+
+from tools.utils.metrics import proximity
 warnings.filterwarnings('ignore')
 from time import time
 import multiprocessing as mp
@@ -17,19 +19,12 @@ from tools.utils.datalake import SimpleDataLakeHelper
 from tools.utils.classes import ResultDatabase
 from tools.utils.settings import get_all_paths, make_parser
 from tools.utils.misc import (
-    apply_sloth,
+    largest_overlap_sloth,
     get_local_time,
-    table_to_tokens_set,
+    table_to_tokens,
 )
 from tools.utils.logging import logging_setup, info
-
-
-
-def chunks(sequence, chunk_size, *args):
-    # Chunks of chunk_size documents at a time.
-    for j in range(0, len(sequence), chunk_size):
-        yield (sequence[j:j + chunk_size], *args)
-
+from tools.utils.parallel import chunks
 
 
 def worker_result_extractor(data):
@@ -67,24 +62,24 @@ def worker_result_extractor(data):
 
         # if already exists a couple with these ID, take its computed SLOTH overlap
         r_id, s_id = (query_id, result_id) if query_id <= result_id else (result_id, query_id)
-        dboverlap, lookuptime = resultsdb.lookup_result_table(r_id, s_id), -1
+        dboverlap, lookuptime = resultsdb.lookup(r_id, s_id), -1
         
         if dboverlap != None:
             hit += 1
         
-        sloth_overlap, sloth_time = (dboverlap, lookuptime) if dboverlap != None else apply_sloth(table_q, table_r, numeric_columns_q, numeric_columns_r, blacklist=blacklist)
+        sloth_overlap, sloth_time = (dboverlap, lookuptime) if dboverlap != None else largest_overlap_sloth(table_q, table_r, numeric_columns_q, numeric_columns_r, blacklist=blacklist)
         
         # if sloth_overlap == -1 and dboverlap == None:
         #     warning(f"Pair {query_id} - {result_id} SLOTH failed")
 
         # the intersection size is used for computing Jaccard Similarity or other metrics like containment, 
         # so compute using the set semantic, since it considers the intersection of the table "basic" values
-        set_q = set(table_to_tokens_set(table_q, 'set', numeric_columns_q, blacklist=blacklist))
-        set_r = set(table_to_tokens_set(table_r, 'set', numeric_columns_r, blacklist=blacklist))
+        set_q = set(table_to_tokens(table_q, 'set', numeric_columns_q, blacklist=blacklist))
+        set_r = set(table_to_tokens(table_r, 'set', numeric_columns_r, blacklist=blacklist))
         set_intersection_size = len(set_q.intersection(set_r))
         
-        bag_q = set(table_to_tokens_set(table_q, 'bag', numeric_columns_q, blacklist=blacklist))
-        bag_r = set(table_to_tokens_set(table_r, 'bag', numeric_columns_r, blacklist=blacklist))
+        bag_q = set(table_to_tokens(table_q, 'bag', numeric_columns_q, blacklist=blacklist))
+        bag_r = set(table_to_tokens(table_r, 'bag', numeric_columns_r, blacklist=blacklist))
         bag_intersection_size = len(bag_q.intersection(bag_r))
 
         set_size_q, set_size_r = len(set_q), len(set_r)
@@ -98,15 +93,16 @@ def worker_result_extractor(data):
                 multi_jaccard_sim =         set_intersection_size / (set_size_q + set_size_r)
                 containment =               set_intersection_size / set_size_q
                 overlap_set_similarity =    set_intersection_size / min(bag_size_q, bag_size_r)
+                prox =                      proximity(sloth_overlap, algorithm_overlap)
 
                 # the area ratio, as stated in SLOTH paper is "the largest overlap 
                 # normalized by the area of the smaller table", and we could consider
                 # the token set in bag mode as the table area
                 area_ratio = sloth_overlap / min(bag_size_q, bag_size_r)
             except ZeroDivisionError:
-                jaccard_sim = multi_jaccard_sim = containment = overlap_set_similarity = area_ratio = 0
+                jaccard_sim = multi_jaccard_sim = containment = overlap_set_similarity = area_ratio = prox = 0
         else:
-            jaccard_sim = multi_jaccard_sim = containment = overlap_set_similarity = area_ratio = 0
+            jaccard_sim = multi_jaccard_sim = containment = overlap_set_similarity = area_ratio = prox = 0
 
         rv.append([query_id, result_id, algorithm, mode, sloth_overlap, algorithm_overlap,
                 
@@ -115,8 +111,9 @@ def worker_result_extractor(data):
                 
                 jaccard_sim, 
                 multi_jaccard_sim, 
-                containment, 
-                overlap_set_similarity, 
+                containment,
+                overlap_set_similarity,
+                proximity,
                 area_ratio,
                 
                 sloth_time])
@@ -171,6 +168,7 @@ def extract_results(test_name, k, num_query_samples, num_cpu, pg_dbname,
         'multi_jaccard_sim': pl.Float32,
         'containment': pl.Float32,
         'overlap_set_sim': pl.Float32,
+        'proximity': pl.Float32,
         'area_ratio': pl.Float32,
         
         'sloth_time(s)': pl.Float32
@@ -230,9 +228,9 @@ def extract_results(test_name, k, num_query_samples, num_cpu, pg_dbname,
             
             # smaller chunk-size offer the possibility to better parallelization, because
             # SLOTH often takes time and some processes finish while others still have many computations to do 
-            chunksize = max(min(len(work) // num_cpu, 1000) // 4, 1)
+            chunksize = max(min(len(work) // num_cpu, 1000), 1)
             info(f'Total work length: {len(work)}, total workers: {num_cpu}, chunk-size: {chunksize}. Starting extraction...')
-            extr_res = pool.map(worker_result_extractor, chunks(work, chunksize))
+            extr_res = pool.map(worker_result_extractor, chunks(work, len(work), chunksize))
             info(f"Completed extraction in {round(time() - sss)}s")
             
             hit = 0
@@ -249,19 +247,17 @@ def extract_results(test_name, k, num_query_samples, num_cpu, pg_dbname,
     info(f"Hit rates: {hit_rates}")
 
     # save the statistics about the analysis time
-    add_header = not os.path.exists(runtime_stat_file)
-    with open(runtime_stat_file, 'a') as rfw:
-        if add_header:
-            rfw.write("local_time,algorithm,mode,task,k,num_queriestime\n")
-
-        rfw.write(f"{get_local_time()},analysis,,extraction,{k},{num_query_samples},{round(time() - start_analysis, 3)}\n")
+    # add_header = not os.path.exists(runtime_stat_file)
+    # with open(runtime_stat_file, 'a') as rfw:
+    #     if add_header:
+    #         rfw.write("local_time,algorithm,mode,task,k,num_queriestime\n")
+    #     rfw.write(f"{get_local_time()},analysis,,extraction,{k},{num_query_samples},{round(time() - start_analysis, 3)}\n")
 
     # save statistics about analysis file size
-    storage_size = os.path.getsize(final_results_file) / (1024 ** 3)
-
-    append = os.path.exists(storage_stat_file)
-    dbsize = pd.DataFrame([['analysis', f'extraction_k{k}_q{num_query_samples}', storage_size]], columns=['algorithm', 'mode', 'size(GB)'])
-    dbsize.to_csv(storage_stat_file, index=False, mode='a' if append else 'w', header=False if append else True)
+    # storage_size = os.path.getsize(final_results_file) / (1024 ** 3)
+    # append = os.path.exists(storage_stat_file)
+    # dbsize = pd.DataFrame([['analysis', f'extraction_k{k}_q{num_query_samples}', storage_size]], columns=['algorithm', 'mode', 'size(GB)'])
+    # dbsize.to_csv(storage_stat_file, index=False, mode='a' if append else 'w', header=False if append else True)
 
     resultsdb.close()
 
