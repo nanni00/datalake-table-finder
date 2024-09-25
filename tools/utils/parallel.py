@@ -3,9 +3,9 @@ from tools.utils.metrics import *
 
 
 
-def chunks(sequence, sequence_size, chunk_size, *args):
+def chunks(sequence, chunk_size, *args):
     # Chunks of chunk_size documents at a time.
-    for j in range(0, sequence_size, chunk_size):
+    for j in range(0, len(sequence), chunk_size):
         yield (sequence[j:j + chunk_size], *args)
 
 

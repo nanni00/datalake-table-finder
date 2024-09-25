@@ -22,8 +22,18 @@ documentation
 
 models
 notebooks
-experiments/multi_key_join
-!experiments/multi_key_join/josie_find_joins.py
+
+experiments/deepjoin
+experiments/multi_key_join/analyses*
+experiments/multi_key_join/*header*
+experiments/multi_key_join/wikiturlsnap
+experiments/multi_key_join/gittables
+experiments/multi_key_join/santoslarge
+experiments/multi_key_join/sloth_overlap.py
+experiments/multi_key_join/find_frequent_headers.py
+
+
+
 
 **__pycache__**
 .git

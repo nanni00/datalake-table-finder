@@ -137,6 +137,42 @@ def is_valid_table(table, bad_columns):
     
 
 
+
+def is_valid_multi_key(names, table, bad_columns, headers):
+    """
+    Check if there is any functional dependency, i.e. there is a UNIQUE column
+    which isn't meaningful for our search
+    e.g. table
+        CITY   | STATE    | POPULATION
+        Rome   | Italy    | 2'750'000
+        Paris  | France   | 2'229'000
+        London | England  | 8'900'000
+        ...
+    then it's easy to see that CITY=>STATE, and thus a multi-key CITY-STATE isn't interesting
+
+    Also, check that the selected columns actually are a multi-key, 
+    i.e. no duplicates
+    """
+    table = table_rows_to_columns(table, 0, len(table[0]), bad_columns)
+    headers = [h for i, h in enumerate(headers) if bad_columns[i] == 0]
+    multi_key_columns = [column for h, column in zip(headers, table) if h in names]
+    
+    # sometimes the attributes aren't accepted
+    if len(multi_key_columns) != len(names):
+        return False
+    
+    for column in multi_key_columns:
+        if len(set(column)) == len(column):
+            return False
+
+    #  if there are duplicates in the combinations of the two columns 
+    if len(set(zip(*multi_key_columns))) != len(multi_key_columns[0]):
+        return False
+    return True
+
+
+
+
 def is_number_tryexcept(s):
     try: float(s)
     except (ValueError, TypeError): return False
