@@ -53,24 +53,22 @@ def create_minhash(iterable):
     return m
 
 
+# def clean_str(token):
+#     return str(token).replace('|', ' ').replace('\n', ' ')
 
-def prepare_token(token):
-    return str(token).replace('|', ' ').replace('\n', ' ')
+# def token_to_str(token, *translators):
+#     return reduce(lambda to, tr: str(to).translate(tr), translators, str(token)).strip()
+
+# def tokenize_column(column, *translators, blacklist=[]):
+#     """Extract distinct tokens from the column, apply on them the translators and remove empty strings """
+#     column = [token_to_str(token, *translators) for token in set(column) if token not in blacklist]
+#     return [token for token in column if set(token)]
 
 
-def token_to_str(token, *translators):
-    return reduce(lambda to, tr: str(to).translate(tr), translators, str(token)).strip()
-
-
-def clean_str(s, *translators):
+def clean_string(s, *translators):
+    if len(translators) == 0:
+        translators = [str.maketrans('\n|', '  ')]
     return reduce(lambda si, tr: str(si).translate(tr), translators, str(s)).strip()
-
-
-def tokenize_column(column, *translators, blacklist=[]):
-    """Extract distinct tokens from the column, apply on them the translators and remove empty strings """
-    column = [token_to_str(token, *translators) for token in set(column) if token not in blacklist]
-    return [token for token in column if set(token)]
-
 
 
 def column_to_text(column, *translators, blacklist=[], max_seq_len=512):
@@ -80,7 +78,7 @@ def column_to_text(column, *translators, blacklist=[], max_seq_len=512):
             return column
         return [x[0] for x in sorted(list(Counter(column).items()), key=lambda x: x[1], reverse=True)][:max_seq_len]
     # return ' '.join(tokenize_column(column, *translators))
-    return clean_str(' '.join([str(token) for token in most_frequent_tokens(column)]), *translators)
+    return clean_string(' '.join([str(token) for token in most_frequent_tokens(column)]), *translators)
 
 
 def table_columns_to_rows(columns):
@@ -214,7 +212,7 @@ def table_to_tokens(table, mode, numeric_columns, encode=None, blacklist:set=set
     :param blacklist: a set of tokens that won't be considered
     """
     if mode == 'set':
-        tokens = list({prepare_token(token) for row in table for icol, token in enumerate(row) 
+        tokens = list({clean_string(token) for row in table for icol, token in enumerate(row) 
                      if not pd.isna(token) and token and numeric_columns[icol] == 0 and token not in blacklist})
     elif mode == 'bag':
         counter = defaultdict(int)
@@ -223,7 +221,7 @@ def table_to_tokens(table, mode, numeric_columns, encode=None, blacklist:set=set
             counter[token] += 1
             return f'{token}{_TOKEN_TAG_SEPARATOR}{counter[token]}'
         
-        tokens = [_create_token_tag(prepare_token(token)) for row in table for icol, token in enumerate(row)
+        tokens = [_create_token_tag(clean_string(token)) for row in table for icol, token in enumerate(row)
                 if not pd.isna(token) and token and numeric_columns[icol] == 0 and token not in blacklist]
     else:
         raise Exception('Unknown mode: ' + str(mode))
@@ -239,7 +237,7 @@ def largest_overlap_sloth(table1, table2, numeric_columns1, numeric_columns2, ve
         if not t or pd.isna(t) or t in blacklist:
             num_null += 1
             return f'{t}@{num_null}'
-        t = prepare_token(t)
+        t = clean_string(t)
         return t
     
     table1 = [[format_value_for_excluding_nan(row[i]) for row in table1] for i in range(len(table1[0])) if numeric_columns1[i] == 0]
@@ -268,7 +266,7 @@ def apply_sloth(table1, table2, numeric_columns1, numeric_columns2, blacklist=[]
         if not t or pd.isna(t) or t in blacklist:
             num_null += 1
             return f'{t}@{num_null}'
-        t = prepare_token(t)
+        t = clean_string(t)
         return t
     
     table1 = [[format_value_for_excluding_nan(row[i]) for row in table1] for i in range(len(table1[0])) if numeric_columns1[i] == 0]

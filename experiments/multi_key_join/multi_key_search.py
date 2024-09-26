@@ -5,18 +5,14 @@ import binascii
 import multiprocessing as mp
 from collections import defaultdict
 
-import numpy as np
 import pandas as pd
 from tqdm import tqdm
-import matplotlib.colors
-from matplotlib import pyplot as plt
 
 from tools.josie import JosieDB
 from tools.utils.datalake import SimpleDataLakeHelper
 from tools.utils.logging import logging_setup, info
 from tools.utils.misc import is_valid_multi_key, is_valid_table, table_columns_to_rows, table_to_tokens, largest_overlap_sloth, table_rows_to_columns
 from tools.utils.classes import ResultDatabase
-from tools.utils.metrics import ndcg_at_k, relevance_precision_at_k
 from tools.utils.settings import DefaultPath as dp
 
 
@@ -130,9 +126,9 @@ def task_compute_overlaps(data):
 # JOSIE può dare alcuni problemi, vedi la coppia di tabelle (59240, 1470444) per gli attributi "Club-Stadium"
 # di fatto nella seconda tabella la colonna "club" è un po' sporca e così non viene matchato niente...
 
-dataset = 'wikiturlsnap'
+dataset = 'gittables'
 test_name, size, mode = 'main', 'standard', 'bag'
-multi_key_join_directory =  f"{dp.root_project_path}/experiments/multi_key_join/wikiturlsnap"
+multi_key_join_directory =  f"{dp.root_project_path}/experiments/multi_key_join/{dataset}"
 
 dbname = 'nanni'
 tables_prefix = f'{test_name}_d{dataset}_m{mode}'
@@ -140,18 +136,17 @@ results_table = f'results_d{dataset}_s{size}'
 
 # search N queries, but many of them may not provide any results wrt the thresholds 
 # min_h, min_w and thus won't be considered in analyses
-N = 300
+N = 600
 K = 50
-k_values = [1, 3, 5, 10, 20]
 
 # we want to find overlaps where the join covers at least this percentage of rows (see SLOTH paper)
-min_h = 0.6
+min_h = 0.9
 
 # these will be set accordingly to the list of names used as candidate join columns
 min_w = None
 max_w = None
 
-SEARCH_QUERIES = True
+SEARCH_QUERIES = False
 
 
 match dataset:
@@ -160,27 +155,32 @@ match dataset:
         mapping_id_file = numeric_columns_file = None
         blacklist = [] 
         list_names = [
-            ['city', 'club'], ['club', 'stadium'], ['city', 'province'], ['city', 'country'],
-            ['name', 'nationality'], ['actor', 'role'], ['director', 'genre'], ['country', 'director'],
-            ['party', 'member'], ['party', 'term'], 
-            ['home', 'road'], ['driver', 'car']
-            ]
+            ['party', 'district']
+            # ['city', 'club'], ['club', 'stadium'], ['city', 'province'], ['city', 'country'],
+            # ['country', 'director'],
+            # ['conference', 'overall'],
+            # ['actor', 'role'], ['director', 'genre'], ['country', 'director'], ['role', 'film'],
+            # ['party', 'member'], ['party', 'term'], ['party', 'candidate'], ['party', 'incumbent', 'candidates'], ['party', 'votes', 'candidates'],
+            # ['home', 'div'], ['home', 'road'], 
+            # ['driver', 'car'],
+            # ['name', 'hometown'], ['name', 'from'], ['name', 'description'], ['name', 'nation'], ['name', 'country'], ['name', 'nationality'],
+        ]
     case "gittables":
         datalake_location = 'mongodb'
         mapping_id_file = numeric_columns_file = None
         blacklist = {"comment", "story", "{\"$numberDouble\": \"NaN\"}"}
         results_table += '_blacklist'
         list_names = [
-            ('title', 'artist'),
-            ('title', 'author'), 
-            ('title', 'author', 'htid'), 
-            ('title', 'author', 'htid', 'imprint'),
-            ('title', 'author', 'imprint'),
-            ('team_city', 'player_name'),
-            ('id', 'name'),
-            ('id', 'name', 'model_id:id'),
-            ('First name', 'Last Name')
-            ][5:6]
+            ['artist', 'lastname'],
+            ['first name', 'last name'],
+            ['firstname', 'lastname'],
+            ['benchmarkname', 'layername'],
+            ['assignee', 'component'],
+            ['player_name', 'team_city'],
+            ['team', 'last name'],
+            ['last name', 'race category'],
+            ['age', 'first name', 'last name']
+        ]
     case "santoslarge":
         datalake_location = "/data4/nanni/data/santos_large/datalake"
         mapping_id_file = "/data4/nanni/data/santos_large/mapping_id.pickle"
@@ -200,21 +200,22 @@ josiedb = JosieDB(dbname, tables_prefix)
 dlh = SimpleDataLakeHelper(datalake_location, dataset, size, mapping_id_file, numeric_columns_file)
 ntables = dlh.get_number_of_tables()
 
-logfile =                   f"{multi_key_join_directory}/N{N}_K{K}.log"
+logfile = f"{multi_key_join_directory}/N{N}_K{K}_T{min_h}.log"
 
 list_names = list(map(lambda names: tuple(s.lower() for s in names), list_names)) # because the names will be used as key of a dict, and tuple are hashables...
 queries_for_name = {names: [] for names in list_names}
 
 
+# create the directory for the results and setup the logging system
 for i, names in enumerate(list_names):
-    test_directory =            f"{multi_key_join_directory}/{'-'.join(names)}/N{N}_K{K}_T{min_h}".replace(' ', '_')
-    if not os.path.exists(test_directory):
-        os.makedirs(test_directory)
-
+    test_directory = f"{multi_key_join_directory}/{'-'.join(names)}/N{N}_K{K}_T{min_h}".replace(' ', '_')
+    if not os.path.exists(test_directory): os.makedirs(test_directory)
     if i == 0: logging_setup(logfile)
 
 
-
+# start the search: for each composite key, scann the tables and find the first N valid tables
+# valid means that have at least 5 rows and 2 columns, not considering numeric or null ones
+# and in case the attributes are in the headers they actual form a valid key (i.e. no FD)
 if SEARCH_QUERIES:
     stdscr = curses.initscr()
     for i, table_obj in enumerate(dlh.scan_tables()):
@@ -239,13 +240,13 @@ if SEARCH_QUERIES:
     
     print('Saving queries IDs...')
     for i, names in enumerate(list_names):
-        queries_file = f"{multi_key_join_directory}/{'-'.join(names)}/queries.txt"# .replace(' ', '_')
+        queries_file = f"{multi_key_join_directory}/{'-'.join(names)}/queries.txt".replace(' ', '_')
         with open(queries_file, 'w') as fw:
             fw.writelines(map(lambda x: str(x) + '\n', [q['_id_numeric'] for q in queries_for_name[names]]))
 
 
 for i, names in enumerate(list_names):
-    test_directory =            f"{multi_key_join_directory}/{'-'.join(names)}"# .replace(' ', '_')
+    test_directory =            f"{multi_key_join_directory}/{'-'.join(names)}".replace(' ', '_')
     queries_file =              f"{test_directory}/queries.txt"
     test_directory +=           f"/N{N}_K{K}_T{min_h}"
     josie_single_results_file = f"{test_directory}/results_single_josie.csv"
@@ -263,7 +264,6 @@ for i, names in enumerate(list_names):
     if len(queries) < N * 0.5:
         print(f'Not enough queries for names {names}: only {len(queries)}')
         print()
-        continue
     
     min_w, max_w = len(names), len(names)
     info(f' Working with names {names} '.center(60, '-'))
@@ -344,15 +344,17 @@ for i, names in enumerate(list_names):
     info('\ta. Create multi-column results (only for queries from the previous filtering)')
     josiedb.open()
     multi_column_bags = {qid: table_to_tokens(columns, 'bag', [0] * len(columns[0]), blacklist=blacklist) for qid, columns in query_columns.items() if qid in single_column_results.keys()}
-    queries_set = []
-    for qid, qbag in tqdm(multi_column_bags.items(), leave=False):
-        q = set()
-        tokens = josiedb._dbconn.execute(f"SELECT tokens FROM {josiedb._SET_TABLE_NAME} WHERE id = {qid}").fetchall()[0][0]
-        for id in tokens:
-            raw_token = josiedb._dbconn.execute(f"SELECT raw_token FROM {josiedb._INVERTED_LISTS_TABLE_NAME} WHERE token = {id}").fetchone()[0]
-            if binascii.unhexlify(raw_token).decode('utf-8') in qbag:
-                q.add(id)
-        queries_set.append([qid, q])
+    queries_set = [
+        [qid, {
+                id 
+                for id in josiedb._dbconn.execute(f"SELECT tokens FROM {josiedb._SET_TABLE_NAME} WHERE id = {qid}").fetchall()[0][0]
+                if binascii.unhexlify(
+                    josiedb._dbconn.execute(f"SELECT raw_token FROM {josiedb._INVERTED_LISTS_TABLE_NAME} WHERE token = {id}").fetchone()[0]
+                ).decode('utf-8') in qbag
+            }
+        ]
+        for qid, qbag in multi_column_bags.items()
+    ]
 
 
     info('\tb. Compute JOSIE overlaps...')
@@ -365,83 +367,11 @@ for i, names in enumerate(list_names):
         work = [(qid, multi_columns_results[qid], query_columns[qid], min_h, min_w, max_w) for qid in multi_columns_results.keys()]
         multi_columns_results = {qid: [r for r in res_list] for qid, res_list in pool.map(task_compute_overlaps, work, 1)}
     
-
     # save the results from both the baseline and MC versions for future analyses
     # no filtering on queries with a non-null results set
     final_results = []
     final_results += [['baseline', qid, *r] for qid, res_list in single_column_results.items() for r in res_list]
     final_results += [['MC', qid, *r] for qid, res_list in multi_columns_results.items() for r in res_list]
     pd.DataFrame(final_results, columns=['version', 'query_id', 'result_id', 'result_rank', 'JOSIE_overlap', 'SLOTH_columns_overlap']).to_csv(final_results_file, index=False)
-
-    info('4. Final analyses')
-    for where, index_sloth_type, fileplot in zip(['table', 'columns'], [-2, -1], [metrics_table_plot, metrics_columns_plot]):
-        if where == 'table': continue
-        info(f'{where} - Create silver-standard for final queries...')
-        qids = set(single_column_results.keys()).intersection(multi_columns_results.keys())
-        silver_standard = {qid: sorted(single_column_results[qid] + multi_columns_results[qid], key=lambda t: t[index_sloth_type], reverse=True)[:K] for qid in qids}
-        silver_standard = {qid: [v for v in r if v[index_sloth_type] > 0] for qid, r in silver_standard.items()}
-        silver_standard = {qid: r for qid, r in silver_standard.items() if len(r) > 0}
-
-        # for next analyses drop the -2 values, that are the pairs with an overlap under threshold
-        # and thus aren't considered actually joinables, and -1 values, the pairs for which SLOTH
-        # failed when computing the largest overlap
-        single_column_results = {qid: [v for v in r if v[index_sloth_type] > 0] for qid, r in single_column_results.items()}
-        multi_columns_results = {qid: [v for v in r if v[index_sloth_type] > 0] for qid, r in multi_columns_results.items()}
-
-
-        info(f'{where} - Compute final results with {len(silver_standard)}/{N} queries')
-        if len(silver_standard) == 0:
-            info(f'All the queries have results that doesn\'t accomplish the thresholds (min_h, min_w) when working in {where} mode, both with baseline and MC')
-            continue
-
-        fig, (axs_ndcg, axs_rp) = plt.subplots(2, len(k_values), sharey='row', figsize=(10, 5))
-        for k, ax_ndcg, ax_rp in zip(k_values, axs_ndcg, axs_rp):
-            results = []
-            queries_actually_used = 0
-            for qid, silstd in silver_standard.items():
-                true_rel = [x[index_sloth_type] for x in silstd]
-                if len(true_rel) < k: 
-                    continue
-                queries_actually_used += 1
-                
-                pred_rel = [x[index_sloth_type] for x in single_column_results[qid]]
-                single_col_ndcg, _ = ndcg_at_k(true_rel, pred_rel, k)
-                single_rel_prec = relevance_precision_at_k(true_rel, pred_rel, k)
-                
-                pred_rel = [x[index_sloth_type] for x in multi_columns_results[qid]]
-                multi_col_ndcg, _ = ndcg_at_k(true_rel, pred_rel, k)
-                multi_rel_prec = relevance_precision_at_k(true_rel, pred_rel, k)
-
-                results.append([single_col_ndcg, multi_col_ndcg, single_rel_prec, multi_rel_prec])
-            if len(results) == 0:
-                info(f'Any query has enough results for K={k}')
-                continue
-
-            w = 0.75
-            bplot = ax_ndcg.boxplot(
-                np.array(results)[:, :2],  widths=w,
-                # tick_labels=['baseline-ndcg', 'MC-ndcg'],
-                showmeans=True, meanline=True, showfliers=True, patch_artist=True
-            )
-            
-            colors = list(matplotlib.colors.TABLEAU_COLORS.keys())[:len(bplot['boxes']) + 2]
-            colors = [colors[0], colors[3]]  # just to drop green and orange, mean and median line aren't clear on it
-            
-            for patch, color in zip(bplot['boxes'], colors):
-                patch.set_facecolor(color)
-            
-            bplot = ax_rp.boxplot(
-                np.array(results)[:, 2:],
-                tick_labels=['baseline', 'MC'], widths=w,
-                showmeans=True, meanline=True, showfliers=True, patch_artist=True
-            )
-            for patch, color in zip(bplot['boxes'], colors):
-                patch.set_facecolor(color)
-            ax_ndcg.set_title(f'K={k}, #Q={queries_actually_used}')
-        
-        axs_ndcg[0].set_ylabel('nDCG')
-        axs_rp[0].set_ylabel('RP')
-        fig.suptitle(f"{'-'.join(names)} - min_h={min_h}")
-        fig.savefig(f'{fileplot}.png', bbox_inches='tight')
-        plt.close()
+ 
     info('')
