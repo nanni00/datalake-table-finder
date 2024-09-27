@@ -13,29 +13,20 @@ data/pg_data
 go/*
 !go/src/github.com
 
-**test**
-
-src
 TaBERT
-MATE
 
-documentation
+MATE/*
+!MATE/src
 
 models
-notebooks
 
 experiments/deepjoin
-experiments/multi_key_join/analyses*
-experiments/multi_key_join/*header*
-experiments/multi_key_join/wikiturlsnap
-experiments/multi_key_join/gittables
-experiments/multi_key_join/santoslarge
-experiments/multi_key_join/sloth_overlap.py
-experiments/multi_key_join/find_frequent_headers.py
+experiments/multi_key_join/*
+!experiments/multi_key_join/*.py
 
-
-
-
+*/*.db
+**test**
+cache
 **__pycache__**
 .git
 .vscode

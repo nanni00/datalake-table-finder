@@ -95,7 +95,7 @@ class EmbeddingTester(AlgorithmTester):
 
         initargs = (
             self.datalake_helper.datalake_location, self.dataset, self.size, 
-            self.datalake_helper._mapping_id_path, self.datalake_helper._numeric_columns_path, 
+            self.datalake_helper.mapping_id_path, self.datalake_helper.numeric_columns_path, 
             self.blacklist, self.embedding_translators, self.num_cpu, self.model_path, self.mode)
 
         with mp.Pool(self.num_cpu, initializer=init_pool, initargs=initargs) as pool:
