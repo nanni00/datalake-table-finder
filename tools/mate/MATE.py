@@ -1,17 +1,20 @@
-import time
-from base import *
-from dbhandler import *
-import pyhash
-from tqdm import tqdm
 import re
-from simhash import Simhash
-from bloom_filter import BloomFilter
-from heapq import heapify, heappush, heappop
+import os
+import math
+import time
 import hashlib
 from collections import Counter
-import math
-import numpy as np
 from typing import List, Dict, Any, Tuple
+from heapq import heapify, heappush, heappop
+
+import pyhash
+import numpy as np
+from tqdm import tqdm
+from simhash import Simhash
+
+from tools.mate.base import *
+from tools.mate.dbhandler import *
+from tools.mate.bloom_filter import BloomFilter
 
 from tools.utils.misc import clean_string
 
@@ -58,37 +61,28 @@ class MATETableExtraction:
     """
     def __init__(self,
                  dataset_name: str,
-                 query_dataset: pd.DataFrame,
                  mate_cache_path:str,
-                 query_column_list: List[str],
                  t_k: int,
                  inverted_index_table: str,
                  ones: int = 5,
                  log_file_name: str = '',
                  min_join_ratio: int = 0,
                  is_min_join_ratio_absolute: bool = True,
+                 database_request: bool = True,
                  **db_connection_info
                  ):
-        self.input_data = query_dataset # pd.read_csv(dataset_path)
         self.main_inverted_index_table_name = inverted_index_table
-        self.input_data = self.input_data.drop_duplicates(subset=query_column_list)
-        for q in query_column_list:
-            self.input_data[q] = self.input_data[q].apply(lambda x: clean_string(x)).replace('', np.nan).replace(
-                'nan', np.nan).replace('unknown', np.nan)
-            self.input_data.dropna(subset=[q], inplace=True)
-        self.query_columns = query_column_list
         self.top_k = t_k
         self.dataset_name = dataset_name
         self.mate_cache_path = mate_cache_path
+        self.database_request = database_request
         self.dbh = DBHandler(self.mate_cache_path, self.main_inverted_index_table_name, **db_connection_info)
         self.number_of_ones = ones
         self.log_file_name = log_file_name
-        self.input_size = len(self.input_data)
         self.min_join_ratio = min_join_ratio
         self.is_min_join_ratio_absolute = is_min_join_ratio_absolute
         # self.original_data = self.input_data.copy()
-        self.input_data = self.input_data[self.query_columns]
-
+        
     def evaluate_rows(self, input_row: Any, col_dict: Dict) -> Tuple[bool, str]:
         """Evaluates a row.
 
@@ -166,9 +160,7 @@ class MATETableExtraction:
         result = int((x | y) % r)
 
         result = int(result) | int(math.pow(2, len(token)%(hash_size-length_bit_start)) * math.pow(2, length_bit_start))
-        MAX_BIGINT_SIZE = 9223372036854775807
-        while result > MAX_BIGINT_SIZE:
-            result /= 10
+
         return int(result)
 
     @staticmethod
@@ -348,7 +340,9 @@ class MATETableExtraction:
         self.query_columns.insert(0, self.query_columns.pop(self.query_columns.index(best_query)))
         return min_unique_value_number
 
-    def MATE(self, hash_size: int = 128) -> None:
+    def MATE(self, hash_size: int = 128, 
+             query_dataset: pd.DataFrame|None = None,
+             query_column_list: List[str]|None = None):
         """Runs MATE using XASH.
 
         Parameters
@@ -356,8 +350,8 @@ class MATETableExtraction:
         hash_size : int
             Number of bits.
         """
-        print('MATE')
-        self.run_system(self.XASH, hash_size)
+        # print('MATE')
+        return self.run_system(self.XASH, hash_size, query_dataset=query_dataset, query_column_list=query_column_list)
 
     def SIMHASH(self, hash_size: int = 128) -> None:
         """Runs MATE using SIM Hash.
@@ -661,7 +655,9 @@ class MATETableExtraction:
                    hash_function: Any,
                    hash_size: int = 128,
                    run_ics: bool = False,
-                   active_pruning: bool = True
+                   active_pruning: bool = True,
+                   query_dataset: pd.DataFrame|None = None,
+                   query_column_list: List[str]|None = None,
                    ):
         """Runs table extraction.
 
@@ -674,53 +670,76 @@ class MATETableExtraction:
             Number of bits.
 
         run_ics : bool
-            True to run ICS.
+            True to run ICS. 
 
         active_pruning : bool
             True to enable activate pruning.
         """
-        # print(f'{self.dataset_name} DATASET')
+        self.input_data = query_dataset
+        self.input_data = self.input_data.drop_duplicates(subset=query_column_list)
+        for q in query_column_list:
+            self.input_data[q] = (
+                self.input_data[q]
+                .apply(lambda x: clean_string(x)[:255])
+                .replace('', np.nan)
+                .replace('nan', np.nan)
+                .replace('unknown', np.nan)
+            )
+            self.input_data.dropna(subset=[q], inplace=True)
+        self.query_columns = query_column_list
+        self.input_data = self.input_data[self.query_columns]
+        self.input_size = len(self.input_data)
+        
         row_block_size = 100
         total_match = 0
         total_approved = 0
 
         if run_ics:
             self.ICS()
-        super_key_name = 'superkey' # 'SuperKey'
+        super_key_name = 'superkey'
+
         self.input_data[super_key_name] = self.input_data.apply(
             lambda row: self.hash_row_vals(hash_function, row, hash_size), axis=1)
+        
         g = self.input_data.groupby([self.query_columns[0]])
         gd = {}
         for key, _ in g:
             gd[key[0]] = np.array(g.get_group(key))
         super_key_index = list(self.input_data.columns.values).index(super_key_name)
-        # print('gd=', gd)
+        
         top_joinable_tables = []
         heapify(top_joinable_tables)
 
         table_row = self.dbh.get_concatinated_posting_list(self.dataset_name, 
                                                            self.query_columns[0],
-                                                           self.input_data[self.query_columns[0]])
+                                                           self.input_data[self.query_columns[0]],
+                                                           database_request=self.database_request)
+        # tableid _ rowid ; colid _ tokenized $ superkey
         
         table_dictionary = {}
         for i in table_row:
+            tableid, _, _, _, _ = i
+            if not i: continue
             if str(i) == 'None':
                 continue
-            tableid = int(i.split(';')[0].split('_')[0])
+            # tableid = int(i.split(';')[0].split('_')[0])
+            
             if tableid in table_dictionary:
                 table_dictionary[tableid] += [i]
             else:
                 table_dictionary[tableid] = [i]
-
+        
         candidate_external_row_ids = []
         candidate_external_col_ids = []
         candidate_input_rows = []
         candidate_table_rows = []
         candidate_table_ids = []
 
+        timing = []
+
         overlaps_dict = {}
         pruned = False
-        for tableid in tqdm(sorted(table_dictionary, key=lambda k: len(table_dictionary[k]), reverse=True)):
+        for tableid in tqdm(sorted(table_dictionary, key=lambda k: len(table_dictionary[k]), reverse=True), disable=True):
             set_of_rowids = set()
             hitting_posting_list_concatinated = table_dictionary[tableid]
             if active_pruning and len(top_joinable_tables) >= self.top_k and top_joinable_tables[0][0] >= len(
@@ -738,11 +757,15 @@ class MATETableExtraction:
                         (len(hitting_posting_list_concatinated) - already_checked_hits + len(set_of_rowids)) <
                         top_joinable_tables[0][0]):
                     break
-                tablerowid = hit.split(';')[0]
-                rowid = tablerowid.split('_')[1]
-                colid = hit.split(';')[1].split('$')[0].split('_')[0]
-                token = hit.split(';')[1].split('$')[0].split('_')[1]
-                superkey = int(hit.split('$')[1])
+                tableid, rowid, colid, token, superkey = hit
+                superkey = int(superkey)
+                # tablerowid = hit.split(';')[0]
+                # rowid = tablerowid.split('_')[1]
+                # colid = hit.split(';')[1].split('$')[0].split('_')[0]
+                # token = hit.split(';')[1].split('$')[0].split('_')[1]
+                
+                # the super key should be saved as a VARCHAR or smth similar?
+                # superkey = int(hit.split('$')[1])
 
                 relevant_input_rows = gd[token]
 
@@ -761,8 +784,10 @@ class MATETableExtraction:
                     break
                 candidate_input_rows = np.array(candidate_input_rows)
                 candidate_table_ids = np.array(candidate_table_ids)
+                start = time.time()
                 pls = self.dbh.get_pl_by_table_and_rows(candidate_table_rows)
-                # print(pls[:4])
+                timing.append(round(time.time() - start, 5))
+
                 table_row_dict = {}
                 for i in pls:
                     if i[0] not in table_row_dict:
@@ -805,10 +830,14 @@ class MATETableExtraction:
             if pruned:
                 break
 
-        print('---------------------------------------------')
-        print(top_joinable_tables)
-        print(len(top_joinable_tables))
-        print(f'FP = {total_approved - total_match}')
+        # print('---------------------------------------------')
+        # print(top_joinable_tables)
+        # print(len(top_joinable_tables))
+        # print(f'FP = {total_approved - total_match}')
+
+        with open('this_is_time.txt', 'w') as fw:
+            fw.writelines(map(lambda t: str(t) + '\n', timing))
+        return sorted(top_joinable_tables, key=lambda x: x[0], reverse=True)
 
     def hash_row_vals_bf(self, row: Any, hash_size: int) -> str:
         """Calculates Hash value for row using Bloom Filter.
@@ -986,33 +1015,45 @@ class MATETableExtraction:
 
 
 if __name__ == '__main__':
-    top_k = 50
+    top_k = 10
     one_bits = 5
-    bits = 64
 
     dataset_name = 'mate_wikiturlsnap'
+    query_dataset_path = f"{os.path.dirname(__file__)}/query.csv"
     
     cache_path = f"{os.path.dirname(__file__)}/cache"
-    query_dataset_path = f"{os.path.dirname(__file__)}/query.csv"
     if not os.path.exists(cache_path):
         os.makedirs(cache_path)
+    
+    hash_size = 128
+    table_name = f'mate__wikiturlsnap_table_{hash_size}'
     query_dataset = pd.read_csv(query_dataset_path)
     query_columns_list = ['party', 'member']
+    
     db_connection_info = {
-            'url': f'duckdb:///{os.path.dirname(__file__)}/mate_index.db'
+        'url': f'postgresql://localhost:5442/nanni',
+        # 'url': f'duckdb:///{dp.data_path.base}/mate_index.db',
+        # 'connect_args': {
+        #    'read_only': True
+        # }
+        'connect_args': {
+            'options': "-c default_transaction_read_only=on"
+        }
     }
-    min_join_ratio = int(0.5 * query_dataset.shape[0])
+
+    min_join_ratio = 0.9
+
+    query_dataset = pd.read_csv(query_dataset_path)[query_columns_list]
 
     mate = MATETableExtraction(
         dataset_name, 
-        query_dataset_path, 
-        query_dataset,
         cache_path, 
-        query_columns_list, 
         top_k, 
-        'wikiturlsnap_main', 
+        table_name,
         one_bits, 
         None, 
         min_join_ratio=min_join_ratio,
+        is_min_join_ratio_absolute=False,
+        database_request=True,
         **db_connection_info)
-    print(mate.MATE(bits))
+    print(mate.MATE(hash_size, query_dataset, query_columns_list))

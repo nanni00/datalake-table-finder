@@ -36,6 +36,8 @@ def recall_at_k(true_relevances:list, result_relevances:list, k:int, negative_ta
     NB: the true and result relevances lists should contain not the relevance values themselves,
     but true/false values indicating whether the i-th item is relevant or not.
     """
+    if len(result_relevances) == 0: 
+        return 0
     true_relevances = multiset(true_relevances)
     result_relevances = multiset(result_relevances[:k])
     if negative_tag in true_relevances:     del true_relevances[negative_tag]
@@ -49,7 +51,13 @@ def f_score(p, r, beta=1):
 
 
 def ndcg_at_k(true_relevances, result_relevances, k):
-    k = min(k, len(true_relevances), len(result_relevances))
+    # padding with 0 values
+    if len(true_relevances) < k:
+        true_relevances += [0] * (k - len(true_relevances))
+    if len(result_relevances) < k:
+        result_relevances += [0] * (k - len(result_relevances))
+
+    # k = min(k, len(true_relevances), len(result_relevances))
     # computing nDCG is meaningful only if there is more than one document 
     if k <= 0: 
         return 0, 1

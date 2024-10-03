@@ -152,21 +152,27 @@ def is_valid_multi_key(names, table, bad_columns, headers):
     i.e. no duplicates
     """
     table = table_rows_to_columns(table, 0, len(table[0]), bad_columns)
-    headers = [h for i, h in enumerate(headers) if bad_columns[i] == 0]
-    multi_key_columns = [column for h, column in zip(headers, table) if h in names]
+    
+    valid_headers = [h for i, h in enumerate(headers) if bad_columns[i] == 0]
+    multi_key_columns = [column for h, column in zip(valid_headers, table) if h in names]
     
     # sometimes the attributes aren't accepted
     if len(multi_key_columns) != len(names):
-        return False
+        return
     
     for column in multi_key_columns:
         if len(set(column)) == len(column):
-            return False
+            return
 
     #  if there are duplicates in the combinations of the two columns 
     if len(set(zip(*multi_key_columns))) != len(multi_key_columns[0]):
-        return False
-    return True
+        return
+    
+    # the second condition is becoue sometimes there are headers like
+    # ["name", "name", "surname", "age", ...]
+    # and if we want the key <"name", "surname">, usually one of them is an empty column
+    idxs = [i for i, h in  enumerate(headers) if h in names if bad_columns[i] == 0]
+    return idxs if len(idxs) == len(names) else None
 
 
 

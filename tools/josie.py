@@ -25,11 +25,15 @@ from tools.utils.misc import (
     convert_to_giga
 )
 
-
-
+from sqlalchemy import (
+    create_engine, MetaData, 
+    select, insert, delete,
+    Table, Column,
+    Integer, VARCHAR, LargeBinary, ARRAY)
+from sqlalchemy.orm import Session
 
 class JosieDB:
-    def __init__(self, dbname, tables_prefix) -> None:
+    def __init__(self, dbname, tables_prefix, **connection_info) -> None:
         self.dbname = dbname
         self.tables_prefix = tables_prefix
 
@@ -43,6 +47,10 @@ class JosieDB:
 
         self._READ_LIST_COST_SAMPLES_TABLE_NAME = f'{self.tables_prefix}_read_list_cost_samples'
         self._READ_SET_COST_SAMPLES_TABLE_NAME = f'{self.tables_prefix}_read_set_cost_samples'
+
+        self.engine = create_engine(**connection_info)
+        self.metadata = MetaData(self.engine)
+        self.metadata.reflect()
 
     # @print_info(msg_before='Opening connection to the PostgreSQL database...')
     def open(self):
@@ -65,46 +73,86 @@ class JosieDB:
     @_commit_decorator
     @print_info(msg_before='Dropping PostgreSQL database tables...', msg_after='PostgreSQL tables dropped.')
     def drop_tables(self):
-        self._dbconn.execute(
-            f"""
-            DROP TABLE IF EXISTS {self._INVERTED_LISTS_TABLE_NAME};
-            DROP TABLE IF EXISTS {self._SET_TABLE_NAME};
-            DROP TABLE IF EXISTS {self._QUERY_TABLE_NAME};
+        for table_name in [
+            self._INVERTED_LISTS_TABLE_NAME,
+            self._SET_TABLE_NAME,
+            self._QUERY_TABLE_NAME,
+            self._READ_LIST_COST_SAMPLES_TABLE_NAME,
+            self._READ_SET_COST_SAMPLES_TABLE_NAME]:
+            try:
+                table_obj = self.metadata.tables[table_name]
+                table_obj.drop(self.engine)
+            except KeyError:
+                continue
 
-            DROP TABLE IF EXISTS {self._READ_LIST_COST_SAMPLES_TABLE_NAME};
-            DROP TABLE IF EXISTS {self._READ_SET_COST_SAMPLES_TABLE_NAME};
-            """
-        )
+        # self._dbconn.execute(
+        #     f"""
+        #     DROP TABLE IF EXISTS {self._INVERTED_LISTS_TABLE_NAME};
+        #     DROP TABLE IF EXISTS {self._SET_TABLE_NAME};
+        #     DROP TABLE IF EXISTS {self._QUERY_TABLE_NAME};
+        #     DROP TABLE IF EXISTS {self._READ_LIST_COST_SAMPLES_TABLE_NAME};
+        #     DROP TABLE IF EXISTS {self._READ_SET_COST_SAMPLES_TABLE_NAME};
+        #     """
+        # )
 
     @_commit_decorator
     @print_info(msg_before='Creating PostgreSQL database tables...', msg_after='PostgreSQL tables created.')
     def create_tables(self):
-        self._dbconn.execute(
-            f"""              
-            CREATE TABLE {self._INVERTED_LISTS_TABLE_NAME} (
-                token integer NOT NULL,
-                frequency integer NOT NULL,
-                duplicate_group_id integer NOT NULL,
-                duplicate_group_count integer NOT NULL,
-                raw_token bytea NOT NULL,
-                set_ids integer[] NOT NULL,
-                set_sizes integer[] NOT NULL,
-                match_positions integer[] NOT NULL
-            );
-
-            CREATE TABLE {self._SET_TABLE_NAME} (
-                id integer NOT NULL,
-                size integer NOT NULL,
-                num_non_singular_token integer NOT NULL,
-                tokens integer[] NOT NULL
-            );
-
-            CREATE TABLE {self._QUERY_TABLE_NAME} (
-                id integer NOT NULL,
-                tokens integer[] NOT NULL
-            );
-            """
+        pl_table = Table(
+            self._INVERTED_LISTS_TABLE_NAME,
+            self.metadata,
+            Column('token',                 Integer,        primary_key=True),
+            Column('frequency',             Integer),
+            Column('duplicate_group_id',    Integer),
+            Column('duplicate_group_count', Integer),
+            Column('raw_token',             LargeBinary),
+            Column('set_ids',               ARRAY(Integer)),
+            Column('set_sizes',             ARRAY(Integer)),
+            Column('match_positions',       ARRAY(Integer))
         )
+
+        set_table = Table(
+            self._SET_TABLE_NAME,
+            self.metadata,
+            Column('id',                    Integer,        primary_key=True),
+            Column('size',                  Integer),
+            Column('num_non_singolar_token',Integer),
+            Column('tokens',                ARRAY(Integer))
+        )
+
+        query_table = Table(
+            self._QUERY_TABLE_NAME,
+            self.metadata,
+            Column('id',                    Integer,        primary_key=True),
+            Column('tokens',                ARRAY(Integer))
+        )
+
+        self.metadata.create_all(self.engine)
+
+        # self._dbconn.execute(
+        #     f"""              
+        #     CREATE TABLE {self._INVERTED_LISTS_TABLE_NAME} (
+        #         token integer NOT NULL,
+        #         frequency integer NOT NULL,
+        #         duplicate_group_id integer NOT NULL,
+        #         duplicate_group_count integer NOT NULL,
+        #         raw_token bytea NOT NULL,
+        #         set_ids integer[] NOT NULL,
+        #         set_sizes integer[] NOT NULL,
+        #         match_positions integer[] NOT NULL
+        #     );
+        #     CREATE TABLE {self._SET_TABLE_NAME} (
+        #         id integer NOT NULL,
+        #         size integer NOT NULL,
+        #         num_non_singular_token integer NOT NULL,
+        #         tokens integer[] NOT NULL
+        #     ); 
+        #     CREATE TABLE {self._QUERY_TABLE_NAME} (
+        #         id integer NOT NULL,
+        #         tokens integer[] NOT NULL
+        #     );
+        #     """
+        # )
 
     # @print_info(msg_before='Clearing PostgreSQL query table...', msg_after='PostgreSQL query table cleaned')
     @_commit_decorator
@@ -116,20 +164,30 @@ class JosieDB:
         )
             
     # @print_info(msg_before='Inserting queries into PostgreSQL table...', msg_after='Queries inserted into PostgreSQL table.')
-    @_commit_decorator
+    # @_commit_decorator
     def insert_data_into_query_table(self, table_ids:list[int]=None, table_id:int=None, tokens_ids:list[int]=None):
-        if table_ids:
-            self._dbconn.execute(
-                f"""
-                INSERT INTO {self._QUERY_TABLE_NAME} SELECT id, tokens FROM {self._SET_TABLE_NAME} WHERE id in {tuple(table_ids)};
-                """
-            )
-        elif table_id and tokens_ids:
-            self._dbconn.execute(
-                f"""
-                INSERT INTO {self._QUERY_TABLE_NAME} VALUES {table_id, tokens_ids};
-                """
-            )
+        with Session(self.engine) as session:
+            set_table = self.metadata.tables[self._SET_TABLE_NAME]
+            query_table = self.metadata.tables[self._QUERY_TABLE_NAME]
+            if table_ids:
+                session.execute(
+                    insert(query_table)
+                    .from_select(select(set_table.c.id, set_table.c.tokens).where(set_table.c.id.in_(table_ids))))
+                # self._dbconn.execute(
+                #     f"""
+                #     INSERT INTO {self._QUERY_TABLE_NAME} SELECT id, tokens FROM {self._SET_TABLE_NAME} WHERE id in {tuple(table_ids)};
+                #     """
+                # )
+            elif table_id and tokens_ids:
+                session.execute(
+                    insert(query_table)
+                    .values(table_id, tokens_ids)
+                )
+                # self._dbconn.execute(
+                #     f"""
+                #     INSERT INTO {self._QUERY_TABLE_NAME} VALUES {table_id, tokens_ids};
+                #     """
+                # )
 
     @_commit_decorator
     @print_info(msg_before='Creating PostgreSQL table sets index...', msg_after='Sets table index created.')
@@ -151,7 +209,7 @@ class JosieDB:
             """
         )
 
-    @_commit_decorator
+    # @_commit_decorator
     def get_statistics(self):
         q = f"""
             SELECT 
@@ -185,11 +243,10 @@ class JosieDB:
 def get_spark_session(num_cpu, 
                       datalake_location:str, datalake_name:str, datalake_size:str='standard', 
                       datalake_mapping_id:dict|None=None, datalake_numeric_columns:dict|None=None,
-                      spark_local_dir:str|None='/tmp/spark', spark_jars_packages=['org.mongodb.spark:mongo-spark-connector_2.12:10.3.0']):
-    # fine tune of executor/driver.memory?
-    builder = SparkSession.Builder()
+                      spark_local_dir:str|None='/tmp/spark', 
+                      spark_jars_packages=['org.mongodb.spark:mongo-spark-connector_2.12:10.3.0']):
     spark = (
-        builder
+        SparkSession.Builder()
         .appName("Data Preparation for JOSIE")
         .master(f"local[{num_cpu}]")
         .config('spark.jars.packages', ','.join(spark_jars_packages))
@@ -265,10 +322,11 @@ class JOSIETester(AlgorithmTester):
             self.tables_prefix, 
             self.db_stat_file, 
             self.pg_user, self.pg_password, 
-            self.spark_local_dir
+            self.spark_local_dir,
+            self.connection_info
         ) = args
         
-        self.josiedb = JosieDB(self.dbname, self.tables_prefix)
+        self.josiedb = JosieDB(self.dbname, self.tables_prefix, **self.connection_info)
         self.josiedb.open()
         logging.getLogger('TestLog').info(f"Status PostgreSQL connection: {self.josiedb.is_open()}")
 
@@ -299,58 +357,6 @@ class JOSIETester(AlgorithmTester):
                                   dlh.datalake_location, dlh.datalake_name, dlh.size,
                                   dlh.mapping_id, dlh.numeric_columns,
                                   self.spark_local_dir, spark_jars_packages)
-
-        # match self.datalake_helper.datalake_location:
-        #     # in the end we must have a RDD with tuples (table_id, table_content, table_numeric_columns)
-        #     # with table_id as an integer,
-        #     # table_content as a list of list (rows)
-        #     # table_numeric_columns as a list of 0/1 values (0 => column i-th is not numeric, 1 otherwise)
-        #     case 'mongodb':
-        #             # if the datalake is stored on MongoDB, then through the connector we
-        #             # can easily access the tables
-        #             mongoclient = pymongo.MongoClient(directConnection=True)
-        #             
-        #             match self.dataset:
-        #                 case 'wikiturlsnap':
-        #                     databases, collections = ['optitab', 'sloth'], ['turl_training_set', 'latest_snapshot_tables']
-        #                 case 'gittables':
-        #                     if 'sloth' in mongoclient.list_database_names():
-        #                         databases = ['sloth']
-        #                     elif 'dataset' in mongoclient.list_database_names():
-        #                         databases = ['datasets']
-        #                     collections = ['gittables']
-        #                 case 'wikitables':
-        #                     databases, collections = ['datasets'], ['wikitables']
-        #                     
-        #             collections = [c + '_small' if self.size == 'small' else c for c in collections]
-        #             db_collections = zip(databases, collections)
-# 
-        #             initial_rdd = spark.sparkContext.emptyRDD()
-# 
-        #             for database, collection_name in db_collections:
-        #                 initial_rdd = initial_rdd.union(
-        #                     spark 
-        #                     .read 
-        #                     .format("mongodb") 
-        #                     .option ("uri", "mongodb://127.0.0.1:27017/") 
-        #                     .option("database", database) 
-        #                     .option("collection", collection_name) 
-        #                     .load() 
-        #                     .select('_id_numeric', 'content', 'numeric_columns') 
-        #                     .rdd
-        #                     .map(list)
-        #                 )
-        #     case _:
-        #             # otherwise, if the datalake is stored on disk as CSV files, then we can access it using
-        #             # the helper class
-        #             initial_rdd = spark.sparkContext.parallelize([(id_num, id_name) for id_num, id_name in dlh._mapping_id.items()])
-# 
-        #             initial_rdd = initial_rdd.map(
-        #                 lambda tabid_tabf: (tabid_tabf[0], pl.read_csv(f'{dlh.datalake_location}/{tabid_tabf[1]}.csv', infer_schema_length=0, encoding='latin1').rows())
-        #             ).map(
-        #                 lambda tid_tab: (tid_tab[0], tid_tab[1], dlh._numeric_columns[tid_tab[0]])
-        #             )
-        
 
 
         def prepare_tuple(t):

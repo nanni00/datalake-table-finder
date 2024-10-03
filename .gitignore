@@ -31,3 +31,4 @@ cache
 .git
 .vscode
 pyrightconfig.json
+MATE/src/mate_index.db

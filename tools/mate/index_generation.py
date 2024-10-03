@@ -6,7 +6,7 @@ where the tuple (TABLE_ID, COLUMN_ID, ROW_ID) is PK
 
 "tokeinzed" should be the tokenized+stemmed version of "token", but in JOSIE
 we didn't do any of these passages (except a basic replacement for characters '\n' and '|')
-so here we should keep the same
+so here we keep the same
 """
 import os
 import math
@@ -17,7 +17,6 @@ from collections import Counter
 import numpy as np
 
 from pyspark.sql.types import StructType, StructField, StringType, IntegerType, LongType
-# from sqlalchemy.engine import create_engine
 from sqlalchemy import (
     Table, Column, 
     create_engine,
@@ -26,11 +25,11 @@ from sqlalchemy import (
 )
 
 from tools.josie import get_spark_session
-from tools.utils.misc import clean_string, is_valid_table
-
-
-
-MAX_BIGINT_SIZE = 9223372036854775807
+from tools.utils.settings import DefaultPath as dp
+from tools.utils.misc import (
+    clean_string, is_valid_table, 
+    lowercase_translator, whitespace_translator, punctuation_translator
+)
 
 
 def XASH(token: str, hash_size: int = 128) -> int:
@@ -81,20 +80,19 @@ def XASH(token: str, hash_size: int = 128) -> int:
     result = int((x | y) % r)
 
     result = int(result) | int(math.pow(2, len(token) % (hash_size - length_bit_start)) * math.pow(2, length_bit_start))
-    while abs(result) > MAX_BIGINT_SIZE:
-        result /= 10
+
     return int(result)
 
 
-def mate__table_to_posting_lists(table_id:int, table:list, bad_columns:list[int], blacklist:set, hash_size:int):
+def mate__table_to_posting_lists(table_id:int, table:list, bad_columns:list[int], blacklist:set, hash_size:int, string_translators=[]):
     def row_xash(row):
-        return reduce(lambda a, b: a | b, map(lambda t: XASH(str(t), hash_size), row), 0)
+        return reduce(lambda a, b: a | b, map(lambda t: XASH(str(t)[:255], hash_size), row), 0)
 
     return sorted([
-        [table_id, column_id, row_id, clean_string(cell), row_xash(row)]
+        [table_id, column_id, row_id, clean_string(cell, *string_translators)[:255], str(row_xash(row))]
         for row_id, row in enumerate(table)
             for column_id, cell in enumerate(row)
-                if not bad_columns[column_id] and clean_string(cell) not in blacklist and cell not in blacklist
+                if not bad_columns[column_id] and clean_string(cell, *string_translators) not in blacklist and cell not in blacklist
         ], key=lambda x: (x[0], x[1], x[2]))
 
 
@@ -112,83 +110,70 @@ def mate__create_inverted_index_table(posting_lists_tablename, **connection_info
         Column('colid',     Integer,        primary_key=True),
         Column('rowid',     Integer,        primary_key=True),
         Column('tokenized', VARCHAR(255)),
-        Column('superkey',  BigInteger)
+        Column('superkey',  VARCHAR(255))
     )
 
     metadata.create_all(engine)
     engine.dispose()
 
 
-def mate__create_inverted_index(hash_size:int, processes:int, blacklist:set, posting_lists_tablename, **connection_info):
+def mate__create_inverted_index(hash_size:int, processes:int, blacklist:set, posting_lists_tablename:str, string_translators:dict|None=None, **connection_info):
     mate__create_inverted_index_table(posting_lists_tablename, **connection_info)
-
+    
     jars = [
         'org.mongodb.spark:mongo-spark-connector_2.12:10.3.0',
-        'org.duckdb:duckdb_jdbc:1.0.0'
+        'org.duckdb:duckdb_jdbc:1.0.0',
+        'org.postgresql:postgresql:42.7.3'
     ]
     
     url = f"jdbc:{connection_info['url']}"
     properties = {
-        "driver": "org.duckdb.DuckDBDriver"
+        # driver": "org.duckdb.DuckDBDriver"
+        "user": "nanni",
+        "password": "",
+        "driver": "org.postgresql.Driver",
+        "batchsize": 5000
     }
 
-    _, initial_rdd = get_spark_session(processes, 'mongodb', 'wikiturlsnap', spark_local_dir='/data4/nanni/spark', spark_jars_packages=jars)
-    """
-    databases, collections = ['optitab', 'sloth'], ['turl_training_set', 'latest_snapshot_tables']            
-    db_collections = zip(databases, collections)
-    initial_rdd = spark.sparkContext.emptyRDD()
-    for database, collection_name in db_collections:
-        initial_rdd = initial_rdd.union(
-            spark 
-            .read 
-            .format("mongodb") 
-            .option ("uri", "mongodb://127.0.0.1:27017/") 
-            .option("database", database) 
-            .option("collection", collection_name) 
-            .load() 
-            .select('_id_numeric', 'content', 'numeric_columns') 
-            .rdd
-            .map(list)
-        )
-    """
 
-    def prepare_tuple(table_id:int, table_rows:list, bad_columns:list):
-        nonlocal hash_size, blacklist
-        return mate__table_to_posting_lists(table_id, table_rows, bad_columns, hash_size=hash_size, blacklist=blacklist)
+    _, initial_rdd = get_spark_session(processes, 'mongodb', 'wikiturlsnap', spark_local_dir='/data4/nanni/spark', spark_jars_packages=jars)
     
     schema = StructType(
         [
             StructField('tableid',      IntegerType(),  False), 
             StructField('colid',        IntegerType(),  False),
             StructField('rowid',        IntegerType(),  False),
-            StructField('tokenized',    StringType(),   True),
-            StructField('superkey',     LongType(),     False)
+            StructField('tokenized',    StringType(),   False),
+            StructField('superkey',     StringType(),   False)
         ]
     )
+
+    def prepare_tuple(table_id:int, table_rows:list, bad_columns:list):
+        nonlocal hash_size, blacklist, string_translators
+        return mate__table_to_posting_lists(table_id, table_rows, bad_columns, hash_size=hash_size, blacklist=blacklist, string_translators=string_translators)
 
     # posting lists creation and storing on DB
     (
         initial_rdd
-        # .sample(False, 0.1)
         .filter(lambda t: is_valid_table(t[1], t[2]))
         .flatMap(lambda t: prepare_tuple(*t))
         .toDF(schema=schema)
         .write
-        .jdbc(url, posting_lists_tablename, 'overwrite', properties)
+        .jdbc(url, posting_lists_tablename, 'append', properties) # the overwrite mode drops also the index...
     )
 
 
 if __name__ == '__main__':
-    db_path = f"{os.path.dirname(__file__)}/mate_index.db"
-    if os.path.exists(db_path):
-        os.remove(db_path)
+    # db_path = f"{dp.data_path.base}/mate_index.db"
     connection_info = {
-        'url': f'duckdb:///{db_path}'
+        # 'url': f'duckdb:///{db_path}'
+        'url': f'postgresql://localhost:5442/nanni'
     }
 
-    posting_lists_tablename = 'wikiturlsnap_main'
-
+    hash_size = 128
+    posting_lists_tablename = f'mate__wikiturlsnap_table_{hash_size}'
+    custom_translator = str.maketrans(';$_\n|', '     ')
     start = time()
-    mate__create_inverted_index(64, 72, set(), posting_lists_tablename, **connection_info)
+    mate__create_inverted_index(hash_size, 72, set(), posting_lists_tablename, [custom_translator], **connection_info)
     step1 = time()
     print(f'create init index time: {round(step1 - start, 3)}s')

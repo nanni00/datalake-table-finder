@@ -1,13 +1,13 @@
-from itertools import chain
-from typing import List
-import pandas as pd
-# import vertica_python
-from base import *
 import os.path
+from typing import List
+from itertools import chain
 
+# import vertica_python
+import pandas as pd
+from sqlalchemy.orm import Session, Bundle
 from sqlalchemy import create_engine, MetaData, select, func
-from sqlalchemy.orm import Session
 
+from tools.mate.base import *
 
 class DBHandler:
     """Bloom filter using murmur3 hash function.
@@ -18,21 +18,13 @@ class DBHandler:
         Name of the main inverted index table in the database.
     """
     def __init__(self, mate_cache_path:str, main_table_name: str = 'main_tokenized', **connection_info):
-        # conn_info = {
-        #     'host': 'SERVER_IP_ADDRESS',
-        #      'port': 5433,
-        #      'user': 'USERNAME',
-        #      'password': 'PASSWORD',
-        #      'database': 'DATABASE_NAME',
-        #      'session_label': 'some_label',
-        #      'read_timeout': 6000,
-        #      'unicode_error': 'strict',
-        # }
-        # connection = vertica_python.connect(**conn_info)
-        # self.cur = connection.cursor()
-        self.engine = create_engine(**connection_info)
         self.main_table_name = main_table_name
         self.mate_cache_path = mate_cache_path
+        self.engine = create_engine(**connection_info)
+        metadata = MetaData(self.engine)
+        metadata.reflect()
+        self.table = metadata.tables[self.main_table_name]
+
 
     def get_concatinated_posting_list(self,
                                       dataset_name: str,
@@ -73,25 +65,29 @@ class DBHandler:
             return pl
         else:
             distinct_clean_values = value_list.unique().tolist()
-            # print('clean values:', distinct_clean_values)
-            metadata = MetaData(self.engine)
-            metadata.reflect()
-            table = metadata.tables[self.main_table_name]
-            
             if top_k != -1:
-                stmt = select(func.concat(table.c.tableid, "_", table.c.rowid, ";", table.c.colid, "_", table.c.tokenized, "$", table.c.superkey).distinct()) \
+                stmt = (
+                    # select(func.concat(self.table.c.tableid, "_", self.table.c.rowid, ";", self.table.c.colid, "_", self.table.c.tokenized, "$", self.table.c.superkey).distinct())
+                    select(self.table.c.tableid, self.table.c.rowid, self.table.c.colid, self.table.c.tokenized, self.table.c.superkey)
                     .where(
                         func.regexp_replace(
-                            func.regexp_replace(table.c.tokenized, '\W+', ' '), ' +', ' '
-                        ).in_(distinct_clean_values)
-                    ).limit(top_k)
+                            func.regexp_replace(self.table.c.tokenized, '\W+', ' '), ' +', ' '
+                        ).in_(distinct_clean_values))
+                    .limit(top_k)
+                )
             else:
-                stmt = select(func.concat(table.c.tableid, "_", table.c.rowid, ";", table.c.colid, "_", table.c.tokenized, "$", table.c.superkey).distinct()) \
-                    .where(table.c.tokenized.in_(distinct_clean_values))
+                stmt = (
+                    # select(func.concat(self.table.c.tableid, "_", self.table.c.rowid, ";", self.table.c.colid, "_", self.table.c.tokenized, "$", self.table.c.superkey).distinct()) \
+                    select(self.table.c.tableid, self.table.c.rowid, self.table.c.colid, self.table.c.tokenized, self.table.c.superkey)
+                    .where(self.table.c.tokenized.in_(distinct_clean_values))
+                )
 
             with Session(self.engine) as session:
-                pl = list(chain(*session.execute(stmt)))
-
+                # pl = session.execute(stmt)
+                if top_k == -1:
+                    pl = session.query(self.table).filter(self.table.c.tokenized.in_(distinct_clean_values)).distinct() \
+                        .with_entities(self.table.c.tableid, self.table.c.rowid, self.table.c.colid, self.table.c.tokenized, self.table.c.superkey)
+            
             if top_k == -1 and not database_request:
                 with open(f"{self.mate_cache_path}/{dataset_name}_{query_column_name}_concatenated_posting_list.txt", "w") as f:
                     for s in pl:
@@ -111,31 +107,15 @@ class DBHandler:
         List[List[str]]
             Posting lists for given table_row_ids.
         """
-        distinct_clean_values = list(set(joint_list))
-        # joint_distinct_values = '\',\''.join(distinct_clean_values)
-        
-        #tables = '\',\''.join(list(set([x.split('_')[0] for x in joint_list])))
-        tables = list(set([x.split('_')[0] for x in joint_list]))
+        distinct_clean_values = set(joint_list)
+        tables, rows = zip(*map(lambda s: s.split('_'), joint_list))
 
-        # rows = '\',\''.join(list(set([x.split('_')[1] for x in joint_list])))
-        rows = list(set([x.split('_')[1] for x in joint_list]))
-        metadata = MetaData(self.engine)
-        metadata.reflect()
-        table = metadata.tables[self.main_table_name]
-
-        query = select(func.concat(table.c.tableid, '_', table.c.rowid), table.c.colid, table.c.tokenized) \
-            .where(table.c.tableid.in_(tables)) \
-            .where(table.c.rowid.in_(rows)) \
-            .where(func.concat(table.c.tableid, '_', table.c.rowid).in_(distinct_clean_values))
-            
-        # query = f'SELECT concat(concat(tableid, \'_\'), rowid), colid, tokenized ' \
-        #         f'FROM {self.main_table_name} ' \
-        #         f'WHERE tableid IN (\'{tables}\') ' \
-        #         f'AND rowid IN(\'{rows}\') ' \
-        #         f'AND concat(concat(tableid, \'_\'), rowid) IN (\'{joint_distinct_values}\');'
-        # self.cur.execute(query)
-        # pl = self.cur.fetchall()
-        # return pl
+        query = (
+            select(func.concat(self.table.c.tableid, '_', self.table.c.rowid), self.table.c.colid, self.table.c.tokenized)
+            .where(self.table.c.tableid.in_(tables))
+            .where(self.table.c.rowid.in_(rows))
+            .where(func.concat(self.table.c.tableid, '_', self.table.c.rowid).in_(distinct_clean_values))
+        )
 
         with Session(self.engine) as session:
             return list(session.execute(query))
