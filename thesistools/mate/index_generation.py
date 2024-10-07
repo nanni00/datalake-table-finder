@@ -8,7 +8,6 @@ where the tuple (TABLE_ID, COLUMN_ID, ROW_ID) is PK
 we didn't do any of these passages (except a basic replacement for characters '\n' and '|')
 so here we keep the same
 """
-import os
 import math
 from time import time
 from functools import reduce
@@ -20,13 +19,13 @@ from pyspark.sql.types import StructType, StructField, StringType, IntegerType, 
 from sqlalchemy import (
     Table, Column, 
     create_engine,
-    Integer, VARCHAR, BigInteger, 
+    Integer, VARCHAR, 
     MetaData
 )
+from sqlalchemy.engine import URL
 
-from tools.josie import get_spark_session
-from tools.utils.settings import DefaultPath as dp
-from tools.utils.misc import (
+from thesistools.utils.spark import get_spark_session
+from thesistools.utils.misc import (
     clean_string, is_valid_table, 
     lowercase_translator, whitespace_translator, punctuation_translator
 )
@@ -84,7 +83,7 @@ def XASH(token: str, hash_size: int = 128) -> int:
     return int(result)
 
 
-def mate__table_to_posting_lists(table_id:int, table:list, bad_columns:list[int], blacklist:set, hash_size:int, string_translators=[]):
+def table_to_posting_lists(table_id:int, table:list, bad_columns:list[int], blacklist:set, hash_size:int, string_translators=[]):
     def row_xash(row):
         return reduce(lambda a, b: a | b, map(lambda t: XASH(str(t)[:255], hash_size), row), 0)
 
@@ -96,7 +95,7 @@ def mate__table_to_posting_lists(table_id:int, table:list, bad_columns:list[int]
         ], key=lambda x: (x[0], x[1], x[2]))
 
 
-def mate__create_inverted_index_table(posting_lists_tablename, **connection_info):
+def create_inverted_index_table(posting_lists_tablename, **connection_info):
     engine = create_engine(**connection_info)
     metadata = MetaData(engine)
 
@@ -117,26 +116,17 @@ def mate__create_inverted_index_table(posting_lists_tablename, **connection_info
     engine.dispose()
 
 
-def mate__create_inverted_index(hash_size:int, processes:int, blacklist:set, posting_lists_tablename:str, string_translators:dict|None=None, **connection_info):
-    mate__create_inverted_index_table(posting_lists_tablename, **connection_info)
-    
-    jars = [
-        'org.mongodb.spark:mongo-spark-connector_2.12:10.3.0',
-        'org.duckdb:duckdb_jdbc:1.0.0',
-        'org.postgresql:postgresql:42.7.3'
-    ]
-    
-    url = f"jdbc:{connection_info['url']}"
-    properties = {
-        # driver": "org.duckdb.DuckDBDriver"
-        "user": "nanni",
-        "password": "",
-        "driver": "org.postgresql.Driver",
-        "batchsize": 5000
+def create_inverted_index(hash_size:int, processes:int, blacklist:set, posting_lists_tablename:str, string_translators:dict|None, connection_info:dict|None, spark_config:dict|None):
+    url = URL.create(**connection_info)
+    jdbc_url = f'jdbc:{URL.create(drivername=url.drivername, database=url.database, host=url.host, port=url.port)}'
+    jdbc_properties = {
+        'user': url.username,
+        'password': url.password
     }
-
-
-    _, initial_rdd = get_spark_session(processes, 'mongodb', 'wikiturlsnap', spark_local_dir='/data4/nanni/spark', spark_jars_packages=jars)
+    
+    create_inverted_index_table(posting_lists_tablename, **connection_info)
+    
+    _, initial_rdd = get_spark_session(processes, 'mongodb', 'wikiturlsnap', **spark_config)
     
     schema = StructType(
         [
@@ -150,7 +140,7 @@ def mate__create_inverted_index(hash_size:int, processes:int, blacklist:set, pos
 
     def prepare_tuple(table_id:int, table_rows:list, bad_columns:list):
         nonlocal hash_size, blacklist, string_translators
-        return mate__table_to_posting_lists(table_id, table_rows, bad_columns, hash_size=hash_size, blacklist=blacklist, string_translators=string_translators)
+        return table_to_posting_lists(table_id, table_rows, bad_columns, hash_size=hash_size, blacklist=blacklist, string_translators=string_translators)
 
     # posting lists creation and storing on DB
     (
@@ -159,21 +149,48 @@ def mate__create_inverted_index(hash_size:int, processes:int, blacklist:set, pos
         .flatMap(lambda t: prepare_tuple(*t))
         .toDF(schema=schema)
         .write
-        .jdbc(url, posting_lists_tablename, 'append', properties) # the overwrite mode drops also the index...
+        .jdbc(jdbc_url, posting_lists_tablename, 'append', jdbc_properties) # the overwrite mode drops also the index...
     )
 
 
 if __name__ == '__main__':
-    # db_path = f"{dp.data_path.base}/mate_index.db"
     connection_info = {
-        # 'url': f'duckdb:///{db_path}'
-        'url': f'postgresql://localhost:5442/nanni'
+        'drivername': 'postgresql',
+        'database': 'JOSIEDB',
+        'username': 'nanni',
+        'password': '',
+        'port': 5442,
+        'host': 'localhost'
+    }
+
+    num_cpu = 64
+    spark_local_dir = '/data4/nanni/spark'
+
+    # the Spark JAR for JDBC should not be inserted there, since it's a known issue
+    # that a JAR passed as package here won't be retrieved as driver class
+    spark_jars_packages = [
+        'org.mongodb.spark:mongo-spark-connector_2.12:10.3.0',
+        'org.duckdb:duckdb_jdbc:1.0.0'
+    ]
+
+    # driver_path = '$HOME/.ivy2/jars/org.postgresql:postgresql:42.7.3'
+    spark_config = {
+        'spark.app.name':               'JOSIE Data Preparation',
+        'spark.master':                 f"local[{num_cpu}]",
+        'spark.executor.memory':        '100g',
+        'spark.driver.memory':          '20g',
+        'spark.local.dir':              spark_local_dir,
+        'spark.driver.maxResultSize':   '12g',
+        'spark.jars.packages':          ','.join(spark_jars_packages),
+        'spark.driver.extraClassPath':  '/path/to/driver/jar'
     }
 
     hash_size = 128
     posting_lists_tablename = f'mate__wikiturlsnap_table_{hash_size}'
     custom_translator = str.maketrans(';$_\n|', '     ')
+    
     start = time()
-    mate__create_inverted_index(hash_size, 72, set(), posting_lists_tablename, [custom_translator], **connection_info)
+    create_inverted_index(hash_size, 72, set(), posting_lists_tablename, [custom_translator], connection_info, spark_config)
     step1 = time()
+    
     print(f'create init index time: {round(step1 - start, 3)}s')

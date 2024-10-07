@@ -1,13 +1,12 @@
-from functools import reduce
-from itertools import chain
 import os
 import re
-import sys
 import curses
 import binascii
+from time import time
+from itertools import chain
+from functools import reduce
 import multiprocessing as mp
 from collections import defaultdict
-from time import time
 
 import pandas as pd
 from tqdm import tqdm
@@ -16,12 +15,12 @@ from sqlalchemy import create_engine, MetaData, select, insert, delete, inspect
 from sqlalchemy.orm import Session
 
 
-from tools.utils.parallel import chunks
-from tools.utils.datalake import SimpleDataLakeHelper
-from tools.utils.logging import logging_setup, info
-from tools.utils.misc import is_valid_multi_key, is_valid_table, table_columns_to_rows, table_to_tokens, largest_overlap_sloth, table_rows_to_columns
-from tools.utils.settings import DefaultPath as dp
-from tools.mate.MATE import MATETableExtraction
+from thesistools.myutils.parallel import chunks
+from thesistools.myutils.datalake import SimpleDataLakeHelper
+from thesistools.myutils.logging import logging_setup, info
+from thesistools.myutils.misc import is_valid_multi_key, is_valid_table, table_columns_to_rows, table_to_tokens, largest_overlap_sloth, table_rows_to_columns
+from thesistools.myutils.settings import DefaultPath as dp
+from thesistools.mate.MATE import MATETableExtraction
 
 
 def get_result_ids(s): 
@@ -35,25 +34,26 @@ def parse_results(r):
 
 def josie_multi_query(queries:list[int:set[int]], k, results_file, dbname, tables_prefix) -> list[tuple[int, list[tuple[int, int]]]]:
     def create_query_table(queries:list[int:set[int]], dbname, tables_prefix):    
-        # josiedb.open()
-        # josiedb.clear_query_table()
-        with Session(josie_db_engine) as session:
-            session.execute(delete(josie__queries_table))
-            session.commit()
-
-            for table_id, tokens_ids in queries:
-                session.execute(insert(josie__queries_table).values(
-                    id=table_id,
-                    tokens=tokens_ids)
-                )
-            session.commit()
-                # try:
-                #     josiedb._dbconn.execute(f"INSERT INTO {tables_prefix}_queries VALUES ({table_id}, ARRAY[{','.join(map(str, tokens_ids))}]);")
-                # except:
-                #     print('error: ', table_id, ' ### ', tokens_ids)
-                #     raise Exception()
-            # josiedb._dbconn.commit()
-
+        with josie_db_engine.connect() as connection:
+            connection.execute(delete(josie__queries_table))
+            values = [{'id': table_id, 'tokens': tokens_ids} for table_id, tokens_ids in queries]
+            connection.execute(josie__queries_table.insert(), values)
+            # for table_id, tokens_ids in queries:
+            #     connection.execute(
+            #         insert(josie__queries_table).values(
+            #             id=table_id,
+            #             tokens=tokens_ids))
+                
+        # with Session(josie_db_engine) as session:
+        #     session.execute(delete(josie__queries_table))
+        #     session.commit()
+        #     for table_id, tokens_ids in queries:
+        #         session.execute(insert(josie__queries_table).values(
+        #             id=table_id,
+        #             tokens=tokens_ids)
+        #         )
+        #     session.commit()
+                
         GOPATH = os.environ['GOPATH']
         josie_cmd_dir = f'{GOPATH}/src/github.com/ekzhu/josie/cmd'
         os.chdir(josie_cmd_dir)
@@ -61,19 +61,14 @@ def josie_multi_query(queries:list[int:set[int]], k, results_file, dbname, table
         # if cost sampling tables already exist we assume they are correct and won't recreate them
         # sample_costs_tables_exist = josiedb.cost_tables_exist()
 
-        # josiedb.close()
-        # josie__read_set_cost_table = metadata.tables[f'{tables_prefix}_read_set_cost_samples']
-        # josie__read_list_cost_table = metadata.tables[f'{tables_prefix}_read_list_cost_samples']
-
         sample_costs_tables_exist = (inspect(josie_db_engine).has_table(f'{tables_prefix}_read_set_cost_samples') \
                                      or inspect(josie_db_engine).has_table(f'{tables_prefix}_read_list_cost_samples'))
 
         if not sample_costs_tables_exist:
-            os.system(f'''
-                      go run {josie_cmd_dir}/sample_costs/main.go
-                        --pg-database={dbname}
-                        --test_tag={tables_prefix}
-                        --pg-table-queries={tables_prefix}_queries''')
+            os.system(f'go run {josie_cmd_dir}/sample_costs/main.go \
+                        --pg-database={dbname} \
+                        --test_tag={tables_prefix} \
+                        --pg-table-queries={tables_prefix}_queries')
     def query(results_file, k, results_directory, dbname, tables_prefix):
         # we are not considering the query preparation steps, since in some cases this will 
         # include also the cost sampling phase and in other cases it won't
@@ -85,15 +80,14 @@ def josie_multi_query(queries:list[int:set[int]], k, results_file, dbname, table
         
         x = 'true' if token_table_on_memory else 'false'
 
-        os.system(f'''
-                  go run {josie_cmd_dir}/topk/main.go
-                    --pg-database={dbname}
-                    --test_tag={tables_prefix}
-                    --outputDir={results_directory}
-                    --resultsFile={results_file}
-                    --useMemTokenTable={x}
-                    --k={k}
-                    --verbose=false''')
+        os.system(f'go run {josie_cmd_dir}/topk/main.go \
+                    --pg-database={dbname} \
+                    --test_tag={tables_prefix} \
+                    --outputDir={results_directory} \
+                    --resultsFile={results_file} \
+                    --useMemTokenTable={x} \
+                    --k={k} \
+                    --verbose=false')
     results_directory = os.path.dirname(results_file)
     create_query_table(queries, dbname, tables_prefix)
     query(results_file, k, results_directory, dbname, tables_prefix)
@@ -111,7 +105,7 @@ def task_compute_overlaps(data):
     qid, res_list, query_cols, min_h, min_w, max_w = data
     dlh = SimpleDataLakeHelper(datalake_location, datalake, size)
     x = []
-    for rank, rid  in tqdm(enumerate(res_list), leave=False, disable=False if os.getpid() % N == 0 else True):
+    for rank, rid  in enumerate(res_list):
         rid = int(rid)
         columns_ov = compute_columns_largest_overlap(rid, dlh, query_cols, min_w=min_w, min_h=min_h)
         x.append([rid, rank, columns_ov])
@@ -151,7 +145,7 @@ N = 600
 K = 50
 
 # we want to find overlaps where the join covers at least this percentage of rows (see SLOTH paper)
-min_h = 0.9
+min_h = 0.6
 
 # these will be set accordingly to the list of names used as candidate join columns
 min_w = None
@@ -334,6 +328,57 @@ for i, names in enumerate(list_names):
             query_columns[qtobj['_id_numeric']].append(table[i])
 
 
+
+    def task_mate(data):
+        results = {}
+        timestat = []
+        mate = MATETableExtraction(dataset_name, None, 
+                                   K, table_name, ones=one_bits, 
+                                   min_join_ratio=min_join_ratio,
+                                   is_min_join_ratio_absolute=False, 
+                                   **mate_db_connection_info)
+        
+        for qid, qcolumns in tqdm(data[0], disable=os.getpid() % 60 != 0):
+            query_dataset = pd.DataFrame(data=list(zip(*qcolumns)))
+            
+            start = time()
+            mate_results = mate.MATE(hash_size, True, query_dataset, query_dataset.columns)
+            end = time()
+        
+            results[qid] = [r[1] for r in mate_results if r[1] != qid]
+            timestat.append(round(end - start, 3))
+        # just to be sure that we don't keep alive too many connections
+        mate.dbh.engine.dispose()
+        return timestat, results
+    
+    def update_dict(x, y):
+        x.update(y)
+        return x
+    
+    info('4. Apply MATE')
+    info(f'\ta. Search candidates with MATE len(work)={len(list(query_columns.items()))}...')
+    processes = 64
+    with mp.Pool(processes) as pool:
+        work = list(query_columns.items())
+        
+        start_total_mate_time = time()
+        timing, mate_results = list(zip(*pool.map(task_mate, chunks(work, max(len(work) // processes, 1)), 1)))
+        total_mate_time = round(time() - start_total_mate_time, 5)
+        
+        mate_results = reduce(update_dict, mate_results)
+        
+        with open(mate_time_file, 'a') as fa:
+            fa.writelines(map(lambda t: str(t) + '\n', timing))
+            fa.write(str(total_mate_time) + '\n')
+
+    
+    info('\tb. Compute largest overlap for MATE results...')
+    with mp.Pool() as pool:
+        work = [(qid, mate_results[qid], query_columns[qid], min_h, min_w, max_w) for qid in mate_results.keys()]
+        mate_results = dict(pool.map(task_compute_overlaps, work))
+
+
+
     info('2. Apply JOSIE with single-column queries (baseline)')
     single_column_bags = {qid: [table_to_tokens([column], mode, [0] * len(column), blacklist=blacklist) # the column is considered as a row-view table
                                 for column in query_columns[qid]] for qid in query_columns.keys()}
@@ -415,53 +460,6 @@ for i, names in enumerate(list_names):
     with mp.Pool() as pool:
         work = [(qid, [r[0] for r in multi_columns_results[qid]], query_columns[qid], min_h, min_w, max_w) for qid in multi_columns_results.keys()]
         multi_columns_results = dict(pool.map(task_compute_overlaps, work))
-
-
-    def task_mate(data):
-        results = {}
-        timestat = []
-        mate = MATETableExtraction(dataset_name, None, 
-                                   K, table_name, ones=one_bits, 
-                                   min_join_ratio=min_join_ratio,
-                                   is_min_join_ratio_absolute=False, 
-                                   **mate_db_connection_info)
-        
-        for qid, qcolumns in data[0]:
-            query_dataset = pd.DataFrame(data=qcolumns).T
-            start = time()
-            mate_results = mate.MATE(hash_size, query_dataset, query_dataset.columns)
-            end = time()
-        
-            results[qid] = [r[1] for r in mate_results if r[1] != qid]
-            timestat.append(round(end - start, 3))
-        
-        return timestat, results
-    
-    def update_dict(x, y):
-        x.update(y)
-        return x
-    
-    info('4. Apply MATE')
-    info(f'\ta. Search candidates with MATE len(work)={len(list(query_columns.items()))}...')
-    processes = 2
-    with mp.Pool(processes) as pool:
-        work = list(query_columns.items())
-        
-        start_total_mate_time = time()
-        timing, mate_results = list(zip(*pool.map(task_mate, chunks(work, max(len(work) // processes, 1)), 1)))
-        total_mate_time = round(time() - start_total_mate_time, 5)
-        
-        mate_results = reduce(update_dict, mate_results)
-        
-        with open(mate_time_file, 'a') as fa:
-            fa.writelines(map(lambda t: str(t) + '\n', timing))
-            fa.write(str(total_mate_time) + '\n')
-
-    
-    info('\tb. Compute largest overlap for MATE results...')
-    with mp.Pool() as pool:
-        work = [(qid, mate_results[qid], query_columns[qid], min_h, min_w, max_w) for qid in mate_results.keys()]
-        mate_results = dict(pool.map(task_compute_overlaps, work))
 
 
     # save the results from both the baseline and MC versions for future analyses

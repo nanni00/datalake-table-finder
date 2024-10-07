@@ -8,8 +8,8 @@ import pymongo
 import polars as pl
 from tqdm import tqdm
 
-from tools.utils.datalake import get_mongodb_collections
-from tools.utils.settings import DefaultPath as dp
+from thesistools.utils.datalake import get_mongodb_collections
+from thesistools.utils.settings import DefaultPath as dp
 
 
 gittables_csv_folder = f'{dp.data_path.base}/raw_dataset/gittables_parquet'

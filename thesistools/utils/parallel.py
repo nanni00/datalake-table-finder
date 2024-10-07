@@ -1,6 +1,4 @@
-from tools.utils.metrics import *
-
-
+from thesistools.utils.metrics import *
 
 
 def chunks(sequence, chunk_size, *args):
@@ -20,7 +18,6 @@ def worker_fp_per_query(inp):
     return y
 
 
-
 def worker_precision(inp):
     query_id, data, p_values, query_silver_standard = inp
 
@@ -38,8 +35,6 @@ def worker_precision(inp):
             f1 = f_score(prec, rec)
             results.append([query_id, len(query_silver_standard), algorithm, mode, _p, prec, rel_prec, rec, f1])
     return results
-
-
 
 
 def worker_ndcg(inp):

@@ -1,14 +1,14 @@
-from argparse import ArgumentParser
-import json
 import os
+import json
+from argparse import ArgumentParser
 
 from analysis_pl import analyses
 from extract_results import extract_results
 from main_pipeline import main_pipeline
 
-from tools.utils.misc import sample_queries
-from tools.utils.datalake import SimpleDataLakeHelper
-from tools.utils.settings import get_all_paths 
+from thesistools.utils.misc import sample_queries
+from thesistools.utils.datalake import SimpleDataLakeHelper
+from thesistools.utils.settings import get_all_paths 
 from numerize_denumerize.numerize import numerize
 
 

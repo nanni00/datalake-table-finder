@@ -13,11 +13,11 @@ import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
 from numerize_denumerize.numerize import numerize
 
-from tools.utils import basicconfig
-from tools.utils.logging import logging_setup, info
-from tools.utils.settings import make_parser, get_all_paths
+from thesistools.utils import basicconfig
+from thesistools.utils.logging_handler import logging_setup, info
+from thesistools.utils.settings import make_parser, get_all_paths
 # from tools.utils.misc import get_local_time
-from tools.utils.parallel import worker_fp_per_query, worker_ndcg, worker_precision
+from thesistools.utils.parallel import worker_fp_per_query, worker_ndcg, worker_precision
 
 
 
@@ -29,13 +29,14 @@ def analyses(test_name, k, num_query_samples, num_cpu, dataset, size, p_values,
     assert dataset in basicconfig.DATALAKES
     assert size in basicconfig.DATALAKE_SIZES
     
+    alpha = 1
+    showfliers = False
+
     test_name = test_name.lower()
     q = numerize(num_query_samples, asint=True)
-
-    TEST_DATASET_DIR, _, logfile, _, _, \
-        _, results_extr_dir, \
-            _, runtime_stat_file, _ = get_all_paths(test_name, dataset, k, num_query_samples)
     
+    paths = get_all_paths(test_name, dataset, k, num_query_samples)
+    TEST_DATASET_DIR =      paths['TEST_DATASET_DIR']
     analyses_dir =          f'{TEST_DATASET_DIR}/results/analyses'
     analyses_query_dir =    f'{analyses_dir}/k{k}_q{q}'
     
@@ -50,7 +51,7 @@ def analyses(test_name, k, num_query_samples, num_cpu, dataset, size, p_values,
     
     analyses_dir = analyses_query_dir
 
-    logging_setup(logfile)
+    logging_setup(paths['logfile'])
     info(f' {test_name.upper()} - {dataset.upper()} - {size.upper()} - ANALYSES - {k} - {q} '.center(150, '-'))
 
     all_colors = colors = list(mcolors.TABLEAU_COLORS.keys())
@@ -58,10 +59,7 @@ def analyses(test_name, k, num_query_samples, num_cpu, dataset, size, p_values,
     markers = {m: 'o' if m[0] == 'josie' else 'x' if m[0] == 'lshforest' else 'd' for m in methods}
     methods = {m: c for m, c in zip(methods, colors[:len(methods)])}
 
-    alpha = 1
-    showfliers = False
-
-    results = pl.read_csv(f'{results_extr_dir}/final_results_k{k}_q{q}.csv')
+    results = pl.read_csv(f'{paths['results_extr_dir']}/final_results_k{k}_q{q}.csv')
     results = results.filter(pl.struct(['algorithm', 'mode']).is_in(list(map(lambda am: {'algorithm': am[0], 'mode': am[1]}, methods.keys()))))
 
     results = results.drop_nulls() # queries without any results
@@ -360,20 +358,3 @@ def analyses(test_name, k, num_query_samples, num_cpu, dataset, size, p_values,
     #         rfw.write("local_time,algorithm,mode,task,k,num_queries,time(s)\n")
     #     for (t_loctime, t_task, t_time) in runtime_metrics:
     #         rfw.write(f"{t_loctime},analysis,,{t_task},{k},{q},{t_time}\n")
-
-
-
-
-
-if __name__ == '__main__':
-    args = make_parser('test_name', 'num_cpu', 'num_query_samples', 'k', 'dataset', 'size', 'p_values')
-    test_name =         args.test_name
-    num_query_samples = args.num_query_samples
-    k =                 args.k
-    num_cpu =           args.num_cpu
-    dataset =           args.dataset
-    size =              args.size
-    p_values =          args.p_values
-
-
-    analyses(test_name, k, num_query_samples, num_cpu, dataset, size, p_values)

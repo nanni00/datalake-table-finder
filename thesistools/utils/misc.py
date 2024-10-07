@@ -7,15 +7,16 @@ import multiprocessing as mp
 from collections import defaultdict, Counter
 from string import whitespace, digits, punctuation, ascii_uppercase, ascii_lowercase
 
+import mmh3
 import pandas as pd
 from datasketch.minhash import MinHash
 
-from tools.sloth.sloth import sloth
-from tools.sloth.utils import parse_table
-from tools.utils.logging import info
-from tools.utils.parallel import chunks
-from tools.utils.datalake import SimpleDataLakeHelper
-from tools.utils.basicconfig import TablesThresholds as tab_thresh
+from thesistools.sloth.sloth import sloth
+from thesistools.sloth.utils import parse_table
+from thesistools.utils.logging_handler import info
+from thesistools.utils.parallel import chunks
+from thesistools.utils.datalake import SimpleDataLakeHelper
+from thesistools.utils.basicconfig import TablesThresholds as tab_thresh
 
 
 
@@ -26,8 +27,11 @@ punctuation_translator =    str.maketrans(punctuation, ' ' * len(punctuation))
 lowercase_translator =      str.maketrans(ascii_uppercase, ascii_lowercase)
 
 
+
+
 def jaccard(X:set, Y:set):
-    # set.union seems to be quite unefficient, more than computing in this way the union
+    # set.union seems to be quite unefficient, 
+    # more than computing in this way the union
     intersection_size = 0
     union_size = 0
     for x in X:
@@ -47,22 +51,14 @@ metrics = {
 }
 
 
+def mmh3_hashfunc(d):
+    return mmh3.hash(d, signed=False)
+
+
 def create_minhash(iterable):
     m = MinHash()
     m.update_batch([str(i).encode() for i in iterable])
     return m
-
-
-# def clean_str(token):
-#     return str(token).replace('|', ' ').replace('\n', ' ')
-
-# def token_to_str(token, *translators):
-#     return reduce(lambda to, tr: str(to).translate(tr), translators, str(token)).strip()
-
-# def tokenize_column(column, *translators, blacklist=[]):
-#     """Extract distinct tokens from the column, apply on them the translators and remove empty strings """
-#     column = [token_to_str(token, *translators) for token in set(column) if token not in blacklist]
-#     return [token for token in column if set(token)]
 
 
 def clean_string(s, *translators):
@@ -77,7 +73,6 @@ def column_to_text(column, *translators, blacklist=[], max_seq_len=512):
         if len(column) < max_seq_len: 
             return column
         return [x[0] for x in sorted(list(Counter(column).items()), key=lambda x: x[1], reverse=True)][:max_seq_len]
-    # return ' '.join(tokenize_column(column, *translators))
     return clean_string(' '.join([str(token) for token in most_frequent_tokens(column)]), *translators)
 
 
@@ -137,20 +132,6 @@ def is_valid_table(table, bad_columns):
 
 
 def is_valid_multi_key(names, table, bad_columns, headers):
-    """
-    Check if there is any functional dependency, i.e. there is a UNIQUE column
-    which isn't meaningful for our search
-    e.g. table
-        CITY   | STATE    | POPULATION
-        Rome   | Italy    | 2'750'000
-        Paris  | France   | 2'229'000
-        London | England  | 8'900'000
-        ...
-    then it's easy to see that CITY=>STATE, and thus a multi-key CITY-STATE isn't interesting
-
-    Also, check that the selected columns actually are a multi-key, 
-    i.e. no duplicates
-    """
     table = table_rows_to_columns(table, 0, len(table[0]), bad_columns)
     
     valid_headers = [h for i, h in enumerate(headers) if bad_columns[i] == 0]
@@ -199,16 +180,11 @@ def naive_detect_bad_columns(table: list[list], tokenize=lambda cell: cell) -> l
         
     if len(table) == 0 or len(table[0]) == 0:
         return []
-
-    return [
-        # int(sum(not cell or is_number_tryexcept(cell) for cell in column) >= len(column) // 2 + 1 or not any(cell for cell in column if not is_number_tryexcept(cell)))
-        int(is_bad_column(column, tokenize))
-        for column in parse_table(table, len(table[0]), 0)
-    ]
+    return [int(is_bad_column(column, tokenize)) for column in parse_table(table, len(table[0]), 0)]
 
 
 
-def table_to_tokens(table, mode, numeric_columns, encode=None, blacklist:set=set()):
+def table_to_tokens(table, mode, numeric_columns, encode=None, blacklist:set=set(), *string_transformers):
     """ Create the token set for the given table 
     :param table: a list of list (row-view) of the table content 
     :param mode: how to create the token set, with "set" or "bag" semantic
@@ -218,7 +194,7 @@ def table_to_tokens(table, mode, numeric_columns, encode=None, blacklist:set=set
     :param blacklist: a set of tokens that won't be considered
     """
     if mode == 'set':
-        tokens = list({clean_string(token) for row in table for icol, token in enumerate(row) 
+        tokens = list({clean_string(token, *string_transformers) for row in table for icol, token in enumerate(row) 
                      if not pd.isna(token) and token and numeric_columns[icol] == 0 and token not in blacklist})
     elif mode == 'bag':
         counter = defaultdict(int)

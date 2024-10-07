@@ -2,7 +2,7 @@ import argparse
 import pymongo
 from tqdm import tqdm
 
-from tools.utils.datalake import get_mongodb_collections
+from thesistools.utils.datalake import get_mongodb_collections
 
 
 

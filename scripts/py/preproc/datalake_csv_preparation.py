@@ -5,7 +5,7 @@ from tqdm import tqdm
 
 import polars as pl
 
-from tools.utils.misc import naive_detect_bad_columns
+from thesistools.utils.misc import naive_detect_bad_columns
 
 # TODO customize paths
 data_dir = '/data4/nanni/data/santos_large/datalake'

@@ -3,10 +3,10 @@ import numpy as np
 import pandas as pd
 from tqdm import tqdm
 
-from tools.utils.misc import is_valid_table, table_rows_to_rows
-from tools.utils.datalake import SimpleDataLakeHelper
-from tools.utils.settings import DefaultPath as defpath
-from tools.utils.parallel import chunks
+from thesistools.utils.misc import is_valid_table, table_rows_to_rows
+from thesistools.utils.datalake import SimpleDataLakeHelper
+from thesistools.utils.settings import DefaultPath as defpath
+from thesistools.utils.parallel import chunks
 import multiprocessing as mp
 
 dataset = "wikiturlsnap"

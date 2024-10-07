@@ -12,11 +12,11 @@ import numpy as np
 from tqdm import tqdm
 from simhash import Simhash
 
-from tools.mate.base import *
-from tools.mate.dbhandler import *
-from tools.mate.bloom_filter import BloomFilter
+from thesistools.mate.base import *
+from thesistools.mate.dbhandler import *
+from thesistools.mate.bloom_filter import BloomFilter
 
-from tools.utils.misc import clean_string
+from thesistools.utils.misc import clean_string
 
 import warnings
 warnings.filterwarnings('ignore')
@@ -341,6 +341,7 @@ class MATETableExtraction:
         return min_unique_value_number
 
     def MATE(self, hash_size: int = 128, 
+             run_ics: bool = False,
              query_dataset: pd.DataFrame|None = None,
              query_column_list: List[str]|None = None):
         """Runs MATE using XASH.
@@ -351,7 +352,7 @@ class MATETableExtraction:
             Number of bits.
         """
         # print('MATE')
-        return self.run_system(self.XASH, hash_size, query_dataset=query_dataset, query_column_list=query_column_list)
+        return self.run_system(self.XASH, hash_size, run_ics=run_ics, query_dataset=query_dataset, query_column_list=query_column_list)
 
     def SIMHASH(self, hash_size: int = 128) -> None:
         """Runs MATE using SIM Hash.
@@ -686,7 +687,7 @@ class MATETableExtraction:
                 .replace('unknown', np.nan)
             )
             self.input_data.dropna(subset=[q], inplace=True)
-        self.query_columns = query_column_list
+        self.query_columns = list(query_column_list)
         self.input_data = self.input_data[self.query_columns]
         self.input_size = len(self.input_data)
         
@@ -830,13 +831,11 @@ class MATETableExtraction:
             if pruned:
                 break
 
-        # print('---------------------------------------------')
-        # print(top_joinable_tables)
-        # print(len(top_joinable_tables))
-        # print(f'FP = {total_approved - total_match}')
+        print('---------------------------------------------')
+        print(top_joinable_tables)
+        print(len(top_joinable_tables))
+        print(f'FP = {total_approved - total_match}')
 
-        with open('this_is_time.txt', 'w') as fw:
-            fw.writelines(map(lambda t: str(t) + '\n', timing))
         return sorted(top_joinable_tables, key=lambda x: x[0], reverse=True)
 
     def hash_row_vals_bf(self, row: Any, hash_size: int) -> str:
@@ -1015,8 +1014,9 @@ class MATETableExtraction:
 
 
 if __name__ == '__main__':
-    top_k = 10
+    top_k = 50
     one_bits = 5
+
 
     dataset_name = 'mate_wikiturlsnap'
     query_dataset_path = f"{os.path.dirname(__file__)}/query.csv"
@@ -1041,6 +1041,7 @@ if __name__ == '__main__':
         }
     }
 
+    run_ics = True
     min_join_ratio = 0.9
 
     query_dataset = pd.read_csv(query_dataset_path)[query_columns_list]
@@ -1056,4 +1057,7 @@ if __name__ == '__main__':
         is_min_join_ratio_absolute=False,
         database_request=True,
         **db_connection_info)
-    print(mate.MATE(hash_size, query_dataset, query_columns_list))
+    start = time.time()
+    print(mate.MATE(hash_size, run_ics, query_dataset, query_columns_list))
+    print('run_ics=', run_ics, round(time.time() - start, 3))
+    mate.dbh.engine.dispose()

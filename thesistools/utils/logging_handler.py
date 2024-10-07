@@ -26,7 +26,7 @@ def info(msg):
 
 
 def warn(msg):
-    logging.getLogger('TestLog').warn(msg)
+    logging.getLogger('TestLog').warning(msg)
 
 
 def error(msg):

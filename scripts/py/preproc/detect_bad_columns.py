@@ -6,10 +6,10 @@ import multiprocessing as mp
 import pymongo
 from tqdm import tqdm
 
-from tools.sloth.utils import parse_table
-from tools.utils.misc import naive_detect_bad_columns
-from tools.utils.datalake import get_mongodb_collections
-from tools.utils.basicconfig import DATALAKES, DATALAKE_SIZES
+from thesistools.sloth.utils import parse_table
+from thesistools.utils.misc import naive_detect_bad_columns
+from thesistools.utils.datalake import get_mongodb_collections
+from thesistools.utils.basicconfig import DATALAKES, DATALAKE_SIZES
 
 
 NUMERICAL_NER_TAGS = {

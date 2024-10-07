@@ -4,10 +4,10 @@ import polars as pl
 import pymongo
 import pymongo.collection
 
-from tools.utils.basicconfig import MONGODB_DATALAKES, DATALAKE_SIZES
+from thesistools.utils.basicconfig import MONGODB_DATALAKES, DATALAKE_SIZES
 
 
-def get_mongodb_collections(dataset:str, size:str) -> tuple[pymongo.MongoClient, list[pymongo.collection.Collection]]:
+def get_mongodb_collections(dataset:str, size:str='standard') -> tuple[pymongo.MongoClient, list[pymongo.collection.Collection]]:
     assert dataset in MONGODB_DATALAKES
     assert size in DATALAKE_SIZES
     
@@ -67,12 +67,14 @@ class SimpleDataLakeHelper:
         self.size = 'standard'
         self.mapping_id_path = None
         self.numeric_columns_path = None
+        self.mapping_id = None
+        self.numeric_columns = None
         
         match self.datalake_location:
             case 'mongodb':
-                self._mongoclient, self._collections = get_mongodb_collections(*args[:2])
                 self.datalake_name = args[0]
-                self.size = args[1]
+                self.size = args[1] if len(args) > 1 else 'standard'
+                self._mongoclient, self._collections = get_mongodb_collections(self.datalake_name, self.size)
             case _:
                 self.mapping_id_path = args[2]
                 self.numeric_columns_path = args[3]

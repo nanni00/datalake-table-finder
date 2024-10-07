@@ -20,12 +20,13 @@ MATE/*
 
 models
 
-experiments/deepjoin
+deepjoin
+table_bert
 experiments/multi_key_join/*
 !experiments/multi_key_join/*.py
 
 */*.db
-**test**
+**test.py
 cache
 **__pycache__**
 .git

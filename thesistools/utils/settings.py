@@ -1,7 +1,7 @@
 import os
 import argparse
 
-from tools.utils import basicconfig
+from thesistools.utils import basicconfig
 
 
 
@@ -151,31 +151,28 @@ def make_parser(*arguments):
 
 
 def get_all_paths(test_name, dataset, k, num_query_samples):
+    p = {}
+
     # output files and directories
     ROOT_TEST_DIR =             f'{DefaultPath.data_path.tests}/{test_name}'
-    TEST_DATASET_DIR =          f'{ROOT_TEST_DIR}/{dataset}'
-    query_file =                f'{TEST_DATASET_DIR}/query_{num_query_samples}.json'
-    logfile =                   f'{TEST_DATASET_DIR}/logging.log'
+    p['TEST_DATASET_DIR'] = TEST_DATASET_DIR = f'{ROOT_TEST_DIR}/{dataset}'
+    p['query_file'] =           f'{TEST_DATASET_DIR}/query_{num_query_samples}.json'
+    p['logfile'] =              f'{TEST_DATASET_DIR}/logging.log'
 
     # LSH-Forest stuff
-    forest_dir =                f'{TEST_DATASET_DIR}/lshforest' 
+    p['forest_dir'] =           f'{TEST_DATASET_DIR}/lshforest' 
     
     # embedding stuff
-    embedding_dir =             f'{TEST_DATASET_DIR}/embedding'
+    p['embedding_dir'] =        f'{TEST_DATASET_DIR}/embedding'
 
     # results stuff
-    results_base_dir =          f'{TEST_DATASET_DIR}/results/base/k{k}_q{num_query_samples}'
-    results_extr_dir =          f'{TEST_DATASET_DIR}/results/extracted'
+    p['results_base_dir'] =      f'{TEST_DATASET_DIR}/results/base/k{k}_q{num_query_samples}'
+    p['results_extr_dir'] =      f'{TEST_DATASET_DIR}/results/extracted'
 
     # statistics stuff
-    statistics_dir =            TEST_DATASET_DIR  + '/statistics'
-    runtime_stat_file =         statistics_dir + '/runtime.csv'     
-    storage_stat_file =         statistics_dir + '/storage.csv'
+    p['statistics_dir'] = statistics_dir = TEST_DATASET_DIR  + '/statistics'
+    p['runtime_stat_file'] =     statistics_dir + '/runtime.csv'     
+    p['storage_stat_file'] =     statistics_dir + '/storage.csv'
 
-    return [TEST_DATASET_DIR, query_file, logfile, 
-            forest_dir, 
-            embedding_dir, 
-            results_base_dir, results_extr_dir,
-            statistics_dir, runtime_stat_file, storage_stat_file]
-
+    return p
 
