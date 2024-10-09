@@ -18,9 +18,9 @@ match dataset:
         datalake_location = "mongodb"
         mapping_id_file = numeric_columns_file = None
     case 'santoslarge':
-        datalake_location = "/data4/nanni/data/santos_large/datalake"
-        mapping_id_file = "/data4/nanni/data/santos_large/mapping_id.pickle"
-        numeric_columns_file = "/data4/nanni/data/santos_large/numeric_columns.pickle"
+        datalake_location = "/path/to/santos_large/datalake"
+        mapping_id_file = "/path/to/santos_large/mapping_id.pickle"
+        numeric_columns_file = "/path/to/santos_large/numeric_columns.pickle"
     case _:
         raise ValueError()
 
@@ -61,7 +61,7 @@ def task(data):
             continue
 
         # filter the numerical columns
-        table = table_rows_to_rows(table, 0, len(table[0]), bad_columns) # [[row[i] for i, x in enumerate(numeric_columns) if x == 0] for row in table]
+        table = table_rows_to_rows(table, 0, len(table[0]), bad_columns)
         
         t = pd.DataFrame(table)
         r, c = t.shape

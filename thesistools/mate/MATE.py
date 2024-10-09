@@ -69,14 +69,15 @@ class MATETableExtraction:
                  min_join_ratio: int = 0,
                  is_min_join_ratio_absolute: bool = True,
                  database_request: bool = True,
-                 **db_connection_info
+                 engine = None,
+                 db_connection_info:dict|None = None
                  ):
         self.main_inverted_index_table_name = inverted_index_table
         self.top_k = t_k
         self.dataset_name = dataset_name
         self.mate_cache_path = mate_cache_path
         self.database_request = database_request
-        self.dbh = DBHandler(self.mate_cache_path, self.main_inverted_index_table_name, **db_connection_info)
+        self.dbh = DBHandler(self.mate_cache_path, self.main_inverted_index_table_name, engine, db_connection_info)
         self.number_of_ones = ones
         self.log_file_name = log_file_name
         self.min_join_ratio = min_join_ratio
@@ -831,10 +832,10 @@ class MATETableExtraction:
             if pruned:
                 break
 
-        print('---------------------------------------------')
-        print(top_joinable_tables)
-        print(len(top_joinable_tables))
-        print(f'FP = {total_approved - total_match}')
+        # print('---------------------------------------------')
+        # print(top_joinable_tables)
+        # print(len(top_joinable_tables))
+        # print(f'FP = {total_approved - total_match}')
 
         return sorted(top_joinable_tables, key=lambda x: x[0], reverse=True)
 

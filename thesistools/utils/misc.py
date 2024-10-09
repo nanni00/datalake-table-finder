@@ -21,12 +21,20 @@ from thesistools.utils.basicconfig import TablesThresholds as tab_thresh
 
 
 _TOKEN_TAG_SEPARATOR = '@#'
+
 whitespace_translator =     str.maketrans(whitespace, ' ' * len(whitespace))
 digits_translator =         str.maketrans(digits, ' ' * len(digits))
 punctuation_translator =    str.maketrans(punctuation, ' ' * len(punctuation))
 lowercase_translator =      str.maketrans(ascii_uppercase, ascii_lowercase)
 
 
+def get_string_translator(tr):
+    match tr:
+        case 'whitespace':  return whitespace_translator
+        case 'digits':      return digits_translator
+        case 'punctuation': return punctuation_translator
+        case 'lowercase':   return lowercase_translator
+        case '':            raise ValueError(f'Unknown translator: {tr}')
 
 
 def jaccard(X:set, Y:set):
@@ -122,7 +130,6 @@ def is_valid_table(table, bad_columns):
     if all(bad_columns):
         return False
     # here is kept a row-view for the table
-    # table = [[row[i] for i, x in enumerate(numeric_columns) if x == 0] for row in table]
     table = table_rows_to_rows(table, 0, len(table[0]), bad_columns)
     return  tab_thresh.MIN_ROWS     <= len(table)                   <= tab_thresh.MAX_ROWS and \
             tab_thresh.MIN_COLUMNS  <= len(table[0])                <= tab_thresh.MAX_COLUMNS and \
@@ -237,29 +244,6 @@ def largest_overlap_sloth(table1, table2, numeric_columns1, numeric_columns2, ve
         return -1, round(time.time() - start_sloth, 3)
     except IndexError:        
         return -2, round(time.time() - start_sloth, 3)
-
-
-
-def apply_sloth(table1, table2, numeric_columns1, numeric_columns2, blacklist=[],  **sloth_args) -> tuple[int, float]:
-    num_null = 0
-
-    def format_value_for_excluding_nan(t):
-        nonlocal num_null
-        if not t or pd.isna(t) or t in blacklist:
-            num_null += 1
-            return f'{t}@{num_null}'
-        t = clean_string(t)
-        return t
-    
-    table1 = [[format_value_for_excluding_nan(row[i]) for row in table1] for i in range(len(table1[0])) if numeric_columns1[i] == 0]
-    table2 = [[format_value_for_excluding_nan(row[i]) for row in table2] for i in range(len(table2[0])) if numeric_columns2[i] == 0]
-
-    metrics = []
-    try:
-        return sloth(table1, table2, metrics=metrics, **sloth_args)        
-    except TimeoutError:
-        return None
-
 
 
 def sample_query_task(data):

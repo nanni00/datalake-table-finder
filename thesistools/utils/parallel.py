@@ -39,7 +39,7 @@ def worker_precision(inp):
 
 def worker_ndcg(inp):
     query_id, query_res, p_values, query_silver_standard = inp
-    ndcg_res = []
+    all_ndcg_results = []
 
     true_relevances = [x[1] for x in query_silver_standard]
 
@@ -47,15 +47,11 @@ def worker_ndcg(inp):
         result_relevances = data['sloth_overlap'].values.tolist()
         for _p in p_values:
             if len(true_relevances) == 0:
-                ndcg_res.append([query_id, len(true_relevances), algorithm, mode, _p, _p, 0])
+                all_ndcg_results.append([query_id, len(true_relevances), algorithm, mode, _p, _p, 0])
                 continue
-            try:
-                # there could be errors in those cases where there isn't any actual relevant documents
-                # i.e. all the retrivied documents doesn't have a non-zero SLOTH overlap                
-                ndcg, _actual_p = ndcg_at_k(true_relevances, result_relevances, _p)
-            except ZeroDivisionError:            
-                continue
-            except ValueError:                
-                continue
-            ndcg_res.append([query_id, len(true_relevances), algorithm, mode, _p, _p - _actual_p, ndcg])
-    return ndcg_res
+            # there could be errors in those cases where there isn't any actual relevant documents
+            # i.e. all the retrivied documents doesn't have a non-zero SLOTH overlap                
+            ndcg = ndcg_at_k(true_relevances, result_relevances, _p)
+
+            all_ndcg_results.append([query_id, len(true_relevances), algorithm, mode, _p, ndcg])
+    return all_ndcg_results

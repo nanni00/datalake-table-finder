@@ -7,7 +7,6 @@ from extract_results import extract_results
 from main_pipeline import main_pipeline
 
 from thesistools.utils.misc import sample_queries
-from thesistools.utils.datalake import SimpleDataLakeHelper
 from thesistools.utils.settings import get_all_paths 
 from numerize_denumerize.numerize import numerize
 
@@ -47,13 +46,15 @@ if __name__ == '__main__':
             num_query_samples = g_config['num_query_samples']
 
             data_lake_args = (g_config['datalake_location'], 
-                                       g_config['dataset'], g_config['size'], 
-                                       g_config['mapping_id_file'], g_config['numeric_columns_file'])
+                              g_config['datalake_name'], 
+                              g_config['datalake_size'], 
+                              g_config['mapping_id_file'], 
+                              g_config['numeric_columns_file'])
             
             str_num_query_samples = numerize(num_query_samples, asint=True)
 
-            TEST_DATASET_DIR, query_file, \
-                _, _, _, _, _, _, _, _ = get_all_paths(g_config['test_name'], g_config['dataset'], g_config['k'], str_num_query_samples)
+            paths = get_all_paths(g_config['test_name'], g_config['datalake_name'], g_config['k'], str_num_query_samples)
+            query_file = paths['query_file']
 
             if not os.path.exists(query_file):
                 num_samples = sample_queries(query_file, num_query_samples, g_config['num_cpu'], *data_lake_args)
@@ -91,13 +92,14 @@ if __name__ == '__main__':
                                 **g_config,
                                 **q_config)
 
-    if 'ft_model_path' in g_config:
-        del g_config['ft_model_path']
+    if 'embedding_model_path' in g_config:
+        del g_config['embedding_model_path']
+
 
     if 'extract' in configuration:
         e_config = configuration['extract']
         if e_config['exec_now']:
-            extract_results(**g_config)
+            extract_results(connection_info=g_config['josie_db_connection_info'], **g_config)
 
 
     if 'analyses' in configuration:

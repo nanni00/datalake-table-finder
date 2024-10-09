@@ -1,10 +1,11 @@
 # Setup
 
-Scaricare la repository
+Download the repository
 ```
 git clone https://github.com/nanni00/tesi-magistrale.git /path/to/tesi-magistrale
 ```
 
+Create a python environment 
 Creare un ambiente python dedicato (tutto è stato provato su python 3.10, con altre versioni ci potrebbero essere problemi) con i pacchetti necessari (file environment.yml)
 
 Aggiungere le variabili d'ambiente:

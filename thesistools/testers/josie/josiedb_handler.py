@@ -1,10 +1,11 @@
 from sqlalchemy.orm import Session
 from sqlalchemy.engine import URL, Engine
 from sqlalchemy import (
-    create_engine, MetaData, text,
+    create_engine, MetaData, text, inspect,
     select, insert,
     Table, Column,
-    Integer, LargeBinary, ARRAY)
+    Integer, LargeBinary, ARRAY
+)
 
 from thesistools.utils.logging_handler import info
 
@@ -41,8 +42,8 @@ class JOSIEDBHandler:
             self._READ_LIST_COST_SAMPLES_TABLE_NAME,
             self._READ_SET_COST_SAMPLES_TABLE_NAME]:
             try:
-                table_obj = self.metadata.tables[table_name]
-                table_obj.drop(self.engine)
+                table = self.metadata.tables[table_name]
+                self.metadata.drop_all(self.engine, [table], checkfirst=True)
             except KeyError:
                 continue
 
@@ -85,21 +86,31 @@ class JOSIEDBHandler:
             ndel = session.query(query_table).delete()
             session.commit()
             
-    def insert_data_into_query_table(self, table_ids:list[int]=None, table_id:int=None, tokens_ids:list[int]=None):
+    def add_queries_from_existent_tables(self, table_ids:list[int]=None):
         with Session(self.engine) as session:
             set_table = self.metadata.tables[self._SET_TABLE_NAME]
             query_table = self.metadata.tables[self._QUERY_TABLE_NAME]
-            if table_ids:
-                session.execute(
-                    insert(query_table)
-                    .from_select(
-                        select(set_table.c.id, set_table.c.tokens)
-                        .where(set_table.c.id.in_(table_ids))
-                    )
+            session.execute(
+                insert(query_table)
+                .from_select(['id', 'tokens'],
+                             select(set_table.c.id, set_table.c.tokens)
+                             .where(set_table.c.id.in_(table_ids))
                 )
-            elif table_id and tokens_ids:
-                session.execute(insert(query_table).values(table_id, tokens_ids))
-          
+            )
+            session.commit()
+            
+    def add_queries(self, table_ids:int=None, tokens_ids:list[int]=None):
+        query_table = self.metadata.tables[self._QUERY_TABLE_NAME]
+        values = [{'id': table_id, 'tokens': tokens} for table_id, tokens in zip(table_ids, tokens_ids)]
+        with Session(self.engine) as session:
+            session.execute(insert(query_table).values(values))
+            session.commit()
+    
+    def exist_cost_tables(self):
+        return inspect(self.engine).has_table(self._READ_LIST_COST_SAMPLES_TABLE_NAME) \
+            or inspect(self.engine).has_table(self._READ_SET_COST_SAMPLES_TABLE_NAME)
+
+
     def get_statistics(self):
         q = f"""
             SELECT 
@@ -125,4 +136,7 @@ class JOSIEDBHandler:
             );
         """
         with Session(self.engine) as session:
-            return list(session.execute(text(q)))
+            return session.execute(text(q)).first()[0]
+
+    def close(self):
+        self.engine.dispose()

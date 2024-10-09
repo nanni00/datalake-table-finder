@@ -150,12 +150,12 @@ def make_parser(*arguments):
 
 
 
-def get_all_paths(test_name, dataset, k, num_query_samples):
+def get_all_paths(test_name, datalake_name, k, num_query_samples):
     p = {}
 
     # output files and directories
     ROOT_TEST_DIR =             f'{DefaultPath.data_path.tests}/{test_name}'
-    p['TEST_DATASET_DIR'] = TEST_DATASET_DIR = f'{ROOT_TEST_DIR}/{dataset}'
+    p['TEST_DATASET_DIR'] = TEST_DATASET_DIR = f'{ROOT_TEST_DIR}/{datalake_name}'
     p['query_file'] =           f'{TEST_DATASET_DIR}/query_{num_query_samples}.json'
     p['logfile'] =              f'{TEST_DATASET_DIR}/logging.log'
 

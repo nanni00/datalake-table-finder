@@ -7,7 +7,7 @@ import polars as pl
 from tqdm import tqdm
 from datasketch import MinHashLSHForest, MinHash
 
-from thesistools.testers.classes import AlgorithmTester
+from thesistools.testers.base_tester import AlgorithmTester
 from thesistools.utils.misc import table_to_tokens, is_valid_table
 from thesistools.utils.logging_handler import info
 from thesistools.utils.parallel import chunks
@@ -17,8 +17,7 @@ from thesistools.utils.datalake import SimpleDataLakeHelper
 
 def worker_lshforest_data_preparation(data):
     global datalake_location, datalake, size, mapping_id_file, numeric_columns_file, \
-        mode, num_cpu, blacklist, token_translators, \
-        num_perm, hash_func, emb_model_path
+        mode, blacklist, token_translators, num_perm, hash_func
     
     id_tables_range = data[0]
     results = []
@@ -116,7 +115,8 @@ class LSHForestTester(AlgorithmTester):
         if not self.forest:
             info('Loading forest...')
             self._forest_handler('load')
-            info('Forest loaded.')
+
+        info('Running top-K...')
         for query_id in tqdm(query_ids):
             try:
                 hashvalues_q = self.forest.get_minhash_hashvalues(query_id)
@@ -131,13 +131,15 @@ class LSHForestTester(AlgorithmTester):
                 minhash_q.update_batch(token_set_q)
                 
             start_query = time()
-            topk_res = self.forest.query(minhash_q, k + 1) # the "k+1" because often LSHForest returns the query table itself if it's already in the index
+            # the "k+1" because often LSHForest returns 
+            # the query table itself if it's already in the index
+            topk_res = self.forest.query(minhash_q, k + 1) 
             end_query = time()
             
             if query_id in topk_res:
                 topk_res.remove(query_id)
             
-            results.append([query_id, round(end_query - start_query, 3), str(topk_res[:k]), str([])])
+            results.append([query_id, round(end_query - start_query, 3), str(topk_res[:k])])
 
         info(f' Saving results to {results_file}...')
         pl.DataFrame(results, schema=['query_id', 'duration', 'results_id'], orient='row').write_csv(results_file)

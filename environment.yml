@@ -12,7 +12,7 @@ dependencies:
   - nltk
   - pip:
     - matplotlib
-    - psycopg
+    - sqlalchemy==1.4
     - pymongo
     - timeout_decorator
     - bitarray
@@ -21,4 +21,4 @@ dependencies:
     - compress-fasttext
     - faiss
     - numerize-denumerize
-    - orjson
+    

@@ -10,7 +10,7 @@ from tqdm import tqdm
 
 from thesistools.utils.misc import is_valid_table
 from thesistools.utils.logging_handler import info
-from thesistools.testers.classes import AlgorithmTester
+from thesistools.testers.base_tester import AlgorithmTester
 from thesistools.utils.datalake import SimpleDataLakeHelper
 from thesistools.utils.parallel import chunks
 from thesistools.utils.table_embedder import table_embedder_factory
@@ -20,7 +20,7 @@ from thesistools.utils.table_embedder import table_embedder_factory
 
 def worker_embedding_data_preparation(data) -> tuple[np.ndarray, np.ndarray]:
     global datalake_location, datalake, size, mapping_id_file, numeric_columns_file, \
-        mode, num_cpu, blacklist, token_translators, num_perm, hash_func, emb_model_path
+        mode, num_cpu, blacklist, token_translators, emb_model_path
     
     dlh = SimpleDataLakeHelper(datalake_location, datalake, size, mapping_id_file, numeric_columns_file)
     model = table_embedder_factory(mode, emb_model_path)
@@ -166,12 +166,12 @@ class EmbeddingTester(AlgorithmTester):
         xq, xq_ids = np.empty(shape=(0, d), dtype=np.float64), np.empty(shape=(0, 1), dtype=np.int32)
         batch_size = 1000
         results = []
-        info('Start query time...')
         
+        info('Running top-K...')
         # batch query processing, because it's significantly faster
         for i, qid in tqdm(enumerate(query_ids), total=len(query_ids)):
-            # when reached the batch threshold, execute the search for the 
-            # current batch vectors
+            # when reached the batch threshold, 
+            # execute the search for the current batch vectors
             if xq.shape[0] > batch_size:
                 start_topk_batch = time()
                 _, I = self.cidx.search(xq, int(k))
@@ -182,7 +182,7 @@ class EmbeddingTester(AlgorithmTester):
 
                 for j, qid in enumerate(np.unique(xq_ids)):
                     x = sorted(list(zip(*np.unique(res[j], return_counts=True))), key=lambda z: z[1], reverse=True)
-                    results.append((qid, round(batch_mean_time, 3), [int(y[0]) for y in x if y[0] not in {qid, -1}][:k + 1], []))
+                    results.append((qid, round(batch_mean_time, 3), [int(y[0]) for y in x if y[0] not in {qid, -1}][:k + 1]))
                 xq, xq_ids = np.empty(shape=(0, d), dtype=np.float64), np.empty(shape=(0, 1), dtype=np.int32)
 
             doc = self.dlh.get_table_by_numeric_id(int(qid))
@@ -202,9 +202,9 @@ class EmbeddingTester(AlgorithmTester):
             start_sort = time()
             x = sorted(list(zip(*np.unique(res[i], return_counts=True))), key=lambda z: z[1], reverse=True)
             sort_time = time() - start_sort
-            results.append((qid, round(batch_mean_time + sort_time, 3), [int(y[0]) for y in x if y[0] not in {qid, -1}][:k + 1], []))
+            results.append((qid, round(batch_mean_time + sort_time, 3), [int(y[0]) for y in x if y[0] not in {qid, -1}][:k + 1]))
 
-        pd.DataFrame(results, columns=['query_id', 'duration', 'results', 'results_overlap']).to_csv(results_file, index=False)    
+        pd.DataFrame(results, columns=['query_id', 'duration', 'results']).to_csv(results_file, index=False)    
         return round(time() - start, 5)
     
     def clean(self):

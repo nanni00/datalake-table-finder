@@ -1,11 +1,9 @@
 import os
 import random
 import warnings
-
-warnings.filterwarnings('ignore')
 from time import time
 import multiprocessing as mp
-
+warnings.filterwarnings('ignore')
 
 import polars as pl
 from tqdm import tqdm
@@ -16,10 +14,9 @@ from thesistools.utils.metrics import proximity
 from thesistools.utils import basicconfig
 from thesistools.utils.datalake import SimpleDataLakeHelper
 from thesistools.utils.overlapdb import OverlapDB
-from thesistools.utils.settings import get_all_paths, make_parser
+from thesistools.utils.settings import get_all_paths
 from thesistools.utils.misc import (
     largest_overlap_sloth,
-    get_local_time,
     table_to_tokens,
 )
 from thesistools.utils.logging_handler import logging_setup, info
@@ -28,20 +25,19 @@ from thesistools.utils.parallel import chunks
 
 def worker_result_extractor(data):
     global datalake_location, dataset, size, mapping_id_file, numeric_columns_file, blacklist, num_cpu, table_name, url, engine
-    
+    is_probe_process = os.getpid() % num_cpu == 0
     chunk = data[0]
-    if os.getpid() % num_cpu == 0:
-        # print(chunk)
-        pass
+    if is_probe_process:
+        print(f"Process {os.getpid()} working on chunk {data}...")
+        
 
     dlh = SimpleDataLakeHelper(datalake_location, dataset, size, mapping_id_file, numeric_columns_file)
     resultsdb = OverlapDB(table_name, url=url, engine=engine)
-    resultsdb.open()
     
     rv = []
     hit = 0
     
-    for (algorithm, mode, query_id, result_id) in tqdm(chunk, total=len(chunk), leave=False, disable=False if os.getpid() % num_cpu == 0 else True):
+    for (algorithm, mode, query_id, result_id) in tqdm(chunk, total=len(chunk), leave=False, disable=not is_probe_process):
         # here we need eval because on the csv file the values are stored as strings
         # result_ids, algorithm_overlaps = eval(result_ids), eval(algorithm_overlaps)
         
@@ -67,10 +63,9 @@ def worker_result_extractor(data):
             hit += 1
         
         sloth_overlap, sloth_time = (dboverlap, lookuptime) if dboverlap != None else largest_overlap_sloth(table_q, table_r, numeric_columns_q, numeric_columns_r, blacklist=blacklist)
-        
-        # if sloth_overlap == -1 and dboverlap == None:
-        #     warning(f"Pair {query_id} - {result_id} SLOTH failed")
 
+        sloth_overlap = sloth_overlap if sloth_overlap > 0 else 0
+        
         # the intersection size is used for computing Jaccard Similarity or other metrics like containment, 
         # so compute using the set semantic, since it considers the intersection of the table "basic" values
         set_q = set(table_to_tokens(table_q, 'set', numeric_columns_q, blacklist=blacklist))
@@ -112,12 +107,11 @@ def worker_result_extractor(data):
                 multi_jaccard_sim, 
                 containment,
                 overlap_set_similarity,
-                proximity,
+                prox,
                 area_ratio,
                 
                 sloth_time])
 
-    # mongoclient.close()
     dlh.close()
     resultsdb.close()
     return hit, rv
@@ -143,7 +137,7 @@ def extract_results(test_name, k, num_query_samples,
                     mapping_id_file:str, numeric_columns_file:str,
                     blacklist, num_cpu,
                     connection_info:dict, 
-                    clear_results_table=False):
+                    clear_results_table=False, **kwargs):
     
     assert int(k) > 0
     assert int(num_cpu) > 0
@@ -196,7 +190,6 @@ def extract_results(test_name, k, num_query_samples,
     url = URL.create(**connection_info)
     engine = create_engine(url)
 
-    start_analysis = time()
     resultsdb = OverlapDB(table_name, url=url, engine=engine)
     
     # clear the result table (occhio a farlo che poi si perdono i dati già salvati...)
@@ -219,7 +212,7 @@ def extract_results(test_name, k, num_query_samples,
             if result_file.endswith('.raw'): continue
             
             results = pl.read_csv(f'{results_base_dir}/{result_file}')
-            algorithm, mode = [x[1:] for x in result_file[:-4].split('_')]
+            algorithm, mode = result_file[:-4].split('_')
             
             info(f'Extracting results from {result_file} ({algorithm}-{mode})...')
             
@@ -250,20 +243,6 @@ def extract_results(test_name, k, num_query_samples,
             final_results.write_csv(final_results_file)
 
     info(f"Hit rates: {hit_rates}")
-
-    # save the statistics about the analysis time
-    # add_header = not os.path.exists(runtime_stat_file)
-    # with open(runtime_stat_file, 'a') as rfw:
-    #     if add_header:
-    #         rfw.write("local_time,algorithm,mode,task,k,num_queriestime\n")
-    #     rfw.write(f"{get_local_time()},analysis,,extraction,{k},{num_query_samples},{round(time() - start_analysis, 3)}\n")
-
-    # save statistics about analysis file size
-    # storage_size = os.path.getsize(final_results_file) / (1024 ** 3)
-    # append = os.path.exists(storage_stat_file)
-    # dbsize = pd.DataFrame([['analysis', f'extraction_k{k}_q{num_query_samples}', storage_size]], columns=['algorithm', 'mode', 'size(GB)'])
-    # dbsize.to_csv(storage_stat_file, index=False, mode='a' if append else 'w', header=False if append else True)
-
     resultsdb.close()
 
 

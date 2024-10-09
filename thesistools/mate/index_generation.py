@@ -15,7 +15,7 @@ from collections import Counter
 
 import numpy as np
 
-from pyspark.sql.types import StructType, StructField, StringType, IntegerType, LongType
+from pyspark.sql.types import StructType, StructField, StringType, IntegerType
 from sqlalchemy import (
     Table, Column, 
     create_engine,
@@ -116,17 +116,13 @@ def create_inverted_index_table(posting_lists_tablename, **connection_info):
     engine.dispose()
 
 
-def create_inverted_index(hash_size:int, processes:int, blacklist:set, posting_lists_tablename:str, string_translators:dict|None, connection_info:dict|None, spark_config:dict|None):
+def create_inverted_index(hash_size:int, blacklist:set, posting_lists_tablename:str, string_translators:dict|None, connection_info:dict|None, spark_config:dict|None):
     url = URL.create(**connection_info)
     jdbc_url = f'jdbc:{URL.create(drivername=url.drivername, database=url.database, host=url.host, port=url.port)}'
     jdbc_properties = {
         'user': url.username,
         'password': url.password
     }
-    
-    create_inverted_index_table(posting_lists_tablename, **connection_info)
-    
-    _, initial_rdd = get_spark_session(processes, 'mongodb', 'wikiturlsnap', **spark_config)
     
     schema = StructType(
         [
@@ -142,15 +138,20 @@ def create_inverted_index(hash_size:int, processes:int, blacklist:set, posting_l
         nonlocal hash_size, blacklist, string_translators
         return table_to_posting_lists(table_id, table_rows, bad_columns, hash_size=hash_size, blacklist=blacklist, string_translators=string_translators)
 
+    create_inverted_index_table(posting_lists_tablename, **connection_info)
+    spark, data_rdd = get_spark_session('mongodb', 'wikiturlsnap', **spark_config)
+
     # posting lists creation and storing on DB
     (
-        initial_rdd
+        data_rdd
         .filter(lambda t: is_valid_table(t[1], t[2]))
         .flatMap(lambda t: prepare_tuple(*t))
         .toDF(schema=schema)
         .write
         .jdbc(jdbc_url, posting_lists_tablename, 'append', jdbc_properties) # the overwrite mode drops also the index...
     )
+
+    spark.sparkContext.stop()
 
 
 if __name__ == '__main__':
@@ -190,7 +191,7 @@ if __name__ == '__main__':
     custom_translator = str.maketrans(';$_\n|', '     ')
     
     start = time()
-    create_inverted_index(hash_size, 72, set(), posting_lists_tablename, [custom_translator], connection_info, spark_config)
+    create_inverted_index(hash_size, set(), posting_lists_tablename, [custom_translator], connection_info, spark_config)
     step1 = time()
     
     print(f'create init index time: {round(step1 - start, 3)}s')

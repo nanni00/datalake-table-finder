@@ -3,16 +3,17 @@ import os
 import pandas as pd
 from numerize_denumerize.numerize import numerize
 
-from thesistools.testers import lshforest, embedding
 from thesistools.testers.josie import josie
+from thesistools.testers import lshforest, embedding
 from thesistools.utils.logging_handler import info, logging_setup
 from thesistools.utils.settings import DefaultPath as defpath, get_all_paths
 from thesistools.utils.datalake import SimpleDataLakeHelper
 from thesistools.utils import basicconfig
 from thesistools.utils.misc import (
+    mmh3_hashfunc,
     get_local_time,
-    get_query_ids_from_query_file, 
-    whitespace_translator, punctuation_translator, lowercase_translator
+    get_string_translator,
+    get_query_ids_from_query_file
 )
 
 
@@ -24,16 +25,16 @@ def main_pipeline(test_name, algorithm, mode, tasks:list[str],
                   datalake_size:str=None,
                   mapping_id_file:str=None,
                   numeric_columns_file:str=None,
-                  token_translators=[whitespace_translator, punctuation_translator, lowercase_translator],
+                  token_translators=[],
                   blacklist:list[str]=[],
 
                   # JOSIE specific parameters
-                  josiedb_connection_info:dict=None,
+                  josie_db_connection_info:dict=None,
                   token_table_on_mem:bool=False, 
                   spark_config:dict=None,
                   
                   # LSH Forest specific parameters
-                  num_perm:int=256, l:int=16, hash_func=None,
+                  num_perm:int=256, l:int=16, hash_func=mmh3_hashfunc,
                   forest_file=None,
 
                   # fastText-FAISS specific parameters
@@ -89,13 +90,15 @@ def main_pipeline(test_name, algorithm, mode, tasks:list[str],
     forest_file =       f'{forest_dir}/forest_m{mode}.json' if not forest_file else forest_file
     idx_tag =           'ft' if mode in ['ft', 'ftdist'] else 'cft' if mode in ['cft', 'cftdist'] else ''
     cidx_file =         f'{embedding_dir}/col_idx_m{idx_tag}.index' 
-    topk_results_file = f'{results_base_dir}/a{algorithm}_m{mode}.csv'
+    topk_results_file = f'{results_base_dir}/{algorithm}_{mode}.csv'
     db_stat_file =      f'{statistics_dir}/db.csv' 
 
 
     # tokens that will be filtered
     blacklist = set(blacklist)
     info(f"Blacklist: {blacklist}")
+
+    token_translators = [get_string_translator(tr) for tr in token_translators]
     
     # a list containing information about timing of each step
     runtime_metrics = []
@@ -103,14 +106,14 @@ def main_pipeline(test_name, algorithm, mode, tasks:list[str],
     datalake_helper = SimpleDataLakeHelper(datalake_location, datalake_name, datalake_size, mapping_id_file, numeric_columns_file)
 
     # the prefix used in the database tables (mainly for JOSIE)
-    table_prefix = f'josie__{test_name}_{datalake_name}_{datalake_size}_{mode}'
+    table_prefix = f'josie__{test_name}__{datalake_name}_{datalake_size}_{mode}'
 
     # selecting the right tester accordingly to the specified algorithm and mode
     tester = None
-    default_args = (mode, datalake_name, datalake_size, blacklist, datalake_helper, token_translators)
+    default_args = (mode, blacklist, datalake_helper, token_translators)
     match algorithm:
         case 'josie':
-            tester = josie.JOSIETester(*default_args, table_prefix, db_stat_file, josiedb_connection_info, spark_config)
+            tester = josie.JOSIETester(*default_args, table_prefix, db_stat_file, josie_db_connection_info, spark_config)
         case 'lshforest':
             tester = lshforest.LSHForestTester(*default_args, num_cpu, forest_file, num_perm, l, hash_func)
         case 'embedding':
@@ -149,5 +152,3 @@ def main_pipeline(test_name, algorithm, mode, tasks:list[str],
 
     datalake_helper.close()
     info('All tasks have been completed.')
-
-

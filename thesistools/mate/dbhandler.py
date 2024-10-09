@@ -1,26 +1,20 @@
 import os.path
 from typing import List
-from itertools import chain
 
-# import vertica_python
 import pandas as pd
-from sqlalchemy.orm import Session, Bundle
+from sqlalchemy.orm import Session
 from sqlalchemy import create_engine, MetaData, select, func
 
 from thesistools.mate.base import *
 
 class DBHandler:
-    """Bloom filter using murmur3 hash function.
-
-    Parameters
-    ----------
-    main_table_name : str
-        Name of the main inverted index table in the database.
-    """
-    def __init__(self, mate_cache_path:str, main_table_name: str = 'main_tokenized', **connection_info):
+    def __init__(self, mate_cache_path:str, main_table_name: str = 'main_tokenized', engine=None, connection_info:dict|None=None):
         self.main_table_name = main_table_name
         self.mate_cache_path = mate_cache_path
-        self.engine = create_engine(pool_size=10, max_overflow=20, **connection_info)
+        if engine:
+            self.engine = engine
+        else:
+            self.engine = create_engine(**connection_info)
         metadata = MetaData(self.engine)
         metadata.reflect()
         self.table = metadata.tables[self.main_table_name]
@@ -32,7 +26,8 @@ class DBHandler:
                                       value_list: pd.Series,
                                       top_k: int = -1,
                                       database_request: bool = True) -> List[str]:
-        """Fetches posting lists for top-k values.
+        """
+        Fetches posting lists for top-k values.
 
         Parameters
         ----------
@@ -59,7 +54,7 @@ class DBHandler:
         if os.path.isfile(f"{self.mate_cache_path}/{dataset_name}_{query_column_name}_concatenated_posting_list.txt")\
                 and top_k == -1 and not database_request:
             pl = []
-            with open(f"{self.mate_cache_path}/{dataset_name}_{ query_column_name}_concatenated_posting_list.txt", "r") as f:
+            with open(f"{self.mate_cache_path}/{dataset_name}_{query_column_name}_concatenated_posting_list.txt", "r") as f:
                 for line in f:
                     pl += [line.strip()]
             return pl
@@ -67,7 +62,6 @@ class DBHandler:
             distinct_clean_values = value_list.unique().tolist()
             if top_k != -1:
                 stmt = (
-                    # select(func.concat(self.table.c.tableid, "_", self.table.c.rowid, ";", self.table.c.colid, "_", self.table.c.tokenized, "$", self.table.c.superkey).distinct())
                     select(self.table.c.tableid, self.table.c.rowid, self.table.c.colid, self.table.c.tokenized, self.table.c.superkey)
                     .where(
                         func.regexp_replace(
@@ -77,14 +71,10 @@ class DBHandler:
                 )
             else:
                 stmt = (
-                    # select(func.concat(self.table.c.tableid, "_", self.table.c.rowid, ";", self.table.c.colid, "_", self.table.c.tokenized, "$", self.table.c.superkey).distinct()) \
                     select(self.table.c.tableid, self.table.c.rowid, self.table.c.colid, self.table.c.tokenized, self.table.c.superkey)
                     .distinct()
                     .where(self.table.c.tokenized.in_(distinct_clean_values))
                 )
-
-            # with Session(self.engine) as session:
-            #     # pl = session.execute(stmt)
             
             with self.engine.connect() as connection:
                 pl = connection.execute(stmt)
@@ -96,7 +86,8 @@ class DBHandler:
             return pl
 
     def get_pl_by_table_and_rows(self, joint_list: List[str]) -> List[List[str]]:
-        """Fetches posting lists a set of table_row_ids.
+        """
+        Fetches posting lists from a set of table_row_ids.
 
         Parameters
         ----------

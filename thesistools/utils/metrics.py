@@ -56,18 +56,25 @@ def ndcg_at_k(true_relevances, result_relevances, k):
         true_relevances += [0] * (k - len(true_relevances))
     if len(result_relevances) < k:
         result_relevances += [0] * (k - len(result_relevances))
-
-    # k = min(k, len(true_relevances), len(result_relevances))
+    
+    if not any(true_relevances) or not any(result_relevances):
+        return 0
+    
     # computing nDCG is meaningful only if there is more than one document 
     if k <= 0: 
-        return 0, 1
+        return 0
+    
     idcg = sum(rel / log2(i + 1) for i, rel in enumerate(true_relevances[:k], start=1))
     dcg = sum(rel / log2(i + 1) for i, rel in enumerate(result_relevances[:k], start=1))
     
     if idcg < dcg:
         raise ValueError(f'Ideal DCG is lower than current DCG: {idcg} < {dcg}')
+    if idcg < 0:
+        raise ValueError(f'Ideal DCG is lower than 0: {idcg}')
+    if dcg < 0:
+        raise ValueError(f'Computed DCG is lower than 0: {dcg}, with values {result_relevances} and silver standard {true_relevances}')
     
-    return dcg / idcg, k
+    return dcg / idcg
 
 
 

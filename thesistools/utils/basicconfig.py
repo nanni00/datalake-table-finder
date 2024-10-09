@@ -7,6 +7,7 @@ ALGORITHMS = [
     'embedding'
 ]
 
+
 MODES = [
     'set',
     'bag',
@@ -28,24 +29,13 @@ ALGORITHM_MODE_CONFIG = [
 ]
 
 
-# filtering only those tables that have very few cells (<10)
-TABLES_THRESHOLDS = {
-    'min_row':      5,
-    'min_column':   2,
-    'min_area':     0,
-    'max_row':      999999,
-    'max_column':   999999,
-    'max_area':     999999,
-}
-
-
 class TablesThresholds(IntEnum):
     MIN_ROWS = 5
-    MAX_ROWS = 9999999
+    MAX_ROWS = 1_000_000_000
     MIN_COLUMNS = 2
-    MAX_COLUMNS = 9999999
+    MAX_COLUMNS = 1_000_000_000
     MIN_AREA = 0
-    MAX_AREA = 9999999
+    MAX_AREA = 1_000_000_000
     
 
 

@@ -16,10 +16,10 @@ from sentence_transformers.evaluation import TripletEvaluator
 from sentence_transformers.training_args import BatchSamplers
 from tqdm import tqdm
 
-from tools.utils.parallel import chunks
-from tools.utils.datalake import SimpleDataLakeHelper
-from tools.utils.misc import (
-    is_valid_table, logging_setup, table_rows_to_columns, tokenize_column, are_joinable_columns, create_minhash,
+from thesistools.utils.parallel import chunks
+from thesistools.utils.datalake import SimpleDataLakeHelper
+from thesistools.utils.misc import (
+    is_valid_table, table_rows_to_columns, are_joinable_columns, create_minhash,
     whitespace_translator, lowercase_translator, punctuation_translator
 )
 

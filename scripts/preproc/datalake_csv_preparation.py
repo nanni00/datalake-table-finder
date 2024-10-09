@@ -8,9 +8,9 @@ import polars as pl
 from thesistools.utils.misc import naive_detect_bad_columns
 
 # TODO customize paths
-data_dir = '/data4/nanni/data/santos_large/datalake'
-mapping_path = '/data4/nanni/data/santos_large/mapping_id.pickle'
-numcol_path = '/data4/nanni/data/santos_large/numeric_columns.pickle'
+data_dir = '/path/to/santos_large/datalake'
+mapping_path = '/path/to/santos_large/mapping_id.pickle'
+numcol_path = '/path/to/santos_large/numeric_columns.pickle'
 
 ntables = len(os.listdir(data_dir))
 ignored_tables = 0

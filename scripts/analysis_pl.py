@@ -1,6 +1,5 @@
 import os
 import pickle
-import logging
 from time import time
 import multiprocessing as mp
 from collections import defaultdict
@@ -14,20 +13,21 @@ import matplotlib.colors as mcolors
 from numerize_denumerize.numerize import numerize
 
 from thesistools.utils import basicconfig
+from thesistools.utils.settings import get_all_paths
 from thesistools.utils.logging_handler import logging_setup, info
-from thesistools.utils.settings import make_parser, get_all_paths
-# from tools.utils.misc import get_local_time
 from thesistools.utils.parallel import worker_fp_per_query, worker_ndcg, worker_precision
 
 
 
 
-def analyses(test_name, k, num_query_samples, num_cpu, dataset, size, p_values, 
+def analyses(test_name, k, num_query_samples, num_cpu, 
+             datalake_name, datalake_size, 
+             p_values, 
              save_silver_standard_to:str=None, load_silver_standard_from:str=None, *args, **kwargs):
     assert int(k) > 0
     assert int(num_cpu) > 0
-    assert dataset in basicconfig.DATALAKES
-    assert size in basicconfig.DATALAKE_SIZES
+    assert datalake_name in basicconfig.DATALAKES
+    assert datalake_size in basicconfig.DATALAKE_SIZES
     
     alpha = 1
     showfliers = False
@@ -35,13 +35,11 @@ def analyses(test_name, k, num_query_samples, num_cpu, dataset, size, p_values,
     test_name = test_name.lower()
     q = numerize(num_query_samples, asint=True)
     
-    paths = get_all_paths(test_name, dataset, k, num_query_samples)
+    paths = get_all_paths(test_name, datalake_name, k, num_query_samples)
     TEST_DATASET_DIR =      paths['TEST_DATASET_DIR']
     analyses_dir =          f'{TEST_DATASET_DIR}/results/analyses'
     analyses_query_dir =    f'{analyses_dir}/k{k}_q{q}'
     
-
-    # runtime_metrics = []
 
     if not os.path.exists(analyses_dir):
         os.mkdir(analyses_dir)
@@ -52,26 +50,25 @@ def analyses(test_name, k, num_query_samples, num_cpu, dataset, size, p_values,
     analyses_dir = analyses_query_dir
 
     logging_setup(paths['logfile'])
-    info(f' {test_name.upper()} - {dataset.upper()} - {size.upper()} - ANALYSES - {k} - {q} '.center(150, '-'))
+    info(f' {test_name.upper()} - {datalake_name.upper()} - {datalake_size.upper()} - ANALYSES - {k} - {q} '.center(150, '-'))
 
     all_colors = colors = list(mcolors.TABLEAU_COLORS.keys())
     methods = basicconfig.ALGORITHM_MODE_CONFIG
     markers = {m: 'o' if m[0] == 'josie' else 'x' if m[0] == 'lshforest' else 'd' for m in methods}
     methods = {m: c for m, c in zip(methods, colors[:len(methods)])}
 
-    results = pl.read_csv(f'{paths['results_extr_dir']}/final_results_k{k}_q{q}.csv')
+    results = pl.read_csv(f"{paths['results_extr_dir']}/final_results_k{k}_q{q}.csv")
     results = results.filter(pl.struct(['algorithm', 'mode']).is_in(list(map(lambda am: {'algorithm': am[0], 'mode': am[1]}, methods.keys()))))
 
     results = results.drop_nulls() # queries without any results
     results = results.filter(pl.col('sloth_overlap') != -1) # pairs that have had a SLOTH failure while computing the overlap
 
     results = results.with_columns((pl.col('algorithm_overlap') - pl.col('sloth_overlap')).alias('difference_overlap'))
-    # results = results.with_columns((pl.col('algorithm_overlap') / (pl.col('sloth_overlap') + 1)).alias('algorithm_overlap_norm'))
 
     info(f'Filtering those groups where any method has returned less than K={k} values...')
     start_filtering = time()
     bad_groups = []
-    for query_id, q_group in tqdm(results.to_pandas().groupby('query_id'), total=results.select('query_id').unique().shape[0]):
+    for query_id, q_group in tqdm(results.to_pandas().groupby('query_id'), total=results.select('query_id').unique().shape[0], leave=False):
         for (alg, mode), data in q_group.groupby(['algorithm', 'mode']):
             if data.shape[0] < k:
                 bad_groups.append(query_id)
@@ -80,7 +77,6 @@ def analyses(test_name, k, num_query_samples, num_cpu, dataset, size, p_values,
     end_filtering = time()
     print(len(bad_groups), num_query_samples, results.select('query_id').unique().shape[0])
     
-    # runtime_metrics.append((get_local_time(), 'filtering_groups', round(end_filtering - start_filtering, 3)))
     info(f'Filtered {len(bad_groups)} groups in {round(end_filtering - start_filtering, 3)}s')
 
 
@@ -112,7 +108,6 @@ def analyses(test_name, k, num_query_samples, num_cpu, dataset, size, p_values,
 
     # Saving the results
     info(f'Finished. Total time: {round(end_zr - start_zr, 3)}s')
-    # runtime_metrics.append((get_local_time(), 'false_positives', round(end_zr-start_zr, 3)))
     fp_per_query_pivot.to_csv(analyses_dir + f'/false_positives_per_group.csv')
     fp_per_algmode.to_csv(analyses_dir + f'/false_positives_per_alg_mode.csv')
     
@@ -140,7 +135,7 @@ def analyses(test_name, k, num_query_samples, num_cpu, dataset, size, p_values,
     ax.grid()
     ax.set_xlabel('ALGORITHM overlap - SLOTH overlap')
     ax.set_ylabel('frequency')
-    fig.suptitle(f'Algorithm and Real Overlap comparison for dataset {dataset}')
+    fig.suptitle(f'Algorithm and Real Overlap comparison for dataset {datalake_name}')
 
     plt.legend()
     plt.savefig(analyses_dir + '/graph_difference.png', bbox_inches='tight')
@@ -169,7 +164,7 @@ def analyses(test_name, k, num_query_samples, num_cpu, dataset, size, p_values,
     ax.set_ylabel('frequency')
     ax.set_yscale('log')
     ax.tick_params(axis='x', rotation=45)
-    fig.suptitle(f'Algorithm and Real Overlap Normalizes comparison for dataset {dataset}')
+    fig.suptitle(f'Algorithm and Real Overlap Normalizes comparison for dataset {datalake_name}')
 
     plt.legend()
     plt.savefig(analyses_dir + '/graph_ratio_norm.png', bbox_inches='tight')
@@ -198,7 +193,7 @@ def analyses(test_name, k, num_query_samples, num_cpu, dataset, size, p_values,
         # if a Silver Standard has less than the maximum P value, it isn't considered in the 
         # next analyses, just to avoid corner cases with groups with just N<<P values (however, this
         # shouldn't happen since we've already filtered on the returned list size of each algorithm...)
-        for query_id, ids_overlaps in tqdm(results_ids, total=nqueries):
+        for query_id, ids_overlaps in tqdm(results_ids, total=nqueries, leave=False):
             if ids_overlaps.shape[0] < max(p_values):
                 continue
             s = set()
@@ -207,7 +202,6 @@ def analyses(test_name, k, num_query_samples, num_cpu, dataset, size, p_values,
         end_ss = time()
 
         info(f'Finished. Total time: {round(end_ss - start_ss, 3)}s')
-        #runtime_metrics.append((get_local_time(), 'create_silver_standard', round(end_ss - start_ss, 3)))
 
     if save_silver_standard_to:
         info(f'Saving silver standard to {save_silver_standard_to}...')
@@ -229,7 +223,6 @@ def analyses(test_name, k, num_query_samples, num_cpu, dataset, size, p_values,
             ((name, data, p_values, silver_standard[name]) for name, data in query_groups))
         end_prec = time()
         info(f'Finished. Total time: {round(end_prec - start_prec, 3)}s')
-    # runtime_metrics.append((get_local_time(), 'prec-rec-f1', round(end_prec - start_prec, 3)))
 
     prec_rec_results = [x for qres in prec_rec_results for x in qres]
     prec_rec_results = pd.DataFrame(prec_rec_results, columns=['query_id', 'silver_std_size', 'algorithm', 'mode', 'p', 'precision', 'RP', 'recall', 'f1'])
@@ -246,7 +239,7 @@ def analyses(test_name, k, num_query_samples, num_cpu, dataset, size, p_values,
         plt.xticks(p_values, p_values)
         plt.xlabel('P')
         plt.ylabel(f'mean {measure}@P')
-        plt.title(f"{measure}@P graph for dataset {dataset}")
+        plt.title(f"{measure}@P graph for dataset {datalake_name}")
         plt.legend()
         plt.grid()
         plt.savefig(f'{analyses_dir}/graph_{measure}@p.png', bbox_inches='tight')
@@ -296,15 +289,14 @@ def analyses(test_name, k, num_query_samples, num_cpu, dataset, size, p_values,
         end_ndcg = time()
         info(f'Finished. Total time: {round(end_ndcg - start_ndcg, 3)}s')
         ndcg_results = [x for qres in ndcg_results for x in qres]
-    # runtime_metrics.append([get_local_time(), 'ndcg', round(end_ndcg - start_ndcg, 3)])
 
-    df = pd.DataFrame(ndcg_results, columns=['query_id', 'silver_standard_size', 'algorithm', 'mode', 'p', 'missing_p', 'ndcg_p'])
+    df = pd.DataFrame(ndcg_results, columns=['query_id', 'silver_standard_size', 'algorithm', 'mode', 'p', 'ndcg_p'])
 
     # consider only those groups that have more than X elements
     silver_standard_size_threshold = max(p_values)
     df_thr = df[df['silver_standard_size'] >= silver_standard_size_threshold]
 
-    ndcg_pivot = df_thr.pivot_table(index=['algorithm', 'mode'], columns=['p'], values=['ndcg_p', 'missing_p'], aggfunc=['mean', 'max']).convert_dtypes()
+    ndcg_pivot = df_thr.pivot_table(index=['algorithm', 'mode'], columns=['p'], values=['ndcg_p'], aggfunc=['mean', 'max']).convert_dtypes()
     ndcg_pivot.to_csv(analyses_dir + f'/ndcg@p.csv')
 
     for row, label in zip(ndcg_pivot['mean', 'ndcg_p'].values, ndcg_pivot.index):
@@ -313,7 +305,7 @@ def analyses(test_name, k, num_query_samples, num_cpu, dataset, size, p_values,
     plt.xlabel("P")
     plt.ylabel("mean nDCG@P")
 
-    plt.title(f"nDCG@P graph for dataset {dataset}")
+    plt.title(f"nDCG@P graph for dataset {datalake_name}")
     plt.legend()
     plt.grid()
     plt.savefig(f'{analyses_dir}/graph_ndcg@p.png', bbox_inches='tight')
@@ -348,13 +340,3 @@ def analyses(test_name, k, num_query_samples, num_cpu, dataset, size, p_values,
 
     fig.savefig(f'{analyses_dir}/boxplot_ndcg@p.png', bbox_inches='tight')
     plt.close()
-
-
-
-    # Saving time statistics
-    # add_header = not os.path.exists(runtime_stat_file)
-    # with open(runtime_stat_file, 'a') as rfw:
-    #     if add_header:
-    #         rfw.write("local_time,algorithm,mode,task,k,num_queries,time(s)\n")
-    #     for (t_loctime, t_task, t_time) in runtime_metrics:
-    #         rfw.write(f"{t_loctime},analysis,,{t_task},{k},{q},{t_time}\n")

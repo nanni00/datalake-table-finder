@@ -2,13 +2,13 @@ import pymongo
 import polars as pl
 
 from pyspark.sql import SparkSession
-from pyspark import SparkContext, SparkConf
+from pyspark import SparkContext, SparkConf, RDD
 
 
 def get_spark_session(
                       datalake_location:str, datalake_name:str, datalake_size:str='standard', 
                       datalake_mapping_id:dict|None=None, datalake_numeric_columns:dict|None=None,
-                      **spark_config):
+                      **spark_config) -> tuple[SparkSession, RDD]:
     
     conf = SparkConf().setAll(list(spark_config.items()))
     sc = SparkContext.getOrCreate(conf=conf)

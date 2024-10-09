@@ -62,111 +62,99 @@ class JOSIETester(AlgorithmTester):
         
         token_sets = (
             initial_rdd
-                .filter(
-                    # (_id_numeric, content, numeric_columns)
-                    lambda t: is_valid_table(t[1], t[2])
+            .filter(
+                # (_id_numeric, content, numeric_columns)
+                lambda t: is_valid_table(t[1], t[2])
+            )
+            .map(
+                # (_id_numeric, content, numeric_columns) -> (_id_numeric, [token1, token2, token3, ...])
+                lambda t: prepare_tuple(t)
+            ).flatMap(
+                    # (set_id, [tok1, tok2, tok3, ...]) -> [(tok1, set_id), (tok2, set_id), ...]
+                    lambda t: [(token, t[0]) for token in t[1]]
                 )
-                .map(
-                    # (_id_numeric, content, numeric_columns) -> (_id_numeric, [token1, token2, token3, ...])
-                    lambda t: prepare_tuple(t)
-                ).flatMap(
-                        # (set_id, [tok1, tok2, tok3, ...]) -> [(tok1, set_id), (tok2, set_id), ...]
-                        lambda t: [(token, t[0]) for token in t[1]]
-                    )
         )
 
         posting_lists_sorted = (
             token_sets
-                .groupByKey()
-                    .map(
-                        # (token, [set_idK, set_idJ, set_idM, ...]) -> (token, [set_id1, set_id2, set_id3, ..., set_idZ]) 
-                        lambda t: (t[0], sorted(list(t[1]))))
-                        .map(
-                            # (token, set_ids) -> (token, set_ids, set_ids_hash)
-                            lambda t:
-                                (
-                                    t[0], 
-                                    t[1], 
-                                    mmh3.hash_bytes(np.array(t[1]))
-                                )
-                            )
-                            .sortBy(
-                                # t: (token, setIDs, hash)
-                                lambda t: (len(t[1]), t[2], t[1]))
-                                .zipWithIndex()
-                                    .map(
-                                        # t: ((rawToken, sids, hash), tokenIndex) -> (token_id, (raw_token, set_ids, set_ids_hash))
-                                        lambda t: (t[1], t[0]))
-                                        .persist(pyspark.StorageLevel.MEMORY_ONLY)
+            .groupByKey()
+            .map(
+                # (token, [set_idK, set_idJ, set_idM, ...]) -> (token, [set_id1, set_id2, set_id3, ..., set_idZ]) 
+                lambda t: (t[0], sorted(list(t[1]))))
+            .map(
+                # (token, set_ids) -> (token, set_ids, set_ids_hash)
+                lambda t: (t[0], t[1], mmh3.hash_bytes(np.array(t[1]))))
+            .sortBy(
+                # t: (token, setIDs, hash)
+                lambda t: (len(t[1]), t[2], t[1]))
+            .zipWithIndex()
+            .map(
+                # t: ((rawToken, sids, hash), tokenIndex) -> (token_id, (raw_token, set_ids, set_ids_hash))
+                lambda t: (t[1], t[0]))
+            .persist(pyspark.StorageLevel.MEMORY_ONLY)
         )
 
         # create the duplicate groups
         duplicate_group_ids = (
             posting_lists_sorted
-                .map(
-                    # t: (tokenIndex, (rawToken, sids, hash)) -> (token_index, (sids, hash))
-                    lambda t: (t[0] + 1, (t[1][1], t[1][2])))
-                    .join(posting_lists_sorted)
-                        .map(
-                            lambda t: 
-                                -1 if t[1][0][1] == t[1][1][2] and t[1][0][0] == t[1][1][1] else t[0]
-                        )
-                            .filter(
-                                lambda i: i > 0)
-                                .union(spark.sparkContext.parallelize([0, posting_lists_sorted.count()]))
-                                    .sortBy(lambda i: i)
-                                        .zipWithIndex()
-                                            .map(
-                                                # returns a mapping from group ID to the
-                                                # starting index of the group
-                                                # (startingIndex, GroupID) -> (GroupID, startingIndex)
-                                                lambda t: (t[1], t[0]))
+            .map(
+                # t: (tokenIndex, (rawToken, sids, hash)) -> (token_index, (sids, hash))
+                lambda t: (t[0] + 1, (t[1][1], t[1][2])))
+            .join(posting_lists_sorted)
+            .map(
+                lambda t: -1 if t[1][0][1] == t[1][1][2] and t[1][0][0] == t[1][1][1] else t[0])
+            .filter(
+                lambda i: i > 0)
+            .union(spark.sparkContext.parallelize([0, posting_lists_sorted.count()]))
+            .sortBy(lambda i: i)
+            .zipWithIndex()
+            .map(
+                # returns a mapping from group ID to the
+                # starting index of the group
+                # (startingIndex, GroupID) -> (GroupID, startingIndex)
+                lambda t: (t[1], t[0]))
         )
             
         # generating all token indexes of each group
         token_group_ids = (
             duplicate_group_ids
-                .join( # (GroupIDLower, startingIndexLower) JOIN (GroupIDUpper, startingIndexUpper) 
-                    duplicate_group_ids
-                        .map(
-                            # (GroupID, startingIndexUpper) -> (GroupID, startingIndexUpper)
-                            lambda t: (t[0] - 1, t[1])
-                        )
-                    )
+            .join( # (GroupIDLower, startingIndexLower) JOIN (GroupIDUpper, startingIndexUpper) 
+                duplicate_group_ids
+                .map(
+                    # (GroupID, startingIndexUpper) -> (GroupID, startingIndexUpper)
+                    lambda t: (t[0] - 1, t[1]))
+            )
         )
 
         token_group_ids = (
             token_group_ids
-                .flatMap(
-                    # GroupID, (startingIndexLower, startingIndexUpper) -> (tokenIndex, groupID)
-                    lambda t: [(i, t[0]) for i in range(t[1][0], t[1][1])]
-                ).persist(pyspark.StorageLevel.MEMORY_ONLY)
+            .flatMap(
+                # GroupID, (startingIndexLower, startingIndexUpper) -> (tokenIndex, groupID)
+                lambda t: [(i, t[0]) for i in range(t[1][0], t[1][1])])
+            .persist(pyspark.StorageLevel.MEMORY_ONLY)
         )
 
         # join posting lists with their duplicate group IDs
-        posting_lists_with_group_ids = posting_lists_sorted \
-            .join(token_group_ids) \
-                .map(
-                    # (tokenIndex, ((rawToken, sids, _), gid)) -> (token_index, (group_id, raw_token, sids))
-                    lambda t: (t[0], (t[1][1], t[1][0][0], t[1][0][1]))
-                )
+        posting_lists_with_group_ids = (
+            posting_lists_sorted
+            .join(token_group_ids)
+            .map(
+                # (tokenIndex, ((rawToken, sids, _), gid)) -> (token_index, (group_id, raw_token, sids))
+                lambda t: (t[0], (t[1][1], t[1][0][0], t[1][0][1])))
+        )
         
         # STAGE 2: CREATE INTEGER SETS
         # Create sets and replace text tokens with token index
         integer_sets = (
             posting_lists_with_group_ids
-                .flatMap(
-                    # (tokenIndex, (_, _, sids))
-                    lambda t: [(sid, t[0]) for sid in t[1][2]]        
-                )
-                    .groupByKey()
-                        .map(
-                            # (sid, tokenIndexes)
-                            lambda t: (
-                                t[0], 
-                                sorted(t[1])
-                            )
-                        )
+            .flatMap(
+                # (tokenIndex, (_, _, sids))
+                lambda t: [(sid, t[0]) for sid in t[1][2]])
+            .groupByKey()
+            .map(
+                # (sid, tokenIndexes)
+                lambda t: (t[0], sorted(t[1]))
+            )
         )
 
         # STAGE 3: CREATE THE FINAL POSTING LISTS
@@ -174,28 +162,27 @@ class JOSIETester(AlgorithmTester):
         # lists to obtain the final posting lists with all the information
         posting_lists = (
             integer_sets
-                .flatMap(
-                    lambda t:
-                        [
-                            (token, (t[0], len(t[1]), pos))
-                            for pos, token in enumerate(t[1])
-                        ]
-                )
-                    .groupByKey()
-                        .map(
-                            # (token, sets)
-                            lambda t: (
-                                t[0], 
-                                sorted(t[1], 
-                                    key=lambda s: s[0]
-                                    )
-                            )
+            .flatMap(
+                lambda t:
+                    [
+                        (token, (t[0], len(t[1]), pos))
+                        for pos, token in enumerate(t[1])
+                    ])
+            .groupByKey()
+            .map(
+                # (token, sets)
+                lambda t: (
+                    t[0], 
+                    sorted(t[1], 
+                        key=lambda s: s[0]
                         )
-                            .join(posting_lists_with_group_ids)
-                                .map(
-                                    # (token, (sets, (gid, rawToken, _))) -> (token, rawToken, gid, sets)
-                                    lambda t: (t[0], t[1][1][1], t[1][1][0], t[1][0])
-                                )
+                )
+            )
+            .join(posting_lists_with_group_ids)
+            .map(
+                # (token, (sets, (gid, rawToken, _))) -> (token, rawToken, gid, sets)
+                lambda t: (t[0], t[1][1][1], t[1][1][0], t[1][0])
+            )
         )
 
         # STAGE 4: SAVE INTEGER SETS AND FINAL POSTING LISTS
@@ -203,7 +190,6 @@ class JOSIETester(AlgorithmTester):
         info(f"Total posting lists: {posting_lists.count()}")
         info(f"Total number of partitions: {posting_lists.getNumPartitions()}")
         
-        # to load directly into the database
         def _integer_set_format(t):
             sid, indices = t
             return (sid, len(indices), len(indices), indices)
@@ -216,17 +202,6 @@ class JOSIETester(AlgorithmTester):
             set_pos = [int(s[2]) for s in sets]
             return (int(token), len(sets), int(gid), 1, byteatoken, set_ids, set_sizes, set_pos)
 
-        integer_sets = integer_sets.map(
-            lambda t: _integer_set_format(t)
-        ).toDF(schema=['id', 'size', 'num_non_singular_token', 'tokens'])
-
-        posting_lists = posting_lists.map(
-            lambda t: _postinglist_format(t)
-        ).toDF(schema=[
-            'token', 'frequency', 'duplicate_group_id', 'duplicate_group_count', 'raw_token', 'set_ids', 'set_sizes', 'match_positions'
-            ]
-        )
-
         url = self.josiedb.url.create(
             self.josiedb.url.drivername, 
             host=self.josiedb.url.host, 
@@ -238,20 +213,35 @@ class JOSIETester(AlgorithmTester):
             'password': self.josiedb.url.password,
         }
 
-        integer_sets.write.jdbc(
-            f'jdbc:{url}',
-            f"{self.tables_prefix}_sets",
-            'append',
-            properties=properties
-            )
 
-        posting_lists.write.jdbc(
-            f'jdbc:{url}',
-            f"{self.tables_prefix}_inverted_lists", 
-            'append', 
-            properties=properties
+        (
+            integer_sets
+            .map(
+                lambda t: _integer_set_format(t))
+            .toDF(schema=['id', 'size', 'num_non_singular_token', 'tokens'])
+            .write
+            .jdbc(
+                f'jdbc:{url}',
+                f"{self.tables_prefix}_sets",
+                'append',
+                properties=properties
             )
-        
+        )
+
+        (
+            posting_lists
+            .map(
+                lambda t: _postinglist_format(t))
+            .toDF(schema=['token', 'frequency', 'duplicate_group_id', 'duplicate_group_count', 'raw_token', 'set_ids', 'set_sizes', 'match_positions'])
+            .write
+            .jdbc(
+                f'jdbc:{url}',
+                f"{self.tables_prefix}_inverted_lists", 
+                'append', 
+                properties=properties
+            )
+        )
+
         spark.sparkContext.stop()
                 
         # database statistics
@@ -269,7 +259,7 @@ class JOSIETester(AlgorithmTester):
 
         start_query = time()
         self.josiedb.clear_query_table()
-        self.josiedb.insert_data_into_query_table(query_ids)
+        self.josiedb.add_queries_from_existent_tables(query_ids)
 
         GOPATH = os.environ['GOPATH']
         josie_cmd_dir = f'{GOPATH}/src/github.com/ekzhu/josie/cmd'
@@ -278,7 +268,7 @@ class JOSIETester(AlgorithmTester):
         info(f'Check if sample tables already exist...')
         # if cost sampling tables already exist we assume they are correct and won't recreate them
         sample_costs_tables_exist = self.josiedb.cost_tables_exist()
-        info(f'Sample costs tables exist? {not sample_costs_tables_exist}')
+        info(f'Sample costs tables exist? {sample_costs_tables_exist}')
         self.josiedb.close()
 
         if not sample_costs_tables_exist:
@@ -290,9 +280,10 @@ class JOSIETester(AlgorithmTester):
 
         # we are not considering the query preparation steps, since in some cases this will 
         # include also the cost sampling phase and in other cases it won't
-        info('Running top-K...')
         x = 'true' if token_table_on_memory else 'false'
         info('Using token table on memory: ' + x)
+
+        info('Running top-K...')
         os.system(f'go run {josie_cmd_dir}/topk/main.go \
                     --pg-database={self.josiedb.url.database} \
                     --test_tag={self.tables_prefix} \
@@ -301,17 +292,14 @@ class JOSIETester(AlgorithmTester):
                     --useMemTokenTable={x} \
                     --k={k}')
 
-        # preparing output for next analyses
-        results_df = pl.read_csv(results_file).select(['query_id', 'duration', 'results'])
-        os.rename(results_file, results_file + '.raw')
-        
-        results_df = results_df.with_columns((pl.col('duration') / 1000).name.keep())
-        (   
-            results_df
+        (
+            pl.read_csv(results_file).select(['query_id', 'duration', 'results'])
+            .with_columns((pl.col('duration') / 1000).name.keep())
             .with_columns(pl.col('results').map_elements(get_result_ids, return_dtype=pl.String).alias('result_ids'))
             .drop('results')
             .write_csv(results_file)
         )
+        os.rename(results_file, results_file + '.raw')
 
         info('Completed JOSIE tests.')
         return round(time() - start_query, 5)
