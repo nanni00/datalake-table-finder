@@ -3,7 +3,7 @@ import os
 import pandas as pd
 from numerize_denumerize.numerize import numerize
 
-from thesistools.testers.josie import josie
+from thesistools.testers.josie_new import josie
 from thesistools.testers import lshforest, embedding
 from thesistools.utils.logging_handler import info, logging_setup
 from thesistools.utils.settings import DefaultPath as defpath, get_all_paths

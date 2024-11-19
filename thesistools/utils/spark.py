@@ -6,7 +6,7 @@ from pyspark import SparkContext, SparkConf, RDD
 
 
 def get_spark_session(
-                      datalake_location:str, datalake_name:str, datalake_size:str='standard', 
+                      datalake_location:str, datalake_name:str, 
                       datalake_mapping_id:dict|None=None, datalake_numeric_columns:dict|None=None,
                       **spark_config) -> tuple[SparkSession, RDD]:
     
@@ -39,21 +39,20 @@ def get_spark_session(
                     case 'wikitables':
                         databases, collections = ['datasets'], ['wikitables']
                         
-                collections = [c + '_small' if datalake_size == 'small' else c for c in collections]
                 db_collections = zip(databases, collections)
 
                 init_rdd = spark.sparkContext.emptyRDD()
 
                 for database, collection_name in db_collections:
                     init_rdd = init_rdd.union(
-                        spark 
+                        spark
                         .read
                         .format("mongodb")
-                        .option ("uri", "mongodb://127.0.0.1:27017/") 
-                        .option("database", database) 
-                        .option("collection", collection_name)                         
-                        .load() 
-                        .select('_id_numeric', 'content', 'numeric_columns') 
+                        .option ("uri", "mongodb://127.0.0.1:27017/")
+                        .option("database", database)
+                        .option("collection", collection_name)
+                        .load()
+                        .select('_id_numeric', 'content', 'numeric_columns')
                         .rdd
                         .map(list)
                     )

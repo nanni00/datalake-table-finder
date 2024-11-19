@@ -7,21 +7,26 @@ import json
 import pickle
 
 
-def parse_tables(path_tables, table_collection, milestone):
+def parse_tables(path_tables, table_collection, milestone, n):
     """
     :param path_tables: path of the JSONL file containing the tables
     :param table_collection: MongoDB collection to store the tables
     :param milestone: table interval to use for tracking the progress
+    :param n: maximum number of tables to load into the MongoDB collection
     """
     tables = list()  # empty list to store the parsed tables
     counter = 0  # counter of the parsed tables
     with open(path_tables, "r") as input_file:  # open the JSONL file containing the tables
-        for line in input_file:  # for every table contained in the JSONL file
+        for i, line in enumerate(input_file):  # for every table contained in the JSONL file
             if counter % milestone == 0 and len(tables) > 0:  # track the progress
                 print(counter, end='\r')
                 table_collection.insert_many(tables)
                 tables = []
             raw_table = json.loads(line)  # load the table in its raw form
+
+            if i >= n:
+                break
+            
             raw_table_content = raw_table["tableData"]  # load the table content in its raw form
             table = dict()  # empty dictionary to store the parsed table
 
@@ -32,11 +37,17 @@ def parse_tables(path_tables, table_collection, milestone):
             
             caption = raw_table["tableCaption"] if "tableCaption" in raw_table else ""
             table["context"] = raw_table["pgTitle"] + " | " + raw_table["sectionTitle"] + " | " +  caption  # table context
-            table["headers"] = raw_table["tableHeaders"]
+            
+            # basic format
+            table["headers"] = raw_table['tableHeaders']
+
+            # for WikiTables format
+            # table["headers"] = [o['text'] for o in raw_table["tableHeaders"][0]]
             table['rows'] = raw_table['numDataRows']
             table['columns'] = raw_table['numCols']
             tables.append(table)  # append the parsed table to the list
             counter += 1  # increment the counter
+    table_collection.insert_many(tables)
     print("Table parsing completed: " + str(counter) + " tables read and stored in the database.")
 
 
@@ -126,15 +137,15 @@ def generate_candidate_set(path_clusters, path_candidates, milestone):
 def main():
     # PARSE THE TABLES FROM THE JSONL FILE AND STORE THEM IN A DEDICATED MONGODB COLLECTION
     # path_tables = "datasets/train_tables.jsonl"  # path of the JSONL file containing the tables
-    path_tables = '/home/giovanni.malaguti/tesi-magistrale/data/raw_dataset/wikitables.json'
+    path_tables = '/home/nanni/datasets_datalakes/WikiTables/tables.json'
     
     client = MongoClient()  # connect to MongoDB
     db = client.datasets  # define the database to use
     table_collection = db.wikitables  # define the collection in the database to store the tables
     milestone = 10000  # table interval to use for tracking the progress
-    parse_tables(path_tables, table_collection, milestone)
-    """
-    """
+    n = 100
+    parse_tables(path_tables, table_collection, milestone, n)
+    
 
     # COMPUTE THE MINHASH FOR ALL TABLES IN THE COLLECTION
     """

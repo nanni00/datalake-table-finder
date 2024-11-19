@@ -5,9 +5,7 @@ data/tests
 data/raw_dataset
 
 # the PostgreSQL database directories
-data/pg_build_dir
-data/postgresql-10.0
-data/pg_data
+data
 
 # Go (keep only the JOSIE code subfolder)
 go/*

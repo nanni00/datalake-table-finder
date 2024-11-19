@@ -49,6 +49,7 @@ DATALAKES = [
 MONGODB_DATALAKES = [
     'gittables',
     'wikitables',
+    'wikitables_small',
     'wikiturlsnap',
 ]
 
