@@ -2,7 +2,7 @@ import csv
 from typing import Optional
 from dataclasses import dataclass
 
-from thesistools.testers.josie_new.heap import SearchResult
+from heap import SearchResult
 
 
 @dataclass

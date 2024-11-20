@@ -27,8 +27,6 @@ def table_embedder_factory(table_embedder:str, model_path) -> TableEmbedder:
             return FastTextTableEmbedder(model_path)
         case 'cft'|'cftdist':
             return FastTextTableEmbedder(model_path, compressed=True)
-        case 'deepjoin':
-            return DeepJoinTableEmbedder(model_path)
         case _:
             raise ValueError('Unknown mode for table embedder with naive query mode: ' + table_embedder)
 
@@ -42,7 +40,7 @@ class FastTextTableEmbedder(TableEmbedder):
         else:
             self.model = compress_fasttext.models.CompressedFastTextKeyedVectors.load(model_path)
 
-    def embed_columns(self, table, numeric_columns, *args):
+    def embed_columns(self, table, valid_columns, *args):
         """ 
         Return columns embeddings as a np.array of shape (#table_columns, #model_vector_size)
 
@@ -55,7 +53,7 @@ class FastTextTableEmbedder(TableEmbedder):
         max_token_per_column = 512
 
         table = [column_to_text(column, *translators, blacklist=blacklist, max_seq_len=max_token_per_column) 
-                 for column in table_rows_to_columns(table, 0, len(table[0]), numeric_columns)]
+                 for column in table_rows_to_columns(table, 0, len(table[0]), valid_columns)]
 
         return np.array([self.model.get_sentence_vector(column) for column in table if column])
 
@@ -63,20 +61,3 @@ class FastTextTableEmbedder(TableEmbedder):
     def get_dimension(self):
         return self.model.get_dimension() if not self.compressed else self.model.vector_size
     
-
-
-class DeepJoinTableEmbedder(TableEmbedder):
-    def __init__(self, model_path) -> None:
-        super().__init__(model_path)
-        self.model = SentenceTransformer(model_path)
-
-    def embed_columns(self, table, numeric_columns, *args):
-        blacklist, translators = args[0], args[1:]
-        table = table_rows_to_columns(table, 0, len(table[0]), numeric_columns)
-        table = [column_to_text([token for token in column if token not in blacklist], *translators) for column in table]
-        if len(table) > 0:
-            return self.model.encode(table, batch_size=16, device='cuda', normalize_embeddings=True)
-
-    def get_dimension(self) -> int:
-        return self.model.get_sentence_embedding_dimension()
-

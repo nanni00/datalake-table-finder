@@ -15,6 +15,7 @@ from thesistools.sloth.sloth import sloth
 from thesistools.sloth.utils import parse_table
 from thesistools.utils.logging_handler import info
 from thesistools.utils.parallel import chunks
+from thesistools.utils.datalake import DataLakeHandlerFactory
 from thesistools.utils.basicconfig import TablesThresholds as tab_thresh
 
 
@@ -86,14 +87,14 @@ def column_to_text(column, *translators, blacklist=[], max_seq_len=512):
 def table_columns_to_rows(columns):
     return [row for row in zip(*columns)]
 
-def table_rows_to_columns(table, num_headers, num_cols, bad_columns:list=[]):
+def table_rows_to_columns(table, num_headers, num_cols, valid_columns:list=[]):
     """ Restructure the table as the list of its columns, ignoring the headers """
-    return [[row[i] for row in table[num_headers:]] for i in range(num_cols) if bad_columns[i] == 0]
+    return [[row[i] for row in table[num_headers:]] for i in range(num_cols) if valid_columns[i] == 1]
 
 
-def table_rows_to_rows(table, num_headers, num_cols, bad_columns:list=[]):
+def table_rows_to_rows(table, num_headers, num_cols, valid_columns:list=[]):
     """ Keeps the row-view structure of the table, removing cells from bad columns """
-    return [[row[i] for i, x in enumerate(bad_columns) if x == 0] for row in table[num_headers:]]
+    return [[row[i] for i, x in enumerate(valid_columns) if x == 1] for row in table[num_headers:]]
 
 
 def are_joinable_columns(c1: list, c2:list, t:float, metric:str):
@@ -125,11 +126,11 @@ def convert_to_giga(x):
         return int(re.match(r'\d+', x).group()) / (1024 ** 2)
 
 
-def is_valid_table(table, bad_columns):
-    if all(bad_columns):
+def is_valid_table(table, valid_columns):
+    if sum(valid_columns) < tab_thresh.MIN_COLUMNS:
         return False
     # here is kept a row-view for the table
-    table = table_rows_to_rows(table, 0, len(table[0]), bad_columns)
+    table = table_rows_to_rows(table, 0, len(table[0]), valid_columns)
     return  tab_thresh.MIN_ROWS     <= len(table)                   <= tab_thresh.MAX_ROWS and \
             tab_thresh.MIN_COLUMNS  <= len(table[0])                <= tab_thresh.MAX_COLUMNS and \
             tab_thresh.MIN_AREA     <= len(table) * len(table[0])   <= tab_thresh.MAX_AREA
@@ -137,10 +138,10 @@ def is_valid_table(table, bad_columns):
 
 
 
-def is_valid_multi_key(names, table, bad_columns, headers):
-    table = table_rows_to_columns(table, 0, len(table[0]), bad_columns)
+def is_valid_multi_key(names, table, valid_cols, headers):
+    table = table_rows_to_columns(table, 0, len(table[0]), valid_cols)
     
-    valid_headers = [h for i, h in enumerate(headers) if bad_columns[i] == 0]
+    valid_headers = [h for i, h in enumerate(headers) if valid_cols[i] == 1]
     multi_key_columns = [column for h, column in zip(valid_headers, table) if h in names]
     
     # sometimes the attributes aren't accepted
@@ -158,7 +159,7 @@ def is_valid_multi_key(names, table, bad_columns, headers):
     # the second condition is becoue sometimes there are headers like
     # ["name", "name", "surname", "age", ...]
     # and if we want the key <"name", "surname">, usually one of them is an empty column
-    idxs = [i for i, h in  enumerate(headers) if h in names if bad_columns[i] == 0]
+    idxs = [i for i, h in  enumerate(headers) if h in names if valid_cols[i] == 1]
     return idxs if len(idxs) == len(names) else None
 
 
@@ -170,38 +171,35 @@ def is_number_tryexcept(s):
     return True
 
 
-def is_bad_column(column:list, tokenize=lambda cell: cell):
+def is_valid_column(column:list, tokenize=lambda cell: cell):
     column = list(map(tokenize, column))
-    return sum(map(lambda cell: is_number_tryexcept(cell) or pd.isna(cell) or not cell, column)) >= len(column) // 2 + 1
+    return sum(map(lambda cell: is_number_tryexcept(cell) or pd.isna(cell) or not cell, column)) <= len(column) // 2 + 1
 
 
-def naive_detect_bad_columns(table: list[list], tokenize=lambda cell: cell) -> list[int]:
+def naive_detect_valid_columns(table: list[list], tokenize=lambda cell: cell) -> list[int]:
     """ 
     :param table: a list of lists representing a table in row view
-    :param any_int: if set to True, a column is detected as an numeric column wheter any of its values is 
-        a numeric value, else if the majority (i.e. #numeric_cells >= #column_size / 2 + 1) of its values are numerics
-    :return a list of int, where the i-th element is set to 1 if the i-th column is detected as numeric or with only null values, 
-        0 otherwise
+    :return a list of int, where the i-th element is set to 1 if the i-th column is detected as valid 0 otherwise
     """
         
     if len(table) == 0 or len(table[0]) == 0:
         return []
-    return [int(is_bad_column(column, tokenize)) for column in parse_table(table, len(table[0]), 0)]
+    return [int(is_valid_column(column, tokenize)) for column in parse_table(table, len(table[0]), 0)]
 
 
 
-def table_to_tokens(table, mode, numeric_columns, encode=None, blacklist:set=set(), *string_transformers):
+def table_to_tokens(table, mode, valid_columns, encode=None, blacklist:set=set(), string_transformers:list|None=None):
     """ Create the token set for the given table 
     :param table: a list of list (row-view) of the table content 
     :param mode: how to create the token set, with "set" or "bag" semantic
-    :param numeric_columns: a flag vector, where if the ith element is 1, this means that the 
+    :param valid_columns: a flag vector, where if the ith element is 1, this means that the 
                             ith column is numeric and its elements are skipped while creating the token set
     :param encode: if set, tokens will be encoded as specified (e.g. 'utf-8')
     :param blacklist: a set of tokens that won't be considered
     """
     if mode == 'set':
         tokens = list({clean_string(token, *string_transformers) for row in table for icol, token in enumerate(row) 
-                     if not pd.isna(token) and token and numeric_columns[icol] == 0 and token not in blacklist})
+                     if not pd.isna(token) and token and valid_columns[icol] == 1 and token not in blacklist})
     elif mode == 'bag':
         counter = defaultdict(int)
         
@@ -210,14 +208,14 @@ def table_to_tokens(table, mode, numeric_columns, encode=None, blacklist:set=set
             return f'{token}{_TOKEN_TAG_SEPARATOR}{counter[token]}'
         
         tokens = [_create_token_tag(clean_string(token)) for row in table for icol, token in enumerate(row)
-                if not pd.isna(token) and token and numeric_columns[icol] == 0 and token not in blacklist]
+                if not pd.isna(token) and token and valid_columns[icol] == 1 and token not in blacklist]
     else:
         raise Exception('Unknown mode: ' + str(mode))
     return tokens if not encode else [token.encode(encode) for token in tokens]
 
 
 
-def largest_overlap_sloth(table1, table2, numeric_columns1, numeric_columns2, verbose=False, blacklist=[], **sloth_args) -> tuple[int, float]:
+def largest_overlap_sloth(table1, table2, valid_cols1, valid_cols2, verbose=False, blacklist=[], **sloth_args) -> tuple[int, float]:
     num_null = 0
 
     def format_value_for_excluding_nan(t):
@@ -228,8 +226,8 @@ def largest_overlap_sloth(table1, table2, numeric_columns1, numeric_columns2, ve
         t = clean_string(t)
         return t
     
-    table1 = [[format_value_for_excluding_nan(row[i]) for row in table1] for i in range(len(table1[0])) if numeric_columns1[i] == 0]
-    table2 = [[format_value_for_excluding_nan(row[i]) for row in table2] for i in range(len(table2[0])) if numeric_columns2[i] == 0]
+    table1 = [[format_value_for_excluding_nan(row[i]) for row in table1] for i in range(len(table1[0])) if valid_cols1[i] == 1]
+    table2 = [[format_value_for_excluding_nan(row[i]) for row in table2] for i in range(len(table2[0])) if valid_cols2[i] == 1]
 
     metrics = []
     start_sloth = time.time()
@@ -246,14 +244,14 @@ def largest_overlap_sloth(table1, table2, numeric_columns1, numeric_columns2, ve
 
 
 
-from thesistools.utils.datalake import DataLakeHandlerFactory
+
 def sample_query_task(data):
     chunk, data_lake_args = data[0], data[1:]
     dlh = DataLakeHandlerFactory.create_handler(*data_lake_args)
     s = set()
     for table_id in chunk:
         table_obj = dlh.get_table_by_numeric_id(table_id)
-        if not is_valid_table(table_obj['content'], table_obj['numeric_columns']):
+        if not is_valid_table(table_obj['content'], table_obj['valid_columns']):
             continue
         
         s.add(table_id)
@@ -261,9 +259,10 @@ def sample_query_task(data):
     return s
 
 
+
 def sample_queries(output_query_json, nsamples, num_cpu, *data_lake_args):
     s = set()
-    print(output_query_json)
+    start = time.time()
     dlh = DataLakeHandlerFactory.create_handler(*data_lake_args)
     N = dlh.count_tables()
     dlh.close()
@@ -279,6 +278,8 @@ def sample_queries(output_query_json, nsamples, num_cpu, *data_lake_args):
                 for x in taskres:
                     s.add(int(x))
             print(f'Sampled {len(s)} ({round(len(s) * 100 / nsamples)}%)', end='\r')
+            if time.time() - start > 3:
+                break
     samples = {'_id_numeric': list(s)[:nsamples]}
     
     with open(output_query_json, 'w') as wf:
@@ -288,4 +289,4 @@ def sample_queries(output_query_json, nsamples, num_cpu, *data_lake_args):
 
 def get_query_ids_from_query_file(query_file):
     with open(query_file) as fr:
-        return json.load(fr)['_id_numeric']
+        return sorted(json.load(fr)['_id_numeric'])

@@ -1,12 +1,12 @@
 import time
 
 from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import Session, aliased
+from sqlalchemy.orm import Session
 from sqlalchemy.engine import URL, Engine
 from sqlalchemy import (
     create_engine, MetaData, 
     text, inspect, func,
-    select, insert,
+    select, insert, delete,
     Column,
     Integer, LargeBinary, ARRAY, update
 )
@@ -247,6 +247,7 @@ class JOSIEDBHandler:
 			FROM inverted_lists
 			WHERE token = any(tokens)
 		), tokens FROM queries
+        ORDER BY id
         """
 
         rows = self.execute_in_session(text(q))
@@ -312,7 +313,7 @@ class JOSIEDBHandler:
             q = f"""SELECT regr_slope(cost, frequency), regr_intercept(cost, frequency)
                 FROM {ReadListCostSamples.__tablename__};"""
             slope, intercept = session.execute(text(q)).fetchone()
-            print('\n\n\n', self.read_list_cost_intercept, self.read_list_cost_slope, intercept, slope, '\n\n\n')
+
             if verbose:
                 info(f"Resetting read list cost slope {self.read_list_cost_slope:.4f} -> {slope:.4f}")
                 info(f"Resetting read list cost intercept {self.read_list_cost_intercept:.4f} -> {intercept:.4f}")
@@ -331,6 +332,10 @@ class JOSIEDBHandler:
             self.read_set_cost_slope = slope
             self.read_set_cost_intercept = intercept
 
+    def delete_cost_tables(self):
+        self.execute_in_session(delete(ReadListCostSamples))
+        self.execute_in_session(delete(ReadSetCostSamples))
+
     def sample_costs(self, 
                      min_length:int = 0, 
                      max_length:int = 20_000, 
@@ -344,12 +349,10 @@ class JOSIEDBHandler:
             start = time.time()
             s = self.get_set_tokens(set_id)
             duration = time.time() - start  # Duration in seconds
-            print(set_id, len(s), int(duration * 1e9))
             self.insert_read_set_cost(set_id, len(s), int(duration * 1e9))
 
         for l in range(min_length, max_length, step):
             self.insert_read_list_cost(l, l+step, sample_size_per_step)
-            # count = db.count_token_from_read_list_cost(l, l+step)
 
         sample_list_tokens = self.get_array_agg_token_read_list_cost()
         for token in sample_list_tokens:

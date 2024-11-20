@@ -11,24 +11,23 @@ from thesistools.testers.base_tester import AlgorithmTester
 from thesistools.utils.misc import table_to_tokens, is_valid_table
 from thesistools.utils.logging_handler import info
 from thesistools.utils.parallel import chunks
-from thesistools.utils.datalake import SimpleDataLakeHelper
+from thesistools.utils.datalake import DataLakeHandlerFactory, DataLakeHandler
 
 
 
 def worker_lshforest_data_preparation(data):
-    global datalake_location, datalake, size, mapping_id_file, numeric_columns_file, \
-        mode, blacklist, token_translators, num_perm, hash_func
+    global dlhargs, mode, blacklist, token_translators, num_perm, hash_func, dlhargs
     
     id_tables_range = data[0]
     results = []
-
-    dlh = SimpleDataLakeHelper(datalake_location, datalake, size, mapping_id_file, numeric_columns_file)
+    print(dlhargs, *dlhargs)
+    dlh = DataLakeHandlerFactory.create_handler(*dlhargs)
     for i in id_tables_range:
         table_obj = dlh.get_table_by_numeric_id(i)
-        _id_numeric, table, numeric_columns = table_obj['_id_numeric'], table_obj['content'], table_obj['numeric_columns']
+        _id_numeric, table, valid_columns = table_obj['_id_numeric'], table_obj['content'], table_obj['valid_columns']
 
-        if is_valid_table(table, numeric_columns):
-            token_set = table_to_tokens(table, mode, numeric_columns, 'utf-8', blacklist, *token_translators)
+        if is_valid_table(table, valid_columns):
+            token_set = table_to_tokens(table, mode, valid_columns, 'utf-8', blacklist, token_translators)
             m = MinHash(num_perm, hashfunc=hash_func)
             m.update_batch(token_set)
             results.append([_id_numeric, m])
@@ -38,17 +37,10 @@ def worker_lshforest_data_preparation(data):
 
 
 
-def initializer(_datalake_location, _datalake, _size, _mapping_id_file, _numeric_columns_file, 
-                _mode, _num_cpu, _blacklist, _token_translators, _num_perm, _hash_func, _emb_model_path):
-    global datalake_location, datalake, size, mapping_id_file, numeric_columns_file, \
-        mode, num_cpu, blacklist, token_translators, num_perm, hash_func, emb_model_path
+def initializer( _mode, _num_cpu, _blacklist, _token_translators, _num_perm, _hash_func, *_dlhargs):
+    global mode, num_cpu, blacklist, token_translators, num_perm, hash_func, dlhargs
     
-    datalake_location = _datalake_location
-    datalake =          _datalake
-    size =              _size
-    mapping_id_file =   _mapping_id_file
-    numeric_columns_file = _numeric_columns_file
-
+    dlhargs =           _dlhargs[0]
     mode =              _mode
     num_cpu =           _num_cpu
     blacklist =         _blacklist
@@ -56,12 +48,11 @@ def initializer(_datalake_location, _datalake, _size, _mapping_id_file, _numeric
 
     num_perm =          _num_perm
     hash_func =         _hash_func
-    emb_model_path =    _emb_model_path
 
     
 class LSHForestTester(AlgorithmTester):
-    def __init__(self, mode, blacklist, datalake_helper, token_translators, num_cpu, forest_file, num_perm, l, hash_func) -> None:
-        super().__init__(mode, blacklist, datalake_helper, token_translators)
+    def __init__(self, mode, blacklist, dlh, token_translators, num_cpu, forest_file, num_perm, l, hash_func) -> None:
+        super().__init__(mode, blacklist, dlh, token_translators)
         self.num_cpu = num_cpu
         self.forest_file = forest_file
         self.num_perm = num_perm
@@ -84,11 +75,8 @@ class LSHForestTester(AlgorithmTester):
         start = time()
         self.forest = MinHashLSHForest(self.num_perm, self.l)
 
-        initargs = (
-            self.dlh.datalake_location, self.dlh.datalake_name, self.dlh.size, 
-            self.dlh.mapping_id_path, self.dlh.numeric_columns_path,
-            self.mode, self.num_cpu, self.blacklist, self.token_translators, self.num_perm, self.hash_func, None)
-        work = range(self.dlh.get_number_of_tables())
+        initargs = (self.mode, self.num_cpu, self.blacklist, self.token_translators, self.num_perm, self.hash_func, self.dlh.config())
+        work = range(self.dlh.count_tables())
 
         info(f"Start processing tables...")
         with mp.Pool(processes=self.num_cpu, initializer=initializer, initargs=initargs) as pool:
@@ -111,6 +99,7 @@ class LSHForestTester(AlgorithmTester):
     def query(self, results_file, k, query_ids, **kwargs):
         start = time()
         results = []
+        
 
         if not self.forest:
             info('Loading forest...')
@@ -123,9 +112,9 @@ class LSHForestTester(AlgorithmTester):
                 minhash_q = MinHash(num_perm=self.num_perm, hashfunc=self.hash_func, hashvalues=hashvalues_q)
             except KeyError:
                 table_q = self.dlh.get_table_by_numeric_id(query_id)
-                numeric_columns_q, content_q = table_q['numeric_columns'], table_q['content']
+                valid_columns_q, content_q = table_q['valid_columns'], table_q['content']
                 
-                token_set_q = table_to_tokens(content_q, self.mode, numeric_columns_q, blacklist=self.blacklist)
+                token_set_q = table_to_tokens(content_q, self.mode, valid_columns_q, blacklist=self.blacklist, string_transformers=self.token_translators)
 
                 minhash_q = MinHash(num_perm=self.num_perm, hashfunc=self.hash_func)
                 minhash_q.update_batch(token_set_q)
@@ -161,7 +150,7 @@ if __name__ == '__main__':
     datalake = 'wikiturlsnap'
     size = 'small'
     blacklist = []
-    dlh = SimpleDataLakeHelper('mongodb', datalake, size)
+    dlh = DataLakeHandlerFactory.create_handler('mongodb', datalake, ['datasets.wikitables'])
     token_translators = [whitespace_translator, punctuation_translator, lowercase_translator]
     num_cpu = 64
     num_perm = 256

@@ -1,5 +1,5 @@
-from abc import ABC, abstractmethod
 import pickle
+from abc import ABC, abstractmethod
 
 import polars as pl
 import pymongo
@@ -21,6 +21,10 @@ class DataLakeHandler(ABC):
 
     @abstractmethod
     def count_tables(self):
+        pass
+
+    @abstractmethod
+    def config(self):
         pass
 
     @abstractmethod
@@ -62,10 +66,10 @@ class MongoDBDataLakeHandler(DataLakeHandler):
         return sum(c.count_documents({}, hint='_id_') for c in self._collections)
     
     def scan_tables(self, _from = 0, _to = -1):
-        _to = -1 if _to == -1 else self.count_tables()
+        _to = _to if _to != -1 else self.count_tables()
         query = {'$and': [
-                    {'_id_numeric': { '$gt': _from}},
-                    {'_id_numeric': {'$lt': _to}}]
+                    {'_id_numeric': { '$gte': _from}},
+                    {'_id_numeric': {'$lte': _to}}]
                 }
         
         for collection in self._collections:
@@ -77,9 +81,12 @@ class MongoDBDataLakeHandler(DataLakeHandler):
         return {
             '_id_numeric': doc['_id_numeric'], 
             'content': doc['content'], 
-            'numeric_columns': doc['numeric_columns'], 
+            'valid_columns': doc['valid_columns'], 
             'headers': headers
         }
+    
+    def config(self):
+        return self.datalake_location, self.datalake_name, self.dataset_names
 
     def clone(self):
         return DataLakeHandlerFactory.create_handler(self.datalake_location, self.datalake_name, self.dataset_names)
@@ -93,20 +100,20 @@ class LocalFileDataLakeHandler(DataLakeHandler):
         self.datalake_location = datalake_location
         self.datalake_name = datalake_name
         self.mapping_id_path = args[0]
-        self.numeric_columns_path = args[1]
+        self.valid_columns_path = args[1]
         with open(self.mapping_id_path, 'rb') as fr:
             self.mapping_id = pickle.load(fr)
-        with open(self.numeric_columns_path, 'rb') as fr:
-            self.numeric_columns = pickle.load(fr)
+        with open(self.valid_columns_path, 'rb') as fr:
+            self.valid_columns = pickle.load(fr)
 
     def get_table_by_id(self, _id):
         raise NotImplementedError()
 
     def get_table_by_numeric_id(self, _id_numeric):
         content = pl.read_csv(f'{self.datalake_location}/{self.mapping_id[_id_numeric]}.csv', has_header=False, infer_schema_length=0, encoding='latin1').rows()
-        numeric_columns = self.numeric_columns[_id_numeric]
+        valid_columns = self.valid_columns[_id_numeric]
         headers = content[0]
-        return {'_id_numeric': _id_numeric, 'content': content, 'headers': headers, 'numeric_columns': numeric_columns}
+        return {'_id_numeric': _id_numeric, 'content': content, 'headers': headers, 'valid_columns': valid_columns}
 
     def count_tables(self):
         return len(self.mapping_id)
@@ -115,11 +122,14 @@ class LocalFileDataLakeHandler(DataLakeHandler):
         for _id_numeric in range(_from, _to+1):
             yield self.get_table_by_numeric_id(_id_numeric)
 
+    def config(self):
+        return self.datalake_location, self.datalake_name, self.mapping_id_path, self.valid_columns_path
+
     def close(self):
         pass
 
     def clone(self):
-        return DataLakeHandlerFactory.create_handler(self.datalake_location, self.datalake_name, self.mapping_id_path, self.numeric_columns_path)
+        return DataLakeHandlerFactory.create_handler(self.datalake_location, self.datalake_name, self.mapping_id_path, self.valid_columns_path)
 
 
 

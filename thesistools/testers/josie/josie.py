@@ -9,13 +9,20 @@ import pandas as pd
 import polars as pl
 import numpy as np
 
+import pyspark.storagelevel
+
 from thesistools.utils.logging_handler import info
 from thesistools.testers.base_tester import AlgorithmTester
-from thesistools.testers.josie.josiedb_handler import JOSIEDBHandler
 from thesistools.utils.misc import is_valid_table, table_to_tokens, convert_to_giga
 from thesistools.utils.spark import get_spark_session
+from thesistools.utils.datalake import DataLakeHandler
 
-import pyspark.storagelevel
+from db import JOSIEDBHandler
+from exp import write_all_results
+from josie_alg import JOSIE
+from tokentable import TokenTableDisk, TokenTableMem
+
+
 
 def get_result_ids(s):
     return str(list(map(int, re.findall(r'\d+', s)[::2])))
@@ -27,19 +34,17 @@ def get_result_overlaps(s):
 
 
 class JOSIETester(AlgorithmTester):
-    def __init__(self, mode, blacklist, datalake_helper, token_translators,
-                 table_prefix:str,
+    def __init__(self, mode, blacklist, datalake_handler:DataLakeHandler, token_translators,
                  dbstatfile:str,
                  josie_db_connection_info:dict,
                  spark_config:dict) -> None:
-        super().__init__(mode, blacklist, datalake_helper, token_translators)
+        super().__init__(mode, blacklist, datalake_handler, token_translators)
         
-        self.tables_prefix = table_prefix
         self.db_stat_file = dbstatfile
         self.josie_db_connection_info = josie_db_connection_info
         self.spark_config = spark_config
         
-        self.josiedb = JOSIEDBHandler(self.tables_prefix, **self.josie_db_connection_info)
+        self.josiedb = JOSIEDBHandler(**self.josie_db_connection_info)
         
     def data_preparation(self):
         info('Creating integer sets and inverted index tables...')
@@ -47,18 +52,15 @@ class JOSIETester(AlgorithmTester):
         self.josiedb.drop_tables()
         self.josiedb.create_tables()
         
-        mode, blacklist, dlh = self.mode, self.blacklist, self.dlh
+        mode, blacklist, dlh, token_translators = self.mode, self.blacklist, self.dlh, self.token_translators
         
         logging.getLogger('TestLog').info('Preparing inverted index and integer set tables...')
-        spark, initial_rdd = get_spark_session(
-            dlh.datalake_location, dlh.datalake_name, dlh.size,
-            dlh.mapping_id, dlh.numeric_columns,
-            **self.spark_config)
+        spark, initial_rdd = get_spark_session(dlh, **self.spark_config)
 
         def prepare_tuple(t):
             nonlocal mode, blacklist
             # t = (_id_numeric, content, numeric_columns)
-            return [t[0], table_to_tokens(t[1], mode, t[2], blacklist=blacklist)]    
+            return [t[0], table_to_tokens(t[1], mode, t[2], blacklist=blacklist, string_transformers=token_translators)]
         
         token_sets = (
             initial_rdd
@@ -222,7 +224,7 @@ class JOSIETester(AlgorithmTester):
             .write
             .jdbc(
                 f'jdbc:{url}',
-                f"{self.tables_prefix}_sets",
+                f"sets",
                 'append',
                 properties=properties
             )
@@ -236,14 +238,14 @@ class JOSIETester(AlgorithmTester):
             .write
             .jdbc(
                 f'jdbc:{url}',
-                f"{self.tables_prefix}_inverted_lists", 
+                f"inverted_lists", 
                 'append', 
                 properties=properties
             )
         )
 
         spark.sparkContext.stop()
-                
+
         # database statistics
         append = os.path.exists(self.db_stat_file)
         dbstat = pd.DataFrame(self.josiedb.get_statistics())
@@ -256,50 +258,69 @@ class JOSIETester(AlgorithmTester):
         info('Starting JOSIE tests...')
         results_directory = kwargs['results_directory']
         token_table_on_memory = kwargs['token_table_on_memory']
+        verbose = False if 'verbose' not in kwargs else kwargs['verbose']
 
         start_query = time()
         self.josiedb.clear_query_table()
         self.josiedb.add_queries_from_existent_tables(query_ids)
 
-        GOPATH = os.environ['GOPATH']
-        josie_cmd_dir = f'{GOPATH}/src/github.com/ekzhu/josie/cmd'
-        os.chdir(josie_cmd_dir)
+        # if cost sampling tables already exist 
+        # we assume they are correct and won't recreate them
+        # sample_costs_tables_exist = self.josiedb.are_costs_sampled()
+        # info(f'Sample costs tables exist? {sample_costs_tables_exist}')
+        # if not sample_costs_tables_exist:
+        #     info('Sampling costs...')
+        #     self.josiedb.sample_costs()
         
-        info(f'Check if sample tables already exist...')
-        # if cost sampling tables already exist we assume they are correct and won't recreate them
-        sample_costs_tables_exist = self.josiedb.cost_tables_exist()
-        info(f'Sample costs tables exist? {sample_costs_tables_exist}')
+        info('Sampling costs...')
+        self.josiedb.delete_cost_tables()
+        self.josiedb.sample_costs()
         self.josiedb.close()
-
-        if not sample_costs_tables_exist:
-            info('Sampling costs...')
-            os.system(f'go run {josie_cmd_dir}/sample_costs/main.go \
-                        --pg-database={self.josiedb.url.database} \
-                        --test_tag={self.tables_prefix} \
-                        --pg-table-queries={self.tables_prefix}_queries')
 
         # we are not considering the query preparation steps, since in some cases this will 
         # include also the cost sampling phase and in other cases it won't
-        x = 'true' if token_table_on_memory else 'false'
-        info('Using token table on memory: ' + x)
+        info(f'Using token table on memory: {token_table_on_memory}')
 
         info('Running top-K...')
-        os.system(f'go run {josie_cmd_dir}/topk/main.go \
-                    --pg-database={self.josiedb.url.database} \
-                    --test_tag={self.tables_prefix} \
-                    --outputDir={results_directory} \
-                    --resultsFile={results_file} \
-                    --useMemTokenTable={x} \
-                    --k={k}')
+        self.josiedb.reset_cost_function_parameters(verbose)
+
+        if verbose:
+            info("Counting total number of sets")
+        total_number_of_sets = float(self.josiedb.count_number_of_sets())
+        if verbose:
+            info(f"Number of sets: {total_number_of_sets}")
+
+        if token_table_on_memory:
+            if verbose: info("Creating token table on memory...")
+            tb = TokenTableMem(self.josiedb, True)
+        else:
+            if verbose: info("Creating token table on disk...")
+            tb = TokenTableDisk(self.josiedb, True)
+        
+        queries = self.josiedb.get_query_sets()
+
+        if verbose: info(f"Begin experiment for {k=}")
+        if not os.path.exists(results_directory):
+            os.mkdir(results_directory)
+        
+        perfs = []
+        start = time()
+
+        for q in queries:
+            perfs.append(JOSIE(self.josiedb, tb, q, k, True)[1])
+
+        if verbose: info(f"Finished experiment for {k=} in {round((time() - start) / 60, 3)} minutes")
+        
+        write_all_results(perfs, results_file)
 
         (
             pl.read_csv(results_file).select(['query_id', 'duration', 'results'])
             .with_columns((pl.col('duration') / 1000).name.keep())
             .with_columns(pl.col('results').map_elements(get_result_ids, return_dtype=pl.String).alias('result_ids'))
             .drop('results')
-            .write_csv(results_file)
+            .write_csv(results_file + '.raw')
         )
-        os.rename(results_file, results_file + '.raw')
+        # os.rename(results_file, results_file + '.raw')
 
         info('Completed JOSIE tests.')
         return round(time() - start_query, 5)
@@ -311,21 +332,25 @@ class JOSIETester(AlgorithmTester):
 
 
 if __name__ == '__main__':
-    from thesistools.utils.datalake import SimpleDataLakeHelper
+    from thesistools.utils.datalake import DataLakeHandlerFactory
     from thesistools.utils.logging_handler import info, logging_setup
     from thesistools.utils.settings import DefaultPath as dp
-    from thesistools.utils.misc import whitespace_translator, punctuation_translator, lowercase_translator
+    from thesistools.utils.misc import (
+        whitespace_translator, punctuation_translator, lowercase_translator,
+        get_query_ids_from_query_file, sample_queries
+    )
 
     mode = 'set'
-    datalake = 'wikiturlsnap'
-    size = 'small'
+    datalake = 'wikitables'
     blacklist = []
-    dlh = SimpleDataLakeHelper('mongodb', datalake)
-    num_cpu = 64
-    tables_prefix = f"josie__{datalake}_{size}_{mode}"
+    mongo_datasets = ['datasets.wikitables']
+
+    dlh = DataLakeHandlerFactory.create_handler('mongodb', 'wikitables', mongo_datasets)
+    num_cpu = 8
+    tables_prefix = f"josie__{datalake}_{mode}"
     token_translators = [whitespace_translator, punctuation_translator, lowercase_translator]
     
-    spark_local_dir = '/path/to/tmp/spark'
+    spark_local_dir = f'{os.environ["HOME"]}/.spark_tmp'
     # the Spark JAR for JDBC should not be inserted there, since it's a known issue
     # that a JAR passed as package here won't be retrieved as driver class
     spark_jars_packages = ['org.mongodb.spark:mongo-spark-connector_2.12:10.3.0']
@@ -338,26 +363,34 @@ if __name__ == '__main__':
         'spark.local.dir':              spark_local_dir,
         'spark.driver.maxResultSize':   '12g',
         'spark.jars.packages':          ','.join(spark_jars_packages),
-        'spark.driver.extraClassPath':  '/path/to/driver/jar'
+        'spark.driver.extraClassPath':  f'{os.environ["HOME"]}/.ivy2/jars/postgresql-42.7.4.jar'
     }
 
     josie_db_connection_info = {
         'drivername':   'postgresql',
-        'database':     'JOSIEDB',
+        'database':     'JOSIEWikiTables',
         'username':     'nanni',
         'password':     '',
         'port':         5442,
         'host':         '127.0.0.1',
     }
     
-    test_dir = f"{dp.data_path.tests}/new/{datalake}"
+    test_dir = f"{dp.data_path.base}/examples/{datalake}/josie"
     if not os.path.exists(test_dir):
         os.makedirs(test_dir)
     logfile = f"{test_dir}/.logfile"
     db_stat_file = f"{test_dir}/.dbstat"
+    query_file = f"{test_dir}/../queries.json"
+    results_file = f"{test_dir}/results_josie.csv"
 
     logging_setup(logfile)
     tester = JOSIETester(mode, blacklist, dlh, token_translators,
-                         tables_prefix, db_stat_file, josie_db_connection_info, spark_config)
+                         db_stat_file, josie_db_connection_info, spark_config)
     
-    print(tester.data_preparation())
+    
+    # print(tester.data_preparation())
+
+    # sample_queries(query_file, 100, 8, 'mongodb', 'wikitables', mongo_datasets)
+    
+    token_table_on_memory = True
+    tester.query(results_file, 10, get_query_ids_from_query_file(query_file), results_directory=test_dir, token_table_on_memory=token_table_on_memory)

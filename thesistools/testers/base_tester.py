@@ -1,7 +1,10 @@
 from abc import ABC, abstractmethod
 
+from thesistools.utils.datalake import DataLakeHandler
+
+
 class AlgorithmTester(ABC):
-    def __init__(self, mode, blacklist, datalake_helper, token_translators) -> None:
+    def __init__(self, mode, blacklist, datalake_helper:DataLakeHandler, token_translators) -> None:
         self.mode = mode
         self.blacklist = blacklist
         self.dlh = datalake_helper

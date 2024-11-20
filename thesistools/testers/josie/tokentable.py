@@ -3,7 +3,7 @@ import logging
 from typing import List, Tuple
 
 from db import JOSIEDBHandler
-from thesistools.testers.josie_new.josie_io import RawTokenSet
+from josie_io import RawTokenSet
 
 
 # Constants

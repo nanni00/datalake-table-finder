@@ -1,3 +1,4 @@
+import os
 from datasketch import MinHash
 from itertools import combinations
 from pymongo import MongoClient
@@ -39,10 +40,10 @@ def parse_tables(path_tables, table_collection, milestone, n):
             table["context"] = raw_table["pgTitle"] + " | " + raw_table["sectionTitle"] + " | " +  caption  # table context
             
             # basic format
-            table["headers"] = raw_table['tableHeaders']
+            # table["headers"] = raw_table['tableHeaders']
 
             # for WikiTables format
-            # table["headers"] = [o['text'] for o in raw_table["tableHeaders"][0]]
+            table["headers"] = [o['text'] for o in raw_table["tableHeaders"][0]]
             table['rows'] = raw_table['numDataRows']
             table['columns'] = raw_table['numCols']
             tables.append(table)  # append the parsed table to the list
@@ -137,7 +138,7 @@ def generate_candidate_set(path_clusters, path_candidates, milestone):
 def main():
     # PARSE THE TABLES FROM THE JSONL FILE AND STORE THEM IN A DEDICATED MONGODB COLLECTION
     # path_tables = "datasets/train_tables.jsonl"  # path of the JSONL file containing the tables
-    path_tables = '/home/nanni/datasets_datalakes/WikiTables/tables.json'
+    path_tables = f'{os.environ["HOME"]}/datasets_datalakes/WikiTables/tables.json'
     
     client = MongoClient()  # connect to MongoDB
     db = client.datasets  # define the database to use
