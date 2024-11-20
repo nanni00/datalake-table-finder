@@ -3,6 +3,7 @@ import logging
 from typing import List, Tuple
 
 from db import JOSIEDBHandler
+from thesistools.testers.josie_new.josie_io import RawTokenSet
 
 
 # Constants
@@ -59,7 +60,10 @@ class TokenTableMem(TokenTable):
         count = 0
         for row in self.db.posting_lists__memproc():
             raw_token, token, frequency, group_id = row
-            h = hashlib.new('fnv1a_64')
+            # TODO hashlib doen't support fnv1a with 64 bits,
+            # it this a significative change?
+            # h = hashlib.new('fnv1a_64')
+            h = hashlib.sha256()
             h.update(raw_token)
             hash_value = h.digest()
 
@@ -73,16 +77,14 @@ class TokenTableMem(TokenTable):
         print()
         logging.info("Finished creating token map and frequency table")
 
-    def process(self, raw_token_set) -> Tuple[List[int], List[int], List[int]]:
+    def process(self, raw_token_set:RawTokenSet) -> Tuple[List[int], List[int], List[int]]:
         tokens = []
         counts = []
         gids = []
 
-        h = hashlib.new('fnv1a_64')
 
-        for raw_token in raw_token_set:
-            h.clear()
-            h.update(raw_token)
+        for raw_token in raw_token_set.raw_tokens:
+            h = hashlib.sha256(raw_token) # hashlib.new('fnv1a_64')
             hash_value = h.digest()
             if hash_value in self.token_map:
                 entry = self.token_map[hash_value]

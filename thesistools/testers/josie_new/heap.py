@@ -18,7 +18,7 @@ class SearchResultHeap:
 
     def __len__(self):
         return len(self.heap)
-
+    
     def push(self, result: SearchResult):
         heapq.heappush(self.heap, result)
 
@@ -61,7 +61,7 @@ def kth_overlap_after_push(heap: SearchResultHeap, k: int, overlap: int) -> int:
         return kth
     if k == 1:
         return overlap
-    jth = heap[1].overlap if k == 2 else min(heap[1].overlap, heap[2].overlap)
+    jth = heap.heap[1].overlap if k == 2 else min(heap.heap[1].overlap, heap.heap[2].overlap)
     return min(jth, overlap)
 
 

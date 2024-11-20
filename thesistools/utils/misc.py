@@ -15,7 +15,6 @@ from thesistools.sloth.sloth import sloth
 from thesistools.sloth.utils import parse_table
 from thesistools.utils.logging_handler import info
 from thesistools.utils.parallel import chunks
-from thesistools.utils.datalake import SimpleDataLakeHelper
 from thesistools.utils.basicconfig import TablesThresholds as tab_thresh
 
 
@@ -246,9 +245,11 @@ def largest_overlap_sloth(table1, table2, numeric_columns1, numeric_columns2, ve
         return -2, round(time.time() - start_sloth, 3)
 
 
+
+from thesistools.utils.datalake import DataLakeHandlerFactory
 def sample_query_task(data):
     chunk, data_lake_args = data[0], data[1:]
-    dlh = SimpleDataLakeHelper(*data_lake_args)
+    dlh = DataLakeHandlerFactory.create_handler(*data_lake_args)
     s = set()
     for table_id in chunk:
         table_obj = dlh.get_table_by_numeric_id(table_id)
@@ -256,13 +257,15 @@ def sample_query_task(data):
             continue
         
         s.add(table_id)
+    dlh.close()
     return s
 
 
 def sample_queries(output_query_json, nsamples, num_cpu, *data_lake_args):
     s = set()
-    dlh = SimpleDataLakeHelper(*data_lake_args)
-    N = dlh.get_number_of_tables()
+    print(output_query_json)
+    dlh = DataLakeHandlerFactory.create_handler(*data_lake_args)
+    N = dlh.count_tables()
     dlh.close()
     
     print(f'Sampling {nsamples} tables from {N} total tables...')
@@ -286,5 +289,3 @@ def sample_queries(output_query_json, nsamples, num_cpu, *data_lake_args):
 def get_query_ids_from_query_file(query_file):
     with open(query_file) as fr:
         return json.load(fr)['_id_numeric']
-
-

@@ -1,5 +1,4 @@
 from typing import Any, List
-from cost import read_set_cost
 from common import next_distinct_list
 
 
@@ -31,8 +30,8 @@ class CandidateEntry:
         self.estimated_overlap = min(self.estimated_overlap, self.upperbound_overlap(query_size, query_current_position))
         return self.estimated_overlap
 
-    def est_cost(self):
-        self.estimated_cost = read_set_cost(self.suffix_length())
+    def est_cost(self, db):
+        self.estimated_cost = db.read_set_cost(self.suffix_length())
         return self.estimated_cost
 
     def est_truncation(self, query_size, query_current_position, query_next_position):
@@ -106,13 +105,13 @@ def prefix_length(query_size, kth_overlap):
     return query_size - kth_overlap + 1
 
 
-def read_lists_benefit_for_candidate(ce, kth_overlap):
+def read_lists_benefit_for_candidate(db, ce, kth_overlap):
     if kth_overlap >= ce.estimated_next_upperbound:
         return ce.estimated_cost
-    return ce.estimated_cost - read_set_cost(ce.suffix_length() - ce.estimated_next_truncation)
+    return ce.estimated_cost - db.read_set_cost(ce.suffix_length() - ce.estimated_next_truncation)
 
 
-def process_candidates_init(query_size, query_current_position, next_batch_end_index,
+def process_candidates_init(db, query_size, query_current_position, next_batch_end_index,
                             kth_overlap, min_sample_size, candidates:dict[int:CandidateEntry], ignores) -> tuple[float|Any, int, List[CandidateEntry]] :
     read_lists_benefit = 0.0
     qualified = []
@@ -128,12 +127,12 @@ def process_candidates_init(query_size, query_current_position, next_batch_end_i
         if not ce.check_min_sample_size(query_current_position, min_sample_size):
             continue
 
-        ce.est_cost()
+        ce.est_cost(db)
         ce.est_overlap(query_size, query_current_position)
         ce.est_truncation(query_size, query_current_position, next_batch_end_index)
         ce.est_next_overlap_upperbound(query_size, query_current_position, next_batch_end_index)
 
-        read_lists_benefit += read_lists_benefit_for_candidate(ce, kth_overlap)
+        read_lists_benefit += read_lists_benefit_for_candidate(db, ce, kth_overlap)
 
         qualified.append(ce)
 
@@ -143,7 +142,7 @@ def process_candidates_init(query_size, query_current_position, next_batch_end_i
     return read_lists_benefit, num_with_benefit, qualified
 
 
-def process_candidates_update(kth_overlap, candidates, counter, ignores):
+def process_candidates_update(db, kth_overlap, candidates, counter, ignores):
     read_lists_benefit = 0.0
 
     for j, ce in enumerate(candidates):
@@ -153,7 +152,7 @@ def process_candidates_update(kth_overlap, candidates, counter, ignores):
             candidates[j] = None
             del counter[ce.id]
             ignores[ce.id] = True
-        read_lists_benefit += read_lists_benefit_for_candidate(ce, kth_overlap)
+        read_lists_benefit += read_lists_benefit_for_candidate(db, ce, kth_overlap)
 
     return read_lists_benefit
 

@@ -11,12 +11,11 @@ import numpy as np
 
 from thesistools.utils.logging_handler import info
 from thesistools.testers.base_tester import AlgorithmTester
-# from thesistools.testers.josie.josiedb_handler import JOSIEDBHandler
 from thesistools.testers.josie_new.db import JOSIEDBHandler
-from thesistools.utils.misc import is_valid_table, table_to_tokens, convert_to_giga
+from thesistools.utils.misc import is_valid_table, table_to_tokens, convert_to_giga, sample_queries
 from thesistools.utils.spark import get_spark_session
+from thesistools.utils.datalake import DataLakeHandler
 
-from thesistools.testers.josie_new.cost import sample_cost
 from thesistools.testers.josie_new.run import run_experiments
 
 import pyspark.storagelevel
@@ -32,11 +31,11 @@ def get_result_overlaps(s):
 
 
 class JOSIETester(AlgorithmTester):
-    def __init__(self, mode, blacklist, datalake_helper, token_translators,
+    def __init__(self, mode, blacklist, datalake_handler:DataLakeHandler, token_translators,
                  dbstatfile:str,
                  josie_db_connection_info:dict,
                  spark_config:dict) -> None:
-        super().__init__(mode, blacklist, datalake_helper, token_translators)
+        super().__init__(mode, blacklist, datalake_handler, token_translators)
         
         self.db_stat_file = dbstatfile
         self.josie_db_connection_info = josie_db_connection_info
@@ -53,10 +52,7 @@ class JOSIETester(AlgorithmTester):
         mode, blacklist, dlh = self.mode, self.blacklist, self.dlh
         
         logging.getLogger('TestLog').info('Preparing inverted index and integer set tables...')
-        spark, initial_rdd = get_spark_session(
-            dlh.datalake_location, dlh.datalake_name,
-            dlh.mapping_id, dlh.numeric_columns,
-            **self.spark_config)
+        spark, initial_rdd = get_spark_session(dlh, **self.spark_config)
 
         def prepare_tuple(t):
             nonlocal mode, blacklist
@@ -246,7 +242,7 @@ class JOSIETester(AlgorithmTester):
         )
 
         spark.sparkContext.stop()
-                
+
         # database statistics
         append = os.path.exists(self.db_stat_file)
         dbstat = pd.DataFrame(self.josiedb.get_statistics())
@@ -266,14 +262,14 @@ class JOSIETester(AlgorithmTester):
 
         info(f'Check if sample tables already exist...')
         # if cost sampling tables already exist we assume they are correct and won't recreate them
-        sample_costs_tables_exist = self.josiedb.cost_tables_exist()
+        sample_costs_tables_exist = self.josiedb.are_costs_sampled()
         info(f'Sample costs tables exist? {sample_costs_tables_exist}')
-        self.josiedb.close()
 
         if not sample_costs_tables_exist:
             info('Sampling costs...')
-            sample_cost(self.josiedb)
-            
+            self.josiedb.sample_costs()
+        self.josiedb.close()
+
         # we are not considering the query preparation steps, since in some cases this will 
         # include also the cost sampling phase and in other cases it won't
         info(f'Using token table on memory: {token_table_on_memory}')
@@ -286,9 +282,9 @@ class JOSIETester(AlgorithmTester):
             .with_columns((pl.col('duration') / 1000).name.keep())
             .with_columns(pl.col('results').map_elements(get_result_ids, return_dtype=pl.String).alias('result_ids'))
             .drop('results')
-            .write_csv(results_file)
+            .write_csv(results_file + '.raw')
         )
-        os.rename(results_file, results_file + '.raw')
+        # os.rename(results_file, results_file + '.raw')
 
         info('Completed JOSIE tests.')
         return round(time() - start_query, 5)
@@ -300,15 +296,20 @@ class JOSIETester(AlgorithmTester):
 
 
 if __name__ == '__main__':
-    from thesistools.utils.datalake import SimpleDataLakeHelper
+    from thesistools.utils.datalake import DataLakeHandlerFactory
     from thesistools.utils.logging_handler import info, logging_setup
     from thesistools.utils.settings import DefaultPath as dp
-    from thesistools.utils.misc import whitespace_translator, punctuation_translator, lowercase_translator
+    from thesistools.utils.misc import (
+        whitespace_translator, punctuation_translator, lowercase_translator,
+        get_query_ids_from_query_file    
+    )
 
     mode = 'set'
     datalake = 'wikitables'
     blacklist = []
-    dlh = SimpleDataLakeHelper('mongodb', datalake)
+    mongo_datasets = ['datasets.wikitables']
+
+    dlh = DataLakeHandlerFactory.create_handler('mongodb', 'wikitables', mongo_datasets)
     num_cpu = 8
     tables_prefix = f"josie__{datalake}_{mode}"
     token_translators = [whitespace_translator, punctuation_translator, lowercase_translator]
@@ -338,14 +339,22 @@ if __name__ == '__main__':
         'host':         '127.0.0.1',
     }
     
-    test_dir = f"{dp.data_path.tests}/new/{datalake}"
+    test_dir = f"{dp.data_path.base}/examples/{datalake}/josie"
     if not os.path.exists(test_dir):
         os.makedirs(test_dir)
     logfile = f"{test_dir}/.logfile"
     db_stat_file = f"{test_dir}/.dbstat"
+    query_file = f"{test_dir}/../queries.json"
+    results_file = f"{test_dir}/results.csv"
 
     logging_setup(logfile)
     tester = JOSIETester(mode, blacklist, dlh, token_translators,
                          db_stat_file, josie_db_connection_info, spark_config)
     
-    print(tester.data_preparation())
+    
+    # print(tester.data_preparation())
+
+    # sample_queries(query_file, 10, 8, 'mongodb', 'wikitables', mongo_datasets)
+    
+    token_table_on_memory = True
+    tester.query(results_file, 5, get_query_ids_from_query_file(query_file), results_directory=test_dir, token_table_on_memory=token_table_on_memory)

@@ -1,7 +1,6 @@
 import time
 
 from db import JOSIEDBHandler
-from cost import read_list_cost
 from josie_io import RawTokenSet
 from tokentable import TokenTable
 from common import overlap
@@ -42,16 +41,16 @@ def JOSIE(
     read_list_costs = [0.0] * len(freqs)
     for i in range(len(freqs)):
         if i == 0:
-            read_list_costs[i] = read_list_cost(freqs[i] + 1)
+            read_list_costs[i] = db.read_list_cost(freqs[i] + 1)
         else:
-            read_list_costs[i] = read_list_costs[i - 1] + read_list_cost(freqs[i] + 1)
+            read_list_costs[i] = read_list_costs[i - 1] + db.read_list_cost(freqs[i] + 1)
 
     exp_result.preproc_duration = int((time.time() - start) * 1000)  # in milliseconds
     start = time.time()
 
     query_size = len(tokens)
     counter = {}
-    ignores = {query.id: True} if ignore_self else {}
+    ignores = {query.set_id: True} if ignore_self else {}
     h = SearchResultHeap()
     num_skipped = 0
 
@@ -70,15 +69,15 @@ def JOSIE(
         exp_result.max_list_size_read = max(exp_result.max_list_size_read, len(entries))
 
         for entry in entries:
-            if entry.id in ignores:
+            if entry.set_id in ignores:
                 continue
-            if entry.id in counter:
-                ce = counter[entry.id]
+            if entry.set_id in counter:
+                ce = counter[entry.set_id]
                 ce.update(entry.match_position, skipped_overlap)
                 continue
             if kth_overlap(h, k) >= max_overlap_unseen_candidate:
                 continue
-            counter[entry.id] = CandidateEntry(entry.id, entry.size, entry.match_position, i, skipped_overlap)
+            counter[entry.set_id] = CandidateEntry(entry.set_id, entry.size, entry.match_position, i, skipped_overlap)
 
         if i == query_size - 1:
             break
@@ -92,7 +91,7 @@ def JOSIE(
         merge_lists_cost = read_list_costs[next_batch_end_index] - read_list_costs[i]
 
         merge_lists_benefit, num_with_benefit, candidates = process_candidates_init(
-            query_size, i, next_batch_end_index, kth_overlap(h, k), batch_size, counter, ignores
+            db, query_size, i, next_batch_end_index, kth_overlap(h, k), batch_size, counter, ignores
         )
 
         exp_result.max_counter_size = max(exp_result.max_counter_size, len(counter))
@@ -118,7 +117,7 @@ def JOSIE(
                     fast_estimate = True
                     fast_estimate_kth_overlap = prev_kth_overlap
                 if not fast_estimate:
-                    merge_lists_benefit = process_candidates_update(kth, candidates, counter, ignores)
+                    merge_lists_benefit = process_candidates_update(db, kth, candidates, counter, ignores)
 
                 probe_set_benefit = read_set_benefit(
                     query_size, kth, kth_overlap_after_push(h, k, candidate.estimated_overlap),
@@ -130,7 +129,7 @@ def JOSIE(
                     break
 
             if fast_estimate or (num_candidate_expensive + 1) * len(candidates) > expensive_estimation_budget:
-                merge_lists_benefit -= read_lists_benefit_for_candidate(candidate, fast_estimate_kth_overlap)
+                merge_lists_benefit -= read_lists_benefit_for_candidate(db, candidate, fast_estimate_kth_overlap)
 
             candidate.read = True
             ignores[candidate.id] = True
@@ -142,6 +141,8 @@ def JOSIE(
             total_overlap = 0
             if candidate.suffix_length() > 0:
                 s = db.get_set_tokens_by_suffix(candidate.id, candidate.latest_match_position + 1)
+                if s == None:
+                    print('>>>>>  ', candidate.id, s)
                 exp_result.num_set_read += 1
                 exp_result.max_set_size_read = max(exp_result.max_set_size_read, len(s))
                 suffix_overlap = overlap(s, tokens[i + 1:])
@@ -159,7 +160,7 @@ def JOSIE(
 
     exp_result.duration = int((time.time() - start) * 1000)  # in milliseconds
     exp_result.results = write_result_string(results)
-    exp_result.query_id = query.id
+    exp_result.query_id = query.set_id
     exp_result.query_size = len(query.raw_tokens)
     exp_result.num_result = len(results)
     exp_result.ignore_size = len(ignores)

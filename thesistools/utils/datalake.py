@@ -1,153 +1,125 @@
+from abc import ABC, abstractmethod
 import pickle
 
 import polars as pl
 import pymongo
 import pymongo.collection
 
-from thesistools.utils.basicconfig import MONGODB_DATALAKES, DATALAKE_SIZES
+
+class DataLakeHandler(ABC):
+    @abstractmethod
+    def get_table_by_id(self, _id:str):
+        pass
+
+    @abstractmethod
+    def get_table_by_numeric_id(self, numeric_id:int):
+        pass
+
+    @abstractmethod
+    def scan_tables(self, _from:int=0, _to:int=-1):
+        pass
+
+    @abstractmethod
+    def count_tables(self):
+        pass
+
+    @abstractmethod
+    def close(self):
+        pass
+
+    @abstractmethod
+    def clone(self):
+        pass
 
 
-def get_mongodb_collections(dataset:str, size:str='standard') -> tuple[pymongo.MongoClient, list[pymongo.collection.Collection]]:
-    assert dataset in MONGODB_DATALAKES
-    assert size in DATALAKE_SIZES
-    
-    mongoclient = pymongo.MongoClient(directConnection=True)
-    collections = []
-
-    if 'optitab' in mongoclient.list_database_names():
-        match dataset:
-            case 'wikiturlsnap':
-                collections.append('mongoclient.optitab.turl_training_set')
-                collections.append('mongoclient.sloth.latest_snapshot_tables')
-            case 'gittables':
-                collections.append('mongoclient.sloth.gittables')
+class DataLakeHandlerFactory:
+    def create_handler(datalake_location:str, *args):
+        match datalake_location:
+            case 'mongodb':
+                return MongoDBDataLakeHandler(datalake_location, *args)
             case _:
-                raise ValueError(f'Unknown dataset: {dataset}')
-    elif 'datasets' in mongoclient.list_database_names():
-        match dataset:
-            case 'wikitables':
-                collections.append('mongoclient.datasets.wikitables')
-            case 'gittables':
-                collections.append('mongoclient.datasets.gittables')
-            case _:
-                raise ValueError(f'Unknown dataset: {dataset}')
-    else:
-        raise ValueError('Current MongoDB not configured')
-    
-    collections = [eval(c + '_small' if size == 'small' else c, {'mongoclient': mongoclient}) for c in collections]
-    return mongoclient, collections
+                return LocalFileDataLakeHandler(datalake_location, *args)
 
-
-
-def get_document_from_mongodb_by_numeric_id(id_numeric, *collections:pymongo.collection.Collection):
-    for collection in collections:
-        if (document := collection.find_one({'_id_numeric': id_numeric})) != None:
-            return document
-
-
-def get_one_document_from_mongodb_by_key(*args):
-    raise DeprecationWarning()
-
-
-
-def format_wikitables_header(header:list):
-    txt_headers = [[h['text'] for h in header_row] for header_row in header]
-    return [' '.join([h[i] for h in txt_headers]) for i in range(len(txt_headers[0]))]
-
-
-
-class SimpleDataLakeHelper:
-    """
-    A simple class that helps to manage different data lake sources.
-    Since the original datasets GitTables and WikiTurlSnap are stored in MongoDB
-    and the SANTOS Large data lake as a CSVs folder, this structure avoids boiler plates code (sperem) """
-    def __init__(self, datalake_location:str, *args):
+class MongoDBDataLakeHandler(DataLakeHandler):
+    def __init__(self, datalake_location, datalake_name, datasets:list[str]):
         self.datalake_location = datalake_location
-        self.datalake_name = None
-        self.size = 'standard'
-        self.mapping_id_path = None
-        self.numeric_columns_path = None
-        self.mapping_id = None
-        self.numeric_columns = None
-        
-        match self.datalake_location:
-            case 'mongodb':
-                self.datalake_name = args[0]
-                self.size = args[1] if len(args) > 1 else 'standard'
-                self._mongoclient, self._collections = get_mongodb_collections(self.datalake_name, self.size)
-            case _:
-                self.mapping_id_path = args[2]
-                self.numeric_columns_path = args[3]
-                mapping_id_path, numeric_columns_path = args[2:]
-                with open(mapping_id_path, 'rb') as fr:
-                    self.mapping_id = pickle.load(fr)
-                with open(numeric_columns_path, 'rb') as fr:
-                    self.numeric_columns = pickle.load(fr)
-                
+        self.datalake_name = datalake_name
+        self.dataset_names = datasets
+        self._mongoclient = pymongo.MongoClient(directConnection=True)
+        self._collections = [eval(f'mongoclient.{d}', {'mongoclient': self._mongoclient}) for d in self.dataset_names]
+
+    def get_table_by_id(self, _id:str):
+        for collection in self._collections:
+            if (document := collection.find_one({'_id': _id})) != None:
+                return document
+            
     def get_table_by_numeric_id(self, numeric_id):
-        """Return a dictionary with fields:
-            - _id_numeric
-            - content
-            - numeric columns
-            - headers """
-        match self.datalake_location:
-            case 'mongodb':
-                if doc := get_document_from_mongodb_by_numeric_id(numeric_id, *self._collections):
-                    content = doc['content']
-                    numeric_columns = doc['numeric_columns']
-                    headers = doc['headers'] if 'headers' in doc else None
-                    if self.datalake_name == 'wikitables':
-                        headers = format_wikitables_header(headers)  # on MongoDB WikiTables these headers aren't formatted as the WikiTurlSnap ones
-                else:
-                    return None
-            case _:
-                try:
-                    # print('Ci prova...')
-                    content = pl.read_csv(f'{self.datalake_location}/{self.mapping_id[numeric_id]}.csv', has_header=False, infer_schema_length=0, encoding='latin1').rows()
-                    # print('...e ci riesce!')
-                    numeric_columns = self.numeric_columns[numeric_id]
-                    headers = content[0]
-                except KeyError:
-                    print('Nada')
-                    return None
-        try:
-            return {'_id_numeric': numeric_id, 'content': content, 'numeric_columns': numeric_columns, 'headers': headers}
-        except UnboundLocalError:
-            print(numeric_id)
-            raise UnboundLocalError()
+        for collection in self._collections:
+            if (document := collection.find_one({'_id_numeric': numeric_id})) != None:
+                return document
 
-    def get_number_of_tables(self):
-        match self.datalake_location:
-            case 'mongodb':
-                return sum(c.count_documents({}, hint='_id_') for c in self._collections)
-            case _:
-                return len(self.mapping_id)
+    def count_tables(self):
+        return sum(c.count_documents({}, hint='_id_') for c in self._collections)
+    
+    def scan_tables(self, _from = 0, _to = -1):
+        _to = -1 if _to == -1 else self.count_tables()
+        query = {'$and': [
+                    {'_id_numeric': { '$gt': _from}},
+                    {'_id_numeric': {'$lt': _to}}]
+                }
+        
+        for collection in self._collections:
+            for doc in collection.find(query):
+                yield self.doc_to_table(doc)
+    
+    def doc_to_table(self, doc):
+        headers = doc['headers'] if 'headers' in doc else doc['content'][0] if len(doc['content']) > 0 else None
+        return {
+            '_id_numeric': doc['_id_numeric'], 
+            'content': doc['content'], 
+            'numeric_columns': doc['numeric_columns'], 
+            'headers': headers
+        }
 
-    def scan_tables(self, ignore_firsts:int=None):
-        match self.datalake_location:
-            case 'mongodb':
-                query = {} if not ignore_firsts else {'_id_numeric': {'$gt': ignore_firsts}}
-                for collection in self._collections:
-                    for doc in collection.find(query):
-                        headers = doc['headers'] if 'headers' in doc else doc['content'][0] if len(doc['content']) > 0 else None
-                        if self.datalake_name == 'wikitables':
-                            headers = format_wikitables_header(headers)  # on MongoDB WikiTables these headers aren't formatted as the WikiTurlSnap ones
-                        yield {'_id_numeric': doc['_id_numeric'], 'content': doc['content'], 'numeric_columns': doc['numeric_columns'], 'headers': headers}
-            case _:
-                for _id_numeric in self.mapping_id.keys():
-                    if ignore_firsts and _id_numeric < ignore_firsts:
-                        continue
-                    yield self.get_table_by_numeric_id(_id_numeric)
-
-    def copy(self):
-        return SimpleDataLakeHelper(self.datalake_location, self.datalake_name, self.size, self.mapping_id_path, self.numeric_columns_path)
+    def clone(self):
+        return DataLakeHandlerFactory.create_handler(self.datalake_location, self.datalake_name, self.dataset_names)
 
     def close(self):
-        match self.datalake_location:
-            case 'mongodb':
-                self._mongoclient.close()
-            case _:
-                pass
+        return self._mongoclient.close()
+
+
+class LocalFileDataLakeHandler(DataLakeHandler):
+    def __init__(self, datalake_location, datalake_name, *args):
+        self.datalake_location = datalake_location
+        self.datalake_name = datalake_name
+        self.mapping_id_path = args[0]
+        self.numeric_columns_path = args[1]
+        with open(self.mapping_id_path, 'rb') as fr:
+            self.mapping_id = pickle.load(fr)
+        with open(self.numeric_columns_path, 'rb') as fr:
+            self.numeric_columns = pickle.load(fr)
+
+    def get_table_by_id(self, _id):
+        raise NotImplementedError()
+
+    def get_table_by_numeric_id(self, _id_numeric):
+        content = pl.read_csv(f'{self.datalake_location}/{self.mapping_id[_id_numeric]}.csv', has_header=False, infer_schema_length=0, encoding='latin1').rows()
+        numeric_columns = self.numeric_columns[_id_numeric]
+        headers = content[0]
+        return {'_id_numeric': _id_numeric, 'content': content, 'headers': headers, 'numeric_columns': numeric_columns}
+
+    def count_tables(self):
+        return len(self.mapping_id)
+        
+    def scan_tables(self, _from = 0, _to = -1):
+        for _id_numeric in range(_from, _to+1):
+            yield self.get_table_by_numeric_id(_id_numeric)
+
+    def close(self):
+        pass
+
+    def clone(self):
+        return DataLakeHandlerFactory.create_handler(self.datalake_location, self.datalake_name, self.mapping_id_path, self.numeric_columns_path)
 
 
 

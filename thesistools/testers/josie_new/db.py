@@ -1,5 +1,7 @@
-import logging
-from sqlalchemy.orm import Session
+import time
+
+from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import Session, aliased
 from sqlalchemy.engine import URL, Engine
 from sqlalchemy import (
     create_engine, MetaData, 
@@ -8,10 +10,9 @@ from sqlalchemy import (
     Column,
     Integer, LargeBinary, ARRAY, update
 )
-from sqlalchemy.ext.declarative import declarative_base
-
 
 from josie_io import RawTokenSet, ListEntry
+from thesistools.utils.logging_handler import info, error
 
 
 Base = declarative_base()
@@ -61,16 +62,6 @@ class ReadSetCostSamples(Base):
 
 class JOSIEDBHandler:
     def __init__(self, url: URL | None = None, engine: Engine | None = None, **connection_info) -> None:
-        # self.tables_prefix = tables_prefix
-
-        # self._SET_TABLE_NAME = f'{self.tables_prefix}_sets'
-        # self._LISTS_TABLE_NAME = f'{self.tables_prefix}_inverted_lists'
-        # self._SET_INDEX_NAME = f'{self.tables_prefix}_sets_id_idx'
-        # self._INVERTED_LISTS_INDEX_NAME = f'{self.tables_prefix}_inverted_lists_token_idx'
-        # self._QUERY_TABLE_NAME = f'{self.tables_prefix}_queries'
-        # self._READ_LIST_COST_SAMPLES_TABLE_NAME = f'{self.tables_prefix}_read_list_cost_samples'
-        # self._READ_SET_COST_SAMPLES_TABLE_NAME = f'{self.tables_prefix}_read_set_cost_samples'
-
         if url and engine:
             self.url = url
             self.engine = engine
@@ -78,19 +69,33 @@ class JOSIEDBHandler:
             self.url = URL.create(**connection_info)
             self.engine = create_engine(self.url)
 
-        self.metadata = MetaData(self.engine)
-        self.metadata.reflect()
+        # SqlAlchemy==1.4
+        # self.metadata = MetaData(self.engine)
+        # self.metadata.reflect()
+
+        # SqlAlchemy==2.0
+        self.metadata = MetaData()
+        self.metadata.reflect(bind=self.engine)
+        
+        # initial cost values 
+        self.min_read_cost = 1000000.0
+        self.read_set_cost_slope = 1253.19054300781
+        self.read_set_cost_intercept = -9423326.99507381
+        self.read_list_cost_slope = 1661.93366983753
+        self.read_list_cost_intercept = 1007857.48225696
 
     def execute_in_session(self, q):
         with Session(self.engine) as session:
-            return session.execute(q)
+            results = session.execute(q)
+            session.commit()
+        return results
 
     def drop_tables(self):
         for table_class in [InvertedList, Set, Query, ReadListCostSamples, ReadSetCostSamples]:
             try:
                 table_class.__table__.drop(self.engine, checkfirst=True)
             except Exception as e:
-                logging.error(f"Failed to drop table {table_class.__tablename__}: {e}")
+                error(f"Failed to drop table {table_class.__tablename__}: {e}")
                 continue
 
     def create_tables(self):
@@ -133,50 +138,20 @@ class JOSIEDBHandler:
                 pg_size_pretty(pg_relation_size(indexrelid)) AS "index_size",
                 reltuples::bigint AS "estimated_table_row_count"
             FROM pg_stat_all_indexes i 
-            JOIN pg_class c ON i.relid = c.oid 
+            JOIN pg_class c ON i.relid = c.oid
         """
         with Session(self.engine) as session:
             return list(session.execute(text(q)))
 
-    def cost_tables_exist(self):
-        q = f"""
-            SELECT EXISTS (
-               SELECT FROM information_schema.tables 
-               WHERE table_name = '{ReadListCostSamples.__tablename__}'
-               OR table_name = '{ReadSetCostSamples.__tablename__}'
-            );
-        """
-        return self.execute_in_session(text(q)).first()[0]
+    def are_costs_sampled(self):
+        q = f""" 
+            SELECT 
+                (SELECT COUNT(*) FROM {ReadListCostSamples.__tablename__}),
+                (SELECT COUNT(*) FROM {ReadSetCostSamples.__tablename__});"""
+        return all(x != 0 for x in self.execute_in_session(text(q)).first())
 
     def close(self):
         self.engine.dispose()
-
-    def reset_cost_function_parameters(self, verbose: bool) -> None:
-        global read_list_cost_slope, read_list_cost_intercept
-        global read_set_cost_slope, read_set_cost_intercept
-
-        with Session(self.engine) as session:
-            q = f"""SELECT regr_slope(cost, frequency), regr_intercept(cost, frequency)
-                FROM {ReadListCostSamples.__tablename__};"""
-            slope, intercept = session.execute(text(q)).fetchone()
-
-            if verbose:
-                logging.info(f"Resetting read list cost slope {read_list_cost_slope:.4f} -> {slope:.4f}")
-                logging.info(f"Resetting read list cost intercept {read_list_cost_intercept:.4f} -> {intercept:.4f}")
-
-            read_list_cost_slope = slope
-            read_list_cost_intercept = intercept
-
-            q = f"""SELECT regr_slope(cost, size), regr_intercept(cost, size)
-                    FROM {ReadSetCostSamples.__tablename__};"""
-            slope, intercept = session.execute(text(q)).fetchone()
-
-            if verbose:
-                logging.info(f"Resetting read set cost slope {read_set_cost_slope:.4f} -> {slope:.4f}")
-                logging.info(f"Resetting read set cost intercept {read_set_cost_intercept:.4f} -> {intercept:.4f}")
-
-            read_set_cost_slope = slope
-            read_set_cost_intercept = intercept
 
     def count_posting_lists(self) -> int:
         return self.execute_in_session(select(func.count()).select_from(InvertedList)).fetchone()[0]
@@ -213,7 +188,7 @@ class JOSIEDBHandler:
     def get_set_tokens_by_prefix(self, set_id, end_pos):
         with Session(self.engine) as session:
             try:
-                return session.execute(select(Set.tokens[:end_pos]).filter(Set.id == set_id)).fetchone()[0]
+                return session.execute(select(Set.tokens[1:end_pos]).filter(Set.id == set_id)).fetchone()[0]
             except:
                 return (
                     row
@@ -225,13 +200,17 @@ class JOSIEDBHandler:
     def get_set_tokens_by_suffix(self, set_id, start_pos):
         with Session(self.engine) as session:
             try:
-                return session.execute(select(Set.tokens[start_pos:]).filter(Set.id == set_id)).fetchone()[0]
+                # print('#1 ::: ', session.execute(select(Set.tokens[start_pos:1e9]).filter(Set.id == set_id)).fetchone()[0])
+                # print(select(Set.tokens[start_pos:1e9]).filter(Set.id == set_id).compile(bind=self.engine))
+                return session.execute(select(Set.tokens[start_pos:1e9]).filter(Set.id == set_id)).fetchone()[0]
             except:
-                return (
+                # print('#2 ::: ', session.execute(select(Set.tokens).where(Set.id == set_id)).fetchone()[0])
+                # print(select(Set.tokens[start_pos:]).filter(Set.id == set_id).compile(bind=self.engine))
+                return [
                         row
-                        for i, row in enumerate(session.execute(select(Set.tokens).filter(Set.id == set_id)).all())
+                        for i, row in enumerate(session.execute(select(Set.tokens).where(Set.id == set_id)).fetchone()[0])
                         if i >= start_pos
-                    )
+                ]
         
     # TODO check is this works correctly
     def get_set_tokens_subset(self, set_id, start_pos, end_pos):
@@ -245,7 +224,7 @@ class JOSIEDBHandler:
                         if start_pos <= i <= end_pos
                     )
     
-    def get_inverted_list(self, token:int):
+    def get_inverted_list(self, token:int) -> list[ListEntry]:
         set_ids, sizes, match_positions = self.execute_in_session(
             select(InvertedList.set_ids, InvertedList.set_sizes, InvertedList.match_positions)
             .filter(InvertedList.token == token)).fetchone()
@@ -260,14 +239,18 @@ class JOSIEDBHandler:
             entries.append(entry)
         return entries
 
-    
     def get_query_sets(self):
-        rows = self.execute_in_session(
-            select(Query.id, 
-                   select(func.array_agg(InvertedList.raw_token)).filter(Query.tokens.any_(InvertedList.token)),
-                   Query.tokens
-                   )
-                )
+        # TODO translate this into sqlalchemy code
+        q = """
+        SELECT id, (
+			SELECT array_agg(raw_token)
+			FROM inverted_lists
+			WHERE token = any(tokens)
+		), tokens FROM queries
+        """
+
+        rows = self.execute_in_session(text(q))
+
         queries = []
 
         for row in rows:
@@ -289,20 +272,22 @@ class JOSIEDBHandler:
         )
 
     def insert_read_list_cost(self, min_freq, max_freq, sample_size_per_step):
-        self.execute_in_session(
-            insert(ReadListCostSamples)
-            .values(
-                select(InvertedList.token, InvertedList.frequency)
-                .where(min_freq <= InvertedList.frequency <= max_freq)
-                .order_by(func.random())
-                .limit(sample_size_per_step)
-            )
+        subq = (
+            select(InvertedList.token, InvertedList.frequency)
+            .where(min_freq <= InvertedList.frequency, InvertedList.frequency <= max_freq)
+            .order_by(func.random())
+            .limit(sample_size_per_step)
         )
+        q = (
+            insert(ReadListCostSamples)
+            .from_select(['token', 'frequency'], subq)
+        )
+        self.execute_in_session(q)
 
     def count_token_from_read_list_cost(self, min_freq, max_freq):
         return self.execute_in_session(
             select(func.count(ReadListCostSamples.token))
-            .where(min_freq <= ReadListCostSamples.frequency <= max_freq)
+            .where(min_freq <= ReadListCostSamples.frequency, ReadListCostSamples.frequency <= max_freq)
         ).fetchone()[0]
     
     def get_array_agg_token_read_list_cost(self):
@@ -314,10 +299,77 @@ class JOSIEDBHandler:
         self.execute_in_session(
             update(ReadListCostSamples)
             .values(cost=cost)
-            .where(token=token)
+            .where(ReadListCostSamples.token == token)
         )
 
-    def count_number_of_sets(self):
-        self.execute_in_session(
+    def count_number_of_sets(self) -> int:
+        return int(self.execute_in_session(
             select(func.count(Set.id))
-        )
+        ).fetchone()[0])
+
+    def reset_cost_function_parameters(self, verbose: bool) -> None:
+        with Session(self.engine) as session:
+            q = f"""SELECT regr_slope(cost, frequency), regr_intercept(cost, frequency)
+                FROM {ReadListCostSamples.__tablename__};"""
+            slope, intercept = session.execute(text(q)).fetchone()
+            print('\n\n\n', self.read_list_cost_intercept, self.read_list_cost_slope, intercept, slope, '\n\n\n')
+            if verbose:
+                info(f"Resetting read list cost slope {self.read_list_cost_slope:.4f} -> {slope:.4f}")
+                info(f"Resetting read list cost intercept {self.read_list_cost_intercept:.4f} -> {intercept:.4f}")
+
+            self.read_list_cost_slope = slope
+            self.read_list_cost_intercept = intercept
+
+            q = f"""SELECT regr_slope(cost, size), regr_intercept(cost, size)
+                    FROM {ReadSetCostSamples.__tablename__};"""
+            slope, intercept = session.execute(text(q)).fetchone()
+
+            if verbose:
+                info(f"Resetting read set cost slope {self.read_set_cost_slope:.4f} -> {slope:.4f}")
+                info(f"Resetting read set cost intercept {self.read_set_cost_intercept:.4f} -> {intercept:.4f}")
+
+            self.read_set_cost_slope = slope
+            self.read_set_cost_intercept = intercept
+
+    def sample_costs(self, 
+                     min_length:int = 0, 
+                     max_length:int = 20_000, 
+                     step:int = 500, 
+                     sample_size_per_step:int = 10):
+        # the table should have been already created 
+        # when the JOSIE has built the main indexes
+        sample_set_ids = self.get_queries_agg_id()
+
+        for set_id in sample_set_ids:
+            start = time.time()
+            s = self.get_set_tokens(set_id)
+            duration = time.time() - start  # Duration in seconds
+            print(set_id, len(s), int(duration * 1e9))
+            self.insert_read_set_cost(set_id, len(s), int(duration * 1e9))
+
+        for l in range(min_length, max_length, step):
+            self.insert_read_list_cost(l, l+step, sample_size_per_step)
+            # count = db.count_token_from_read_list_cost(l, l+step)
+
+        sample_list_tokens = self.get_array_agg_token_read_list_cost()
+        for token in sample_list_tokens:
+            start = time.time()
+            self.get_inverted_list(token)
+            duration = time.time() - start
+            self.update_read_list_cost(token, int(duration * 1e9))
+
+    def read_list_cost(self, length: int) -> float:
+        cost = self.read_list_cost_slope * float(length) + self.read_list_cost_intercept
+        if cost < self.min_read_cost:
+            cost = self.min_read_cost
+        return cost / 1000000.0
+
+    def read_set_cost(self, size: int) -> float:
+        cost = self.read_set_cost_slope * float(size) + self.read_set_cost_intercept
+        if cost < self.min_read_cost:
+            cost = self.min_read_cost
+        return cost / 1000000.0
+
+    def read_set_cost_reduction(self, size: int, truncation: int) -> float:
+        return self.read_set_cost(size) - self.read_set_cost(size - truncation)
+

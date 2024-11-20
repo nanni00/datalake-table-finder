@@ -5,8 +5,8 @@ from thesistools.utils import basicconfig
 
 
 
-# remember to set the env variable TESI_ROOT_PATH 
-root_project_path = os.environ['THESIS_PATH']
+# remember to set the env variable DTFPATH 
+root_project_path = os.environ['DTFPATH']
 
 
 class _DataPath:
