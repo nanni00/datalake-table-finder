@@ -1,4 +1,4 @@
-name: tesi-env
+name: dltfenv
 
 dependencies:
   - python=3.10.13
@@ -11,8 +11,9 @@ dependencies:
   - tqdm
   - nltk
   - pip:
+    - bidict
     - matplotlib
-    - sqlalchemy==1.4
+    - sqlalchemy
     - pymongo
     - timeout_decorator
     - bitarray
@@ -20,5 +21,3 @@ dependencies:
     - fasttext
     - compress-fasttext
     - faiss
-    - numerize-denumerize
-    

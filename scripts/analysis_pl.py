@@ -10,24 +10,20 @@ import polars as pl
 from tqdm import tqdm
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
-from numerize_denumerize.numerize import numerize
 
-from thesistools.utils import basicconfig
-from thesistools.utils.settings import get_all_paths
-from thesistools.utils.logging_handler import logging_setup, info
-from thesistools.utils.parallel import worker_fp_per_query, worker_ndcg, worker_precision
-
-
+from dltftools.utils.misc import numerize
+from dltftools.utils.loghandler import logging_setup, info
+from dltftools.utils.settings import get_all_paths, ALGORITHM_MODE_CONFIG, DATALAKES
+from dltftools.utils.parallel import worker_fp_per_query, worker_ndcg, worker_precision
 
 
 def analyses(test_name, k, num_query_samples, num_cpu, 
-             datalake_name, datalake_size, 
+             datalake_name, 
              p_values, 
              save_silver_standard_to:str=None, load_silver_standard_from:str=None, *args, **kwargs):
     assert int(k) > 0
     assert int(num_cpu) > 0
-    assert datalake_name in basicconfig.DATALAKES
-    assert datalake_size in basicconfig.DATALAKE_SIZES
+    assert datalake_name in DATALAKES
     
     alpha = 1
     showfliers = False
@@ -50,10 +46,10 @@ def analyses(test_name, k, num_query_samples, num_cpu,
     analyses_dir = analyses_query_dir
 
     logging_setup(paths['logfile'])
-    info(f' {test_name.upper()} - {datalake_name.upper()} - {datalake_size.upper()} - ANALYSES - {k} - {q} '.center(150, '-'))
+    info(f' {test_name.upper()} - {datalake_name.upper()} - ANALYSES - {k} - {q} '.center(150, '-'))
 
     all_colors = colors = list(mcolors.TABLEAU_COLORS.keys())
-    methods = basicconfig.ALGORITHM_MODE_CONFIG
+    methods = ALGORITHM_MODE_CONFIG
     markers = {m: 'o' if m[0] == 'josie' else 'x' if m[0] == 'lshforest' else 'd' for m in methods}
     methods = {m: c for m, c in zip(methods, colors[:len(methods)])}
 

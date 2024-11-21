@@ -1,15 +1,9 @@
-# the folder where will be stored tests results, statistics and other big files
-data/tests
-
-# the original datasets as have been downloaded
-data/raw_dataset
-
-# the PostgreSQL database directories
+# the directory containing the JOSIE and MATE databases, results, ...
 data
 
 # Go (keep only the JOSIE code subfolder)
-go/*
-!go/src/github.com
+go
+# !go/src/github.com
 
 TaBERT
 
@@ -23,11 +17,9 @@ table_bert
 experiments/multi_key_join/*
 !experiments/multi_key_join/*.py
 
-*/*.db
-**test.py
-cache
-**__pycache__**
 .git
 .vscode
+
+cache
+**__pycache__**
 pyrightconfig.json
-MATE/src/mate_index.db

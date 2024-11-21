@@ -3,35 +3,32 @@ import random
 import warnings
 from time import time
 import multiprocessing as mp
+
+from dltftools.utils.tables import table_to_tokens
 warnings.filterwarnings('ignore')
 
 import polars as pl
 from tqdm import tqdm
-from numerize_denumerize.numerize import numerize
 from sqlalchemy.engine import URL, create_engine
 
-from thesistools.utils.metrics import proximity
-from thesistools.utils import basicconfig
-from thesistools.utils.datalake import SimpleDataLakeHelper
-from thesistools.utils.overlapdb import OverlapDB
-from thesistools.utils.settings import get_all_paths
-from thesistools.utils.misc import (
-    largest_overlap_sloth,
-    table_to_tokens,
-)
-from thesistools.utils.logging_handler import logging_setup, info
-from thesistools.utils.parallel import chunks
+from dltftools.utils.parallel import chunks
+from dltftools.utils.metrics import proximity
+from dltftools.utils.overlapdb import OverlapDB
+from dltftools.utils.settings import get_all_paths
+from dltftools.utils.loghandler import logging_setup, info
+from dltftools.utils.datalake import DataLakeHandlerFactory
+from dltftools.utils.misc import largest_overlap_sloth, numerize
 
 
 def worker_result_extractor(data):
-    global datalake_location, dataset, size, mapping_id_file, numeric_columns_file, blacklist, num_cpu, table_name, url, engine
+    global blacklist, num_cpu, table_name, url, engine, dlhargs
     is_probe_process = os.getpid() % num_cpu == 0
     chunk = data[0]
     if is_probe_process:
         print(f"Process {os.getpid()} working on chunk {data}...")
         
 
-    dlh = SimpleDataLakeHelper(datalake_location, dataset, size, mapping_id_file, numeric_columns_file)
+    dlh = DataLakeHandlerFactory.create_handler(*dlhargs)
     resultsdb = OverlapDB(table_name, url=url, engine=engine)
     
     rv = []
@@ -117,14 +114,10 @@ def worker_result_extractor(data):
     return hit, rv
 
 
-def initializer(_datalake_location, _dataset, _size, _mapping_id_file, _numeric_columns_file, _blacklist, _num_cpu, _table_name, _url, _engine):
-    global datalake_location, dataset, size, mapping_id_file, numeric_columns_file, blacklist, num_cpu, table_name, url, engine
+def initializer(_blacklist, _num_cpu, _table_name, _url, _engine, *_dlhargs):
+    global blacklist, num_cpu, table_name, url, engine, dlhargs
     
-    datalake_location = _datalake_location
-    dataset = _dataset
-    size = _size
-    mapping_id_file = _mapping_id_file
-    numeric_columns_file = _numeric_columns_file
+    dlhargs = _dlhargs[0]
     blacklist = _blacklist
     num_cpu = _num_cpu
     table_name = _table_name
@@ -132,20 +125,16 @@ def initializer(_datalake_location, _dataset, _size, _mapping_id_file, _numeric_
     engine = _engine
 
 
-def extract_results(test_name, k, num_query_samples, 
-                    datalake_location:str, datalake_name:str, datalake_size:str,
-                    mapping_id_file:str, numeric_columns_file:str,
+def extract_results(test_name, k, num_query_samples,
+                    datalake_location:str,
+                    datalake_name:str, 
+                    datalake_options:list[str],
                     blacklist, num_cpu,
                     connection_info:dict, 
-                    clear_results_table=False, **kwargs):
+                    clear_results_table=False):
     
     assert int(k) > 0
     assert int(num_cpu) > 0
-    assert datalake_location == 'mongodb' or os.path.exists(datalake_location)
-    assert not datalake_name  or datalake_name in basicconfig.DATALAKES
-    assert not datalake_size or datalake_size in basicconfig.DATALAKE_SIZES
-    assert not mapping_id_file or os.path.exists(mapping_id_file)
-    assert not numeric_columns_file or os.path.exists(numeric_columns_file)
     
     final_results = pl.DataFrame(schema={
         'query_id': pl.Int32, 
@@ -182,15 +171,13 @@ def extract_results(test_name, k, num_query_samples,
     results_base_dir = p['results_base_dir']
     logging_setup(p['logfile'])
 
-
     blacklist = set(blacklist)
     info(f'Tokens blacklist: {blacklist}')
 
-    table_name = f'results_d{datalake_name}_s{datalake_size}'
     url = URL.create(**connection_info)
     engine = create_engine(url)
 
-    resultsdb = OverlapDB(table_name, url=url, engine=engine)
+    resultsdb = OverlapDB(url=url, engine=engine)
     
     # clear the result table (occhio a farlo che poi si perdono i dati già salvati...)
     if clear_results_table:
@@ -200,12 +187,11 @@ def extract_results(test_name, k, num_query_samples,
     # just to know if the results database is actually useful
     hit_rates = []
 
-    initargs = (datalake_location, datalake_name, datalake_size, 
-                mapping_id_file, numeric_columns_file, 
-                blacklist, num_cpu, 
-                table_name, url, engine)
+    dlhargs = [datalake_location, datalake_name, datalake_options]
+    initargs = (blacklist, num_cpu, 
+                table_name, url, engine, *dlhargs)
 
-    info(f' {test_name.upper()} - {datalake_name.upper()} - {datalake_size.upper()} - {k} - {num_query_samples} - EXTRACTION '.center(150, '#'))
+    info(f' {test_name.upper()} - {k} - {num_query_samples} - EXTRACTION '.center(150, '#'))
 
     with mp.Pool(processes=num_cpu, initializer=initializer, initargs=initargs) as pool:
         for result_file in os.listdir(results_base_dir):
@@ -244,26 +230,3 @@ def extract_results(test_name, k, num_query_samples,
 
     info(f"Hit rates: {hit_rates}")
     resultsdb.close()
-
-
-
-if __name__ == '__main__':
-    test_name = 'test__fulloverlap'
-    k = 10
-    num_query_samples = 50
-    num_cpu = 64
-
-    connection_info = {
-        'drivername':   'postgresql',
-        'database':     'JOSIEDB',
-        'username':     'nanni',
-        'password':     '',
-        'port':         5442,
-        'host':         '127.0.0.1',
-    }
-
-    extract_results(test_name, k, num_query_samples,
-                    'mongodb', 'wikiturlsnap', 'small',
-                    None, None,
-                    [], num_cpu,
-                    connection_info)

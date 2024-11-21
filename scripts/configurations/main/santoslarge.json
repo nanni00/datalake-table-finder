@@ -2,10 +2,11 @@
     "general": {
         "test_name": "base",
         "datalake_config": {
-            "location": "mongodb",
-            "name": "gittables",
+            "location": "/path/to/data_lake",
+            "name": "santoslarge",
             "options": [
-                "datasets.gittables"
+                "/path/to/mapping_id_file",
+                "/path/to/numeric_columns_file"
             ]
         },
         "blacklist": [],
@@ -18,7 +19,7 @@
         
         "josie_db_connection_info": {
             "drivername":   "postgresql",
-            "database":     "DLTFGitTables",
+            "database":     "DLTFSantosLarge",
             "username":     "nanni",
             "password":     "",
             "port":         5442,

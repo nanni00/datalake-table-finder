@@ -6,10 +6,10 @@ import re
 
 from tqdm import tqdm
 
-from thesistools.myutils.parallel import chunks
-from thesistools.myutils.misc import is_number_tryexcept, is_valid_table
-from thesistools.myutils.settings import DefaultPath as dp
-from thesistools.myutils.datalake import SimpleDataLakeHelper
+from dltftools.myutils.parallel import chunks
+from dltftools.myutils.misc import is_number_tryexcept, is_valid_table
+from dltftools.myutils.settings import DefaultPath as dp
+from dltftools.myutils.datalake import SimpleDataLakeHelper
 
 from datamining.frequent_itemsets.apriori import apriori
 from datamining.utils.misc import create_items_table

@@ -1,25 +1,20 @@
+# Data Lake Table Finder
+
+This repository contains scripts and files to compare different methods in data discovery tasks.
+
 # Setup
 
-Download the repository
-```
-git clone https://github.com/nanni00/tesi-magistrale.git /path/to/tesi-magistrale
-```
+1. Download the repository
 
-Create a python environment 
-Creare un ambiente python dedicato (tutto è stato provato su python 3.10, con altre versioni ci potrebbero essere problemi) con i pacchetti necessari (file environment.yml)
+2. Create a python environment (see environment.yml)
 
-Aggiungere le variabili d'ambiente:
+3. Create the project environment variable and add it to the PYTHONPATH
 ```
-export THESIS_PATH=/path/to/tesi-magistrale
+export DLTF=/path/to/datalake-table-finder
 export PYTHONPATH=$PYTHONPATH:$THESIS_PATH
 ```
 
-e per l'ambiente Go:
-```
-export GOPATH=$THESIS_PATH/go
-export GOBIN=$GOPATH/bin
-export PATH=$PATH:$GOBIN
-```
+4. Load the datalake on MongoDB, or store it as a local file (e.g. SantosLarge)
 
 I datalake usati nei test possono essere o su un database MongoDB oppure si possono strutturare come una cartella contenente dei CSV, ogniuno dei quali è una tabella del corpus.
 

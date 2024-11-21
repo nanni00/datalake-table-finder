@@ -1,30 +1,33 @@
 import os
 
 import pandas as pd
-from numerize_denumerize.numerize import numerize
 
-from thesistools.testers.josie_new import josie
-from thesistools.testers import lshforest, embedding
-from thesistools.utils.logging_handler import info, logging_setup
-from thesistools.utils.settings import DefaultPath as defpath, get_all_paths
-from thesistools.utils.datalake import SimpleDataLakeHelper
-from thesistools.utils import basicconfig
-from thesistools.utils.misc import (
+from dltftools.testers.josie import josie
+from dltftools.utils.query import read_query_ids
+from dltftools.testers import lshforest, embedding
+from dltftools.utils.datalake import DataLakeHandlerFactory
+from dltftools.utils.loghandler import info, logging_setup
+
+from dltftools.utils.settings import (
+    DefaultPath as defpath, 
+    get_all_paths, 
+    ALGORITHM_MODE_CONFIG, 
+    DATALAKES
+)
+
+from dltftools.utils.misc import (
+    numerize,
     mmh3_hashfunc,
     get_local_time,
     get_string_translator,
-    get_query_ids_from_query_file
 )
 
 
-
-def main_pipeline(test_name, algorithm, mode, tasks:list[str], 
+def main_pipeline(test_name:str, algorithm:str, mode:str, tasks:list[str], 
                   k:int=10, num_query_samples:int=1000, num_cpu:int=72, 
                   datalake_location:str=None,
                   datalake_name:str=None, 
-                  datalake_size:str=None,
-                  mapping_id_file:str=None,
-                  numeric_columns_file:str=None,
+                  datalake_options:list[str]=None,
                   token_translators=[],
                   blacklist:list[str]=[],
 
@@ -42,16 +45,13 @@ def main_pipeline(test_name, algorithm, mode, tasks:list[str],
                   embedding_model_size:int=300):
     
     # check configuration
-    if (algorithm, mode) not in basicconfig.ALGORITHM_MODE_CONFIG:
+    if (algorithm, mode) not in ALGORITHM_MODE_CONFIG:
         return
     
     assert int(k) > 0
     assert int(num_cpu) > 0
     assert datalake_location == 'mongodb' or os.path.exists(datalake_location)
-    assert not datalake_name or datalake_name in basicconfig.DATALAKES
-    assert not datalake_size or datalake_size in basicconfig.DATALAKE_SIZES
-    assert not mapping_id_file or os.path.exists(mapping_id_file)
-    assert not numeric_columns_file or os.path.exists(numeric_columns_file)
+    assert not datalake_name or datalake_name in DATALAKES
     assert int(num_perm) > 0
     assert int(l) > 0
     assert int(embedding_model_size) > 0
@@ -77,7 +77,7 @@ def main_pipeline(test_name, algorithm, mode, tasks:list[str],
 
     logging_setup(logfile=p['logfile'])
 
-    info(f" MAIN PIPELINE - {test_name.upper()} - {algorithm.upper()} - {mode.upper()} - {datalake_name.upper()} - {datalake_size.upper()} ".center(150, '#'))
+    info(f" MAIN PIPELINE - {test_name.upper()} - {algorithm.upper()} - {mode.upper()} - {datalake_name.upper()} ".center(150, '#'))
 
     # create folders
     if DATA_PREPARATION or QUERY:
@@ -87,9 +87,9 @@ def main_pipeline(test_name, algorithm, mode, tasks:list[str],
                 os.makedirs(directory)
     
 
-    forest_file =       f'{forest_dir}/forest_m{mode}.json' if not forest_file else forest_file
-    idx_tag =           'ft' if mode in ['ft', 'ftdist'] else 'cft' if mode in ['cft', 'cftdist'] else ''
-    cidx_file =         f'{embedding_dir}/col_idx_m{idx_tag}.index' 
+    forest_file =       f'{forest_dir}/forest_{mode}.json' if not forest_file else forest_file
+    cidx_tag =           'ft' if mode in ['ft', 'ftdist'] else 'cft' if mode in ['cft', 'cftdist'] else ''
+    cidx_file =         f'{embedding_dir}/col_idx_{cidx_tag}.index' 
     topk_results_file = f'{results_base_dir}/{algorithm}_{mode}.csv'
     db_stat_file =      f'{statistics_dir}/db.csv' 
 
@@ -103,17 +103,16 @@ def main_pipeline(test_name, algorithm, mode, tasks:list[str],
     # a list containing information about timing of each step
     runtime_metrics = []
 
-    datalake_helper = SimpleDataLakeHelper(datalake_location, datalake_name, datalake_size, mapping_id_file, numeric_columns_file)
-
-    # the prefix used in the database tables (mainly for JOSIE)
-    table_prefix = f'josie__{test_name}__{datalake_name}_{datalake_size}_{mode}'
+    # the datalake handler, that provides utilities to access the tables
+    dlh_config = [datalake_location, datalake_name, *datalake_options]
+    dlh = DataLakeHandlerFactory.create_handler(dlh_config)
 
     # selecting the right tester accordingly to the specified algorithm and mode
     tester = None
-    default_args = (mode, blacklist, datalake_helper, token_translators)
+    default_args = (mode, blacklist, dlh, token_translators)
     match algorithm:
         case 'josie':
-            tester = josie.JOSIETester(*default_args, table_prefix, db_stat_file, josie_db_connection_info, spark_config)
+            tester = josie.JOSIETester(*default_args, db_stat_file, josie_db_connection_info, spark_config)
         case 'lshforest':
             tester = lshforest.LSHForestTester(*default_args, num_cpu, forest_file, num_perm, l, hash_func)
         case 'embedding':
@@ -136,7 +135,7 @@ def main_pipeline(test_name, algorithm, mode, tasks:list[str],
 
     if QUERY:
         info(f' QUERY - {k} - {str_num_query_samples} '.center(150, '-'))
-        query_ids = get_query_ids_from_query_file(p['query_file'])
+        query_ids = read_query_ids(p['query_file'])
         exec_time = tester.query(topk_results_file, k, query_ids, results_directory=results_base_dir, token_table_on_memory=token_table_on_mem)
         runtime_metrics.append((('query', numerize(len(query_ids), asint=True)), exec_time, get_local_time()))
 
@@ -150,5 +149,5 @@ def main_pipeline(test_name, algorithm, mode, tasks:list[str],
                 rfw.write(f"{t_loctime},{algorithm},{mode},{t_name},{k if t_name == 'query' else ''},{num_queries if t_name == 'query' else ''},{t_time}\n")
 
 
-    datalake_helper.close()
+    dlh.close()
     info('All tasks have been completed.')

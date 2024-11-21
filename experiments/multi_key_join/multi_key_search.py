@@ -15,13 +15,13 @@ from sqlalchemy import select, create_engine
 from sqlalchemy.orm import Session
 from sqlalchemy.engine import URL
 
-from thesistools.testers.josie.josiedb_handler import JOSIEDBHandler
-from thesistools.utils.parallel import chunks
-from thesistools.utils.datalake import SimpleDataLakeHelper
-from thesistools.utils.logging_handler import logging_setup, info
-from thesistools.utils.settings import DefaultPath as dp
-from thesistools.mate.MATE import MATETableExtraction
-from thesistools.utils.misc import (
+from dltftools.testers.josie.josiedb_handler import JOSIEDBHandler
+from dltftools.utils.parallel import chunks
+from dltftools.utils.datalake import SimpleDataLakeHelper
+from dltftools.utils.loghandler import logging_setup, info
+from dltftools.utils.settings import DefaultPath as dp
+from dltftools.mate.MATE import MATETableExtraction
+from dltftools.utils.misc import (
     is_valid_multi_key, is_valid_table, 
     table_columns_to_rows, table_rows_to_columns, table_to_tokens,
     largest_overlap_sloth
