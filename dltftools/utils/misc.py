@@ -96,7 +96,7 @@ def largest_overlap_sloth(table1, table2, valid_cols1, valid_cols2, verbose=Fals
 
 
 
-def numerize(number):
+def numerize(number, asint=True):
     """
     A slightly different version of numerize() function from numerize_denumerize Python package
     from Dheeresh Agarwal, https://pypi.org/project/numerize-denumerize/

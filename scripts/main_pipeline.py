@@ -41,7 +41,7 @@ def main_pipeline(test_name:str, algorithm:str, mode:str, tasks:list[str],
                   forest_file=None,
 
                   # fastText-FAISS specific parameters
-                  embedding_model_path:str=f'{defpath.model_path.fasttext}/cc.en.300.bin',
+                  embedding_model_path:str|None=None,
                   embedding_model_size:int=300):
     
     # check configuration
@@ -104,8 +104,8 @@ def main_pipeline(test_name:str, algorithm:str, mode:str, tasks:list[str],
     runtime_metrics = []
 
     # the datalake handler, that provides utilities to access the tables
-    dlh_config = [datalake_location, datalake_name, *datalake_options]
-    dlh = DataLakeHandlerFactory.create_handler(dlh_config)
+    dlh_config = [datalake_location, datalake_name, datalake_options]
+    dlh = DataLakeHandlerFactory.create_handler(*dlh_config)
 
     # selecting the right tester accordingly to the specified algorithm and mode
     tester = None

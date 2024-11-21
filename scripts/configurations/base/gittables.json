@@ -8,7 +8,7 @@
                 "datasets.gittables"
             ]
         },
-        "blacklist": [],
+        "blacklist": ["story", "comment", "{\"$numberDouble\": \"NaN\"}"],
         "k": 20,
         "num_query_samples": 100,
         "num_cpu": 72,
@@ -28,34 +28,34 @@
     
     "data_preparation": {
         "algorithms": [
-            "josie", "lshforest", "embedding"
+            "josie", "lshforest"
         ],
         "modes": [
-            "set", "bag", "ft"
+            "set", "bag"
         ],
         "spark_config": {
             "spark.app.name":               "JOSIE Data Preparation",
             "spark.master":                 "local[64]",
             "spark.executor.memory":        "100g",
             "spark.driver.memory":          "20g",
-            "spark.local.dir":              "/path/to/.tmp_spark",
+            "spark.local.dir":              "$HOME/.tmp_spark",
             "spark.driver.maxResultSize":   "12g",
             "spark.jars.packages":          "org.mongodb.spark:mongo-spark-connector_2.12:10.3.0",
-            "spark.driver.extraClassPath":  "/path/to/.ivy2/jars/org.postgresql_postgresql-42.7.3.jar"
+            "spark.driver.extraClassPath":  "$HOME/.ivy2/jars/postgresql-42.7.3.jar"
         },
         "token_table_on_mem": false,
         "num_perm": 256,
         "l": 32,
-        "exec_now": false
+        "exec_now": true
     },
 
     "sample_queries": {
-        "exec_now": false
+        "exec_now": true
     },
 
     "query": {
         "algorithms": [
-            "jose", "lshforest", "embedding"
+            "jose", "lshforest"
         ],
         "modes": [
             "set", "bag", "ft"

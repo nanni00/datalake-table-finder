@@ -14,14 +14,14 @@ import pyspark.storagelevel
 from dltftools.utils.loghandler import info
 from dltftools.utils.spark import get_spark_session
 from dltftools.utils.datalake import DataLakeHandler
-from dltftools.testers.base_tester import AlgorithmTester
 from dltftools.utils.misc import convert_to_giga
 from dltftools.utils.tables import is_valid_table, table_to_tokens
+from dltftools.testers.base_tester import AlgorithmTester
 
-from db import JOSIEDBHandler
-from exp import write_all_results
-from josie_alg import JOSIE
-from tokentable import TokenTableDisk, TokenTableMem
+from dltftools.testers.josie.db import JOSIEDBHandler
+from dltftools.testers.josie.exp import write_all_results
+from dltftools.testers.josie.josie_alg import JOSIE
+from dltftools.testers.josie.tokentable import TokenTableDisk, TokenTableMem
 
 
 

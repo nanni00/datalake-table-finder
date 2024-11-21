@@ -34,6 +34,23 @@ def create_numeric_index_on_mongodb(*table_collections):
     print('Completed.')
 
 
+
+def insert_tables(batch_tables, table_collection):
+    errors = 0
+    try: 
+        table_collection.bulk_write(batch_tables, ordered=False)
+    except OverflowError:
+        for table in batch_tables:
+            try: table_collection.insert_one(table)
+            except:
+                errors += 1
+    finally:
+        batch_tables = []
+    return errors
+
+
+
+
 def _columns_detection_worker(t: tuple[str, list[list]]):
     return (t[0], naive_detect_valid_columns(t[1]))
     
@@ -80,8 +97,6 @@ def gittables2mongo(path_tables, table_collection, milestone, n):
     :param milestone: table interval to use for tracking the progress
     :param n: maximum number of tables to load into the MongoDB collection
     """
-    path_tables = f'{dp.data_path.base}/raw_dataset/gittables_parquet'
-
     milestone = 10000
     batch_tables = []
     counter = 0
@@ -109,37 +124,17 @@ def gittables2mongo(path_tables, table_collection, milestone, n):
             batch_tables.append(InsertOne(table_obj))
 
             if len(batch_tables) == milestone:
-                try:
-                    nwriteop = table_collection.bulk_write(batch_tables, ordered=False)
-                except OverflowError:
-                    # there are integers stored with a number of bytes that MongoDB doesn't support.
-                    # in case of error it seems that even with the "ordered=False" option
-                    # all the remaining tables in the bulk write aren't written to the database,
-                    # so scan the batch and try to insert each single table one by one
-                    for table in batch_tables:
-                        try: table_collection.insert_one(table)
-                        except: 
-                            errors += 1
-                            continue
-                finally:
-                    batch_tables = []
+                errors += insert_tables(batch_tables, table_collection)
+                batch_tables = []
             if counter >= n:
                 break
         if counter >= n:
             break
 
     if batch_tables:
-        try:
-            table_collection.bulk_write(batch_tables, ordered=False)
-        except:
-            for table in batch_tables:
-                try: table_collection.insert_one(table)
-                except: 
-                    errors += 1
-                    continue
+        errors += insert_tables(batch_tables, table_collection)
     print(f"Total tables that have not been loaded due to errors: {errors}")
     print("Detecting valid columns of the loaded tables...")
-    mongodb_detect_valid_columns('set', 8, 'mongodb', 'gittables', [table_collection.full_name])
 
 
 def wiki2mongo(path_tables, table_collection, milestone, n):
@@ -184,8 +179,6 @@ def wiki2mongo(path_tables, table_collection, milestone, n):
             counter += 1  # increment the counter
     table_collection.insert_many(tables)
     print("Table parsing completed: " + str(counter) + " tables read and stored in the database.")
-    print("Detecting valid columns of the loaded tables...")
-    mongodb_detect_valid_columns('set', 8, 'mongodb', 'wikitables', [table_collection.full_name])
 
 
 def santos2local(path_tables, mapping_id_path, valid_columns_path, n):
@@ -233,9 +226,6 @@ def santos2local(path_tables, mapping_id_path, valid_columns_path, n):
 
     print('Completed.')
 
-
-
-
 def main_wiki():
     # CHECK THE HEADER FORMAT!!!!!
     path_tables = f'{os.environ["HOME"]}/datasets_datalakes/WikiTables/tables.json'
@@ -246,6 +236,7 @@ def main_wiki():
     milestone = 10000  # table interval to use for tracking the progress
     n = 100
     wiki2mongo(path_tables, table_collection, milestone, n)
+    mongodb_detect_valid_columns('set', 8, 'mongodb', 'wikitables', [table_collection.full_name])
     
 
 def main_gittables():
@@ -256,18 +247,27 @@ def main_gittables():
     table_collection = db.gittables  # define the collection in the database to store the tables
     milestone = 10000  # table interval to use for tracking the progress
     n = 100
-    wiki2mongo(path_tables, table_collection, milestone, n)
+    gittables2mongo(path_tables, table_collection, milestone, n)
+    mongodb_detect_valid_columns('set', 8, 'mongodb', 'gittables', [table_collection.full_name])
     
 
 def main_santos():
     path_tables =           f'{os.environ["HOME"]}/datasets_datalakes/SantosLarge/tables'
     mapping_id_path =       f'{os.environ["HOME"]}/datasets_datalakes/SantosLarge/mapping_id.pickle'
     valid_columns_path =    f'{os.environ["HOME"]}/datasets_datalakes/SantosLarge/valid_columns.pickle'
-
     n = 100
     santos2local(path_tables, mapping_id_path, valid_columns_path, n)
 
 
+def main_santos_small():
+    path_tables =           f'{os.environ["HOME"]}/datasets_datalakes/SantosSmall/datalake'
+    mapping_id_path =       f'{os.environ["HOME"]}/datasets_datalakes/SantosSmall/mapping_id.pickle'
+    valid_columns_path =    f'{os.environ["HOME"]}/datasets_datalakes/SantosSmall/valid_columns.pickle'
+    n = 1000
+    santos2local(path_tables, mapping_id_path, valid_columns_path, n)
+    
 
 if __name__ == "__main__":
-    main_wiki()
+    # main_wiki()
+    main_gittables()
+    # main_santos_small()

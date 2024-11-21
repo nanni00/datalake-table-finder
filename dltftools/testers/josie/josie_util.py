@@ -1,5 +1,5 @@
 from typing import Any, List
-from common import next_distinct_list
+from dltftools.testers.josie.common import next_distinct_list
 
 
 class CandidateEntry:

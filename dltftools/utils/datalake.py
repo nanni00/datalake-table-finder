@@ -99,8 +99,8 @@ class LocalFileDataLakeHandler(DataLakeHandler):
     def __init__(self, datalake_location, datalake_name, *args):
         self.datalake_location = datalake_location
         self.datalake_name = datalake_name
-        self.mapping_id_path = args[0]
-        self.valid_columns_path = args[1]
+        self.mapping_id_path = f"{self.datalake_location}/mapping_id.pickle"
+        self.valid_columns_path = f"{self.datalake_location}/valid_columns.pickle"
         with open(self.mapping_id_path, 'rb') as fr:
             self.mapping_id = pickle.load(fr)
         with open(self.valid_columns_path, 'rb') as fr:
@@ -123,13 +123,13 @@ class LocalFileDataLakeHandler(DataLakeHandler):
             yield self.get_table_by_numeric_id(_id_numeric)
 
     def config(self):
-        return self.datalake_location, self.datalake_name, self.mapping_id_path, self.valid_columns_path
+        return self.datalake_location, self.datalake_name
 
     def close(self):
         pass
 
     def clone(self):
-        return DataLakeHandlerFactory.create_handler(self.datalake_location, self.datalake_name, self.mapping_id_path, self.valid_columns_path)
+        return DataLakeHandlerFactory.create_handler(self.datalake_location, self.datalake_name)
 
 
 

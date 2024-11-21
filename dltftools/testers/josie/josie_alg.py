@@ -1,12 +1,12 @@
 import time
 
-from db import JOSIEDBHandler
-from josie_io import RawTokenSet
-from tokentable import TokenTable
-from common import overlap
-from exp import ExperimentResult, write_result_string
+from dltftools.testers.josie.db import JOSIEDBHandler
+from dltftools.testers.josie.josie_io import RawTokenSet
+from dltftools.testers.josie.tokentable import TokenTable
+from dltftools.testers.josie.common import overlap
+from dltftools.testers.josie.exp import ExperimentResult, write_result_string
 
-from heap import (
+from dltftools.testers.josie.heap import (
     SearchResultHeap, 
     push_candidate, 
     kth_overlap, 
@@ -14,7 +14,7 @@ from heap import (
     ordered_results
 )
 
-from josie_util import (
+from dltftools.testers.josie.josie_util import (
     CandidateEntry, 
     process_candidates_init,
     process_candidates_update,

@@ -13,7 +13,7 @@ if __name__ == '__main__':
     parser.add_argument('--pg-config-path', required=False)
 
     args = parser.parse_args()
-    dthpath = os.environ['DTFPATH']
+    dthpath = os.environ['DLTFPATH']
     home = os.environ['HOME']
 
     task = args.task

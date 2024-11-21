@@ -11,8 +11,8 @@ from sqlalchemy import (
     Integer, LargeBinary, ARRAY, update
 )
 
-from josie_io import RawTokenSet, ListEntry
 from dltftools.utils.loghandler import info, error
+from dltftools.testers.josie.josie_io import RawTokenSet, ListEntry
 
 
 Base = declarative_base()
