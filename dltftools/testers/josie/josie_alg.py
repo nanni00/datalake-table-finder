@@ -32,7 +32,8 @@ def JOSIE(
     k: int,
     batch_size: int = 20,
     expensive_estimation_budget: int = 5000,
-    ignore_self: bool = True
+    ignore_self: bool = True,
+    verbose: bool = True
 ):
     exp_result = ExperimentResult()
 
@@ -141,8 +142,6 @@ def JOSIE(
             total_overlap = 0
             if candidate.suffix_length() > 0:
                 s = db.get_set_tokens_by_suffix(candidate.id, candidate.latest_match_position + 1)
-                if s == None:
-                    print('>>>>>  ', candidate.id, s)
                 exp_result.num_set_read += 1
                 exp_result.max_set_size_read = max(exp_result.max_set_size_read, len(s))
                 suffix_overlap = overlap(s, tokens[i + 1:])

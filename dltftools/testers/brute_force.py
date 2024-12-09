@@ -22,8 +22,8 @@ class BruteForceTester(AlgorithmTester):
             if is_valid_table(table['content'], table['valid_columns']):
                 tokenized[table['_id_numeric']] = set(table_to_tokens(
                                                     table['content'],
-                                                    self.mode,
                                                     table['valid_columns'],
+                                                    self.mode,
                                                     encode=None,
                                                     blacklist=[],
                                                     string_transformers=self.token_translators))
@@ -63,12 +63,12 @@ if __name__ == '__main__':
     from dltftools.utils.misc import whitespace_translator, punctuation_translator, lowercase_translator
 
     mode = 'set'
-    datalake = 'wikitables'
+    datalake = 'gittables'
     blacklist = []
-    mongo_datasets = ['datasets.wikitables']
+    mongo_datasets = ['datasets.gittables']
 
     num_cpu = 8
-    dlh = DataLakeHandlerFactory.create_handler('mongodb', 'wikitables', mongo_datasets)
+    dlh = DataLakeHandlerFactory.create_handler('mongodb', 'gittables', mongo_datasets)
     token_translators = [whitespace_translator, punctuation_translator, lowercase_translator]
         
     test_dir = f"{dp.data_path.base}/examples/{datalake}/bf"

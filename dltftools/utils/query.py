@@ -44,6 +44,7 @@ def sample_queries(output_query_json, nsamples, num_cpu, *data_lake_args):
                 break
     samples = {'_id_numeric': list(s)[:nsamples]}
     
+    print(f"Sampled {len(s)} tables ({round(len(s) * 100 / nsamples)}%).")
     with open(output_query_json, 'w') as wf:
         json.dump(samples, wf, indent=1)
     return len(samples['_id_numeric'])

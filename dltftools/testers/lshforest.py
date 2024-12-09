@@ -27,7 +27,7 @@ def worker_lshforest_data_preparation(data):
         _id_numeric, table, valid_columns = table_obj['_id_numeric'], table_obj['content'], table_obj['valid_columns']
 
         if is_valid_table(table, valid_columns):
-            token_set = table_to_tokens(table, mode, valid_columns, 'utf-8', blacklist, token_translators)
+            token_set = table_to_tokens(table, valid_columns, mode, 'utf-8', blacklist, token_translators)
             m = MinHash(num_perm, hashfunc=hash_func)
             m.update_batch(token_set)
             results.append([_id_numeric, m])
@@ -114,7 +114,7 @@ class LSHForestTester(AlgorithmTester):
                 table_q = self.dlh.get_table_by_numeric_id(query_id)
                 valid_columns_q, content_q = table_q['valid_columns'], table_q['content']
                 
-                token_set_q = table_to_tokens(content_q, self.mode, valid_columns_q, blacklist=self.blacklist, string_transformers=self.token_translators)
+                token_set_q = table_to_tokens(content_q, valid_columns_q, self.mode, blacklist=self.blacklist, string_transformers=self.token_translators)
 
                 minhash_q = MinHash(num_perm=self.num_perm, hashfunc=self.hash_func)
                 minhash_q.update_batch(token_set_q)

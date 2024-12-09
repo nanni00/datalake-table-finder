@@ -9,7 +9,7 @@ import numpy as np
 from tqdm import tqdm
 
 from dltftools.mate.base import *
-from dltftools.mate.dbhandler import *
+from dltftools.mate.db import *
 
 from dltftools.utils.misc import clean_string
 
@@ -192,7 +192,7 @@ class MATETableExtraction:
         int
             Minimum number of unique values for query.
         """
-        min_unique_value_number = 9999999999999
+        min_unique_value_number = 10e9
         best_query = ''
         for q in self.query_columns:
             if len(set(self.input_data[q])) < min_unique_value_number:

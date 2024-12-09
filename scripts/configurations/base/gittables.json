@@ -11,7 +11,7 @@
         "blacklist": ["story", "comment", "{\"$numberDouble\": \"NaN\"}"],
         "k": 20,
         "num_query_samples": 100,
-        "num_cpu": 72,
+        "num_cpu": 9,
         "token_translators": [
             "whitespace", "punctuation", "lowercase"
         ],
@@ -38,10 +38,10 @@
             "spark.master":                 "local[64]",
             "spark.executor.memory":        "100g",
             "spark.driver.memory":          "20g",
-            "spark.local.dir":              "$HOME/.tmp_spark",
+            "spark.local.dir":              "/home/nanni/.spark_tmp",
             "spark.driver.maxResultSize":   "12g",
             "spark.jars.packages":          "org.mongodb.spark:mongo-spark-connector_2.12:10.3.0",
-            "spark.driver.extraClassPath":  "$HOME/.ivy2/jars/postgresql-42.7.3.jar"
+            "spark.driver.extraClassPath":  "/home/nanni/.ivy2/jars/postgresql-42.7.4.jar"
         },
         "token_table_on_mem": false,
         "num_perm": 256,

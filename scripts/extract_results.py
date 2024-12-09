@@ -65,12 +65,12 @@ def worker_result_extractor(data):
         
         # the intersection size is used for computing Jaccard Similarity or other metrics like containment, 
         # so compute using the set semantic, since it considers the intersection of the table "basic" values
-        set_q = set(table_to_tokens(table_q, 'set', numeric_columns_q, blacklist=blacklist))
-        set_r = set(table_to_tokens(table_r, 'set', numeric_columns_r, blacklist=blacklist))
+        set_q = set(table_to_tokens(table_q, numeric_columns_q, 'set', blacklist=blacklist))
+        set_r = set(table_to_tokens(table_r, numeric_columns_r, 'set', blacklist=blacklist))
         set_intersection_size = len(set_q.intersection(set_r))
         
-        bag_q = set(table_to_tokens(table_q, 'bag', numeric_columns_q, blacklist=blacklist))
-        bag_r = set(table_to_tokens(table_r, 'bag', numeric_columns_r, blacklist=blacklist))
+        bag_q = set(table_to_tokens(table_q, numeric_columns_q, 'bag', blacklist=blacklist))
+        bag_r = set(table_to_tokens(table_r, numeric_columns_r, 'bag', blacklist=blacklist))
         bag_intersection_size = len(bag_q.intersection(bag_r))
 
         set_size_q, set_size_r = len(set_q), len(set_r)

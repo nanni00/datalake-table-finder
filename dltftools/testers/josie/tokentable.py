@@ -82,7 +82,6 @@ class TokenTableMem(TokenTable):
         counts = []
         gids = []
 
-
         for raw_token in raw_token_set.raw_tokens:
             h = hashlib.sha256(raw_token) # hashlib.new('fnv1a_64')
             hash_value = h.digest()
@@ -113,7 +112,7 @@ class TokenTableDisk(TokenTable):
         counts = []
         gids = []
 
-        for row in self.db.posting_lists__diskproc(self.ignore_self):
+        for row in self.db.posting_lists__diskproc(raw_token_set, self.ignore_self):
             token, count, gid = row
             tokens.append(token)
             counts.append(count)

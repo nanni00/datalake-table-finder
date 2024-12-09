@@ -112,7 +112,7 @@ def gittables2mongo(path_tables, table_collection, milestone, n):
                 continue
             
             table_obj = dict()
-            table_obj["_id"] = f"{subdir.replace('_csv', '').replace('_licensed', '')}.{table_id}"
+            table_obj["_id"] = f"{subdir}.{table_id}".replace('_csv', '').replace('_licensed', '').replace('.parquet', '')
             table_obj["_id_numeric"] = counter
             table_obj["content"] = table_df.rows()
             table_obj["headers"] = list(table_df.columns)
@@ -134,7 +134,6 @@ def gittables2mongo(path_tables, table_collection, milestone, n):
     if batch_tables:
         errors += insert_tables(batch_tables, table_collection)
     print(f"Total tables that have not been loaded due to errors: {errors}")
-    print("Detecting valid columns of the loaded tables...")
 
 
 def wiki2mongo(path_tables, table_collection, milestone, n):
@@ -247,8 +246,9 @@ def main_gittables():
     table_collection = db.gittables  # define the collection in the database to store the tables
     milestone = 10000  # table interval to use for tracking the progress
     n = 100
-    gittables2mongo(path_tables, table_collection, milestone, n)
-    mongodb_detect_valid_columns('set', 8, 'mongodb', 'gittables', [table_collection.full_name])
+    # gittables2mongo(path_tables, table_collection, milestone, n)
+    print("Detecting valid columns of the loaded tables...")
+    mongodb_detect_valid_columns('set', 1, 'mongodb', 'gittables', [table_collection.full_name])
     
 
 def main_santos():

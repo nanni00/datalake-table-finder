@@ -9,7 +9,6 @@ from dltftools.utils.datalake import DataLakeHandlerFactory
 from dltftools.utils.loghandler import info, logging_setup
 
 from dltftools.utils.settings import (
-    DefaultPath as defpath, 
     get_all_paths, 
     ALGORITHM_MODE_CONFIG, 
     DATALAKES

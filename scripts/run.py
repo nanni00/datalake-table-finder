@@ -56,14 +56,14 @@ if __name__ == '__main__':
 
             str_num_query_samples = numerize(num_query_samples, asint=True)
 
-            paths = get_all_paths(g_config['test_name'], g_config['datalake_name'], g_config['k'], str_num_query_samples)
+            paths = get_all_paths(g_config['test_name'], datalake_name, g_config['k'], str_num_query_samples)
             query_file = paths['query_file']
 
             if not os.path.exists(query_file):
                 num_samples = sample_queries(query_file, num_query_samples, g_config['num_cpu'], *dlhargs)
             else:
                 print(f'Query file for {num_query_samples} already exists: {query_file}')
-            
+
 
     if 'query' in configuration:
         q_config = configuration['query']

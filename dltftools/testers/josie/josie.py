@@ -12,12 +12,12 @@ import numpy as np
 import pyspark.storagelevel
 
 from dltftools.utils.loghandler import info
+from dltftools.utils.misc import convert_to_giga
 from dltftools.utils.spark import get_spark_session
 from dltftools.utils.datalake import DataLakeHandler
-from dltftools.utils.misc import convert_to_giga
 from dltftools.utils.tables import is_valid_table, table_to_tokens
-from dltftools.testers.base_tester import AlgorithmTester
 
+from dltftools.testers.base_tester import AlgorithmTester
 from dltftools.testers.josie.db import JOSIEDBHandler
 from dltftools.testers.josie.exp import write_all_results
 from dltftools.testers.josie.josie_alg import JOSIE
@@ -40,7 +40,6 @@ class JOSIETester(AlgorithmTester):
                  josie_db_connection_info:dict,
                  spark_config:dict) -> None:
         super().__init__(mode, blacklist, datalake_handler, token_translators)
-        
         self.db_stat_file = dbstatfile
         self.josie_db_connection_info = josie_db_connection_info
         self.spark_config = spark_config
@@ -57,11 +56,6 @@ class JOSIETester(AlgorithmTester):
         
         logging.getLogger('TestLog').info('Preparing inverted index and integer set tables...')
         spark, initial_rdd = get_spark_session(dlh, **self.spark_config)
-
-        def prepare_tuple(t):
-            nonlocal mode, blacklist
-            # t = (_id_numeric, content, numeric_columns)
-            return [t[0], table_to_tokens(t[1], mode, t[2], blacklist=blacklist, string_transformers=token_translators)]
         
         token_sets = (
             initial_rdd
@@ -70,8 +64,9 @@ class JOSIETester(AlgorithmTester):
                 lambda t: is_valid_table(t[1], t[2])
             )
             .map(
+                # PySpark cannot access self.arg, like self.mode
                 # (_id_numeric, content, numeric_columns) -> (_id_numeric, [token1, token2, token3, ...])
-                lambda t: prepare_tuple(t)
+                lambda t: [t[0], table_to_tokens(t[1], t[2], mode=mode, encode=None, blacklist=blacklist, string_transformers=token_translators)]
             ).flatMap(
                     # (set_id, [tok1, tok2, tok3, ...]) -> [(tok1, set_id), (tok2, set_id), ...]
                     lambda t: [(token, t[0]) for token in t[1]]
@@ -259,7 +254,7 @@ class JOSIETester(AlgorithmTester):
         info('Starting JOSIE tests...')
         results_directory = kwargs['results_directory']
         token_table_on_memory = kwargs['token_table_on_memory']
-        verbose = False if 'verbose' not in kwargs else kwargs['verbose']
+        verbose = True # False if 'verbose' not in kwargs else kwargs['verbose']
 
         start_query = time()
         # insert the queries into the Queries table
@@ -314,7 +309,7 @@ class JOSIETester(AlgorithmTester):
         start = time()
 
         for q in queries:
-            perfs.append(JOSIE(self.josiedb, tb, q, k, True)[1])
+            perfs.append(JOSIE(self.josiedb, tb, q, k, True, True)[1])
 
         if verbose: info(f"Finished experiment for {k=} in {round((time() - start) / 60, 3)} minutes")
         
@@ -377,7 +372,7 @@ if __name__ == '__main__':
         'drivername':   'postgresql',
         'database':     'DLTFWikiTables',
         'username':     'nanni',
-        'password':     '',
+        'password':     'nanni',
         'port':         5442,
         'host':         '127.0.0.1',
     }
@@ -397,7 +392,7 @@ if __name__ == '__main__':
     
     print(tester.data_preparation())
 
-    sample_queries(query_file, 100, 8, *datalake_config)
+    # sample_queries(query_file, 100, 8, *datalake_config)
     
-    token_table_on_memory = True
-    tester.query(results_file, 10, read_query_ids(query_file), results_directory=test_dir, token_table_on_memory=token_table_on_memory)
+    # token_table_on_memory = True
+    # tester.query(results_file, 10, read_query_ids(query_file), results_directory=test_dir, token_table_on_memory=token_table_on_memory)

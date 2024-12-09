@@ -55,15 +55,16 @@ def naive_detect_valid_columns(table: list[list], tokenize=lambda cell: cell) ->
     :return a list of int, where the i-th element is set to 1 if the i-th column is detected as valid 0 otherwise
     """
     return [] if len(table) == 0 or len(table[0]) == 0 \
-        else [int(_is_valid_column(column, tokenize)) for column in table_rows_to_columns(table, len(table[0]), 0, [1] * len(table[0]))]
+        else [int(_is_valid_column(column, tokenize)) for column in table_rows_to_columns(table, 0, len(table[0]), [1] * len(table[0]))]
 
 
-def table_to_tokens(table, mode, valid_columns, encode=None, blacklist:set=set(), string_transformers:list|None=None):
-    """ Create the token set for the given table 
+def table_to_tokens(table, valid_columns, mode, encode=None, blacklist:set=set(), string_transformers:list|None=None):
+    """ 
+    Create the tokens set for the given table
     :param table: a list of list (row-view) of the table content 
-    :param mode: how to create the token set, with "set" or "bag" semantic
     :param valid_columns: a flag vector, where if the ith element is 1, this means that the 
                             ith column is numeric and its elements are skipped while creating the token set
+    :param mode: how to create the token set, with "set" or "bag" semantic
     :param encode: if set, tokens will be encoded as specified (e.g. 'utf-8')
     :param blacklist: a set of tokens that won't be considered
     """
@@ -83,6 +84,21 @@ def table_to_tokens(table, mode, valid_columns, encode=None, blacklist:set=set()
         raise Exception('Unknown mode: ' + str(mode))
     return tokens if not encode else [token.encode(encode) for token in tokens]
 
+
+def columns_to_tokens(table, valid_columns, blacklist, string_transformers):
+    """
+    Create the tokens sets from the given table columns
+    :param table: a list of list of the table content
+    :param valid_columns:
+    :param blacklist:
+    :param string_transformers:
+    :return 
+    """
+    return [
+        [clean_string(token, *string_transformers) for token in column if not pd.isna(token) and token and token not in blacklist]
+        for is_valid, column in zip(valid_columns, table)
+        if is_valid
+    ]
 
 
 def is_valid_table(table, valid_columns):

@@ -49,9 +49,7 @@ class ExperimentResult:
             "ignore_size": self.ignore_size,
             "actions": self.actions,
             "results": self.results,
-            "benefit_cost": self.benefit_costs,
-            "lsh_duration": self.lsh_duration,
-            "lsh_precision": self.lsh_precision
+            "benefit_cost": self.benefit_costs 
         }
 
     # Method to write this object to a CSV file

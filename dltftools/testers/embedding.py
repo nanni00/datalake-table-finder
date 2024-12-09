@@ -36,8 +36,8 @@ def worker_embedding_data_preparation(data) -> tuple[np.ndarray, np.ndarray]:
 
     for qid in tqdm(id_tables_range, total=id_tables_range.stop - id_tables_range.start, leave=False, disable=False if os.getpid() % num_cpu == 0 else True):
         table_obj = dlh.get_table_by_numeric_id(qid)
-        _id_numeric, table, bad_columns = table_obj['_id_numeric'], table_obj['content'], table_obj['numeric_columns']
-        if not is_valid_table(table, bad_columns):
+        _id_numeric, table, valid_columns = table_obj['_id_numeric'], table_obj['content'], table_obj['valid_columns']
+        if not is_valid_table(table, valid_columns):
             continue
 
         if xb_batch.shape[0] > batch_size:
@@ -45,7 +45,7 @@ def worker_embedding_data_preparation(data) -> tuple[np.ndarray, np.ndarray]:
             xb_ids = np.concatenate((xb_ids, xb_ids_batch))
             xb_batch, xb_ids_batch = np.empty(shape=(0, d)), np.empty(shape=(0, 1))
         
-        colemb = model.embed_columns(table, bad_columns, blacklist, *token_translators)
+        colemb = model.embed_columns(table, valid_columns, blacklist, *token_translators)
         if colemb.shape[0] == 0:
             continue
 
@@ -111,10 +111,9 @@ class EmbeddingTester(AlgorithmTester):
 
             N = sum(xb.shape[0] for xb, _ in results)
             K = 8 * int(math.sqrt(N))
-            M = 32
-            training_size = min(M * K, N)
             HNSW_links_per_vertex = 32
-            info(f'FAISS index parameters: N={N}, K={K}, M={M}, HNSW={HNSW_links_per_vertex}, training_size=M*K={training_size}')
+            training_size = min(HNSW_links_per_vertex * K, N)
+            info(f'FAISS index parameters: N={N}, K={K}, M={HNSW_links_per_vertex}, training_size=M*K={training_size}')
             
             info('Preparing index training set...')
             for result in tqdm(results, leave=False):
@@ -124,7 +123,7 @@ class EmbeddingTester(AlgorithmTester):
                 if xb.shape[0] >= training_size:
                     break
 
-        index = faiss.index_factory(d, f"IVF{K}_HNSW{HNSW_links_per_vertex},Flat")
+        index = faiss.index_factory(d, f"OPQ32,IVF{K}_HNSW{HNSW_links_per_vertex},PQ32")
         info('Training column index...')
         start_training = time()
         index.train(xb)
@@ -173,7 +172,7 @@ class EmbeddingTester(AlgorithmTester):
 
             doc = self.dlh.get_table_by_numeric_id(int(qid))
             
-            colemb = model.embed_columns(doc['content'], doc['numeric_columns'], self.blacklist, *self.token_translators)
+            colemb = model.embed_columns(doc['content'], doc['valid_columns'], self.blacklist, *self.token_translators)
             ids = np.expand_dims(np.repeat([qid], colemb.shape[0]), axis=0)
             xq_ids = np.concatenate((xq_ids, ids.T))
             xq = np.concatenate((xq, colemb), axis=0)
@@ -204,30 +203,29 @@ if __name__ == '__main__':
     from dltftools.utils.settings import DefaultPath as dp
     from dltftools.utils.misc import whitespace_translator, punctuation_translator, lowercase_translator
 
-    mode = 'cft'
+    mode = 'ft'
     blacklist = []
     
-    datalake = 'wikiturlsnap'
-    dlhargs = ['mongodb', datalake, ['datasets.wikitables']]
+    datalake = 'gittables'
+    dlhargs = ['mongodb', datalake, ['datasets.gittables']]
     dlh = DataLakeHandlerFactory.create_handler(*dlhargs)
     token_translators = [whitespace_translator, punctuation_translator, lowercase_translator]
-    num_cpu = 64
-    num_perm = 256
-    l = 16
+    num_cpu = 1
+    ft_emb_size = 128
 
-    test_dir = f"{dp.data_path.tests}/new/{datalake}"
+    test_dir = f"{dp.data_path.tests}/examples/{datalake}"
     if not os.path.exists(test_dir):
         os.makedirs(test_dir)
     logfile = f"{test_dir}/.logfile"
     logging_setup(logfile)
 
-    model_path = f'{dp.model_path.base}/compressed_fasttext/ft_cc.en.300_freqprune_400K_100K_pq_300.bin'
+    model_path =   f'{dp.model_path.base}/fasttext/cc.en.{ft_emb_size}.bin'
     db_stat_file = f"{test_dir}/.dbstat"
     col_idx_file = f"{test_dir}/columnidx.index"
     results_file = f"{test_dir}/results.csv"
 
     tester = EmbeddingTester(mode, blacklist, dlh, token_translators, 
-                             num_cpu, model_path, col_idx_file, 300)
+                             num_cpu, model_path, col_idx_file, ft_emb_size)
     
     print(tester.data_preparation())
 

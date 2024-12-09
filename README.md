@@ -14,13 +14,13 @@ export DLTFPATH=/path/to/datalake-table-finder
 export PYTHONPATH=$PYTHONPATH:$DLTHPATH
 ```
 
-4. Load the datalake on MongoDB, or store it as a local file (e.g. SantosLarge). In both cases, a numeric index and a field which describes the valid columns of each table must be created. For these tasks, check the Python script at script/load_data.py.
+4. Load the datalake on MongoDB, or store it as a local file (e.g. SantosLarge). In both cases, a numeric index and a field which describes the valid columns of each table must be created. For these tasks, check the Python script at script/load_data.py. If you want to store the tables in another way, add a handler subclass in dltftools.utils.datalake.
 
-5. If you want to use JOSIE or MATE, you have to create a database that will store their index structures. The postgresql.conf file is the same used in the original JOSIE repository.
+5. If you want to use JOSIE or MATE, you have to create a database that will store their index structures. Download the required driver (e.g. postgresql_42.7.4.jar from Maven) and set the path into the JSON configuration files (see below).
 
 ## Testing
 
-Once you've completed the setup, to run tests create JSON configuration files, which provide all the details needed for the execution. Some examples of such files are at scripts/configurations/base
+Once you've completed the setup, to run tests create JSON configuration files, which provide all the details needed for the execution. Some examples of such files are at scripts/configurations/base. You'll need to configure some paths, such as Spark temporary folder, and connection parameters used by database and Spark.
 
 Then, pass the configuration file to the script scripts/run.py
 

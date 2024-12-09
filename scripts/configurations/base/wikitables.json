@@ -11,7 +11,7 @@
         "blacklist": [],
         "k": 20,
         "num_query_samples": 100,
-        "num_cpu": 72,
+        "num_cpu": 9,
         "token_translators": [
             "whitespace", "punctuation", "lowercase"
         ],
@@ -20,7 +20,7 @@
             "drivername":   "postgresql",
             "database":     "DLTFWikiTables",
             "username":     "nanni",
-            "password":     "",
+            "password":     "nanni",
             "port":         5442,
             "host":         "127.0.0.1"
         }
@@ -31,22 +31,22 @@
             "josie", "lshforest", "embedding"
         ],
         "modes": [
-            "set", "bag", "ft"
+            "set", "bag", "fasttext"
         ],
         "spark_config": {
             "spark.app.name":               "JOSIE Data Preparation",
-            "spark.master":                 "local[64]",
+            "spark.master":                 "local[9]",
             "spark.executor.memory":        "100g",
             "spark.driver.memory":          "20g",
-            "spark.local.dir":              "/path/to/.tmp_spark",
+            "spark.local.dir":              "/home/nanni/.spark_tmp",
             "spark.driver.maxResultSize":   "12g",
             "spark.jars.packages":          "org.mongodb.spark:mongo-spark-connector_2.12:10.3.0",
-            "spark.driver.extraClassPath":  "/path/to/.ivy2/jars/org.postgresql_postgresql-42.7.3.jar"
+            "spark.driver.extraClassPath":  "/home/nanni/.ivy2/jars/postgresql-42.7.4.jar"
         },
         "token_table_on_mem": false,
         "num_perm": 256,
         "l": 32,
-        "exec_now": false
+        "exec_now": true
     },
 
     "sample_queries": {
@@ -55,12 +55,12 @@
 
     "query": {
         "algorithms": [
-            "jose", "lshforest", "embedding"
+            "josie", "lshforest", "embedding"
         ],
         "modes": [
-            "set", "bag", "ft"
+            "set", "bag", "fasttext"
         ],
-        "exec_now": false
+        "exec_now": true
     },
 
     "extract": {

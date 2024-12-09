@@ -84,9 +84,9 @@ class JOSIEDBHandler:
         self.read_list_cost_slope = 1661.93366983753
         self.read_list_cost_intercept = 1007857.48225696
 
-    def execute_in_session(self, q):
+    def execute_in_session(self, q, **kwargs):
         with Session(self.engine) as session:
-            results = session.execute(q)
+            results = session.execute(q, kwargs)
             session.commit()
         return results
 
@@ -164,22 +164,25 @@ class JOSIEDBHandler:
             select(InvertedList.raw_token, InvertedList.token,
                    InvertedList.frequency, InvertedList.duplicate_group_id)).fetchall()
 
-    def posting_lists__diskproc(self, ignore_self: bool):
+    def posting_lists__diskproc(self, raw_token_set:RawTokenSet, ignore_self: bool):
+        """
+        Returns a list of posting lists to create the token table without loading all the data on memory
+        """
         if ignore_self:
             q = f"""
                 SELECT token, frequency - 1 AS count, duplicate_group_id
                 FROM {InvertedList.__tablename__}
-                WHERE token = ANY(%s) AND frequency > 1
+                WHERE token = ANY(:tokens) AND frequency > 1
                 ORDER BY token ASC;
             """
         else:
             q = f"""
                 SELECT token, frequency - 1 AS count, duplicate_group_id
                 FROM {InvertedList.__tablename__}
-                WHERE token = ANY(%s)
+                WHERE token = ANY(:tokens)
                 ORDER BY token ASC;
             """
-        return self.execute_in_session(text(q)).fetchall()
+        return self.execute_in_session(text(q), tokens=raw_token_set.tokens).fetchall()
 
     def get_set_tokens(self, set_id):
         return self.execute_in_session(select(Set.tokens).filter(Set.id == set_id)).fetchone()[0]
@@ -308,8 +311,28 @@ class JOSIEDBHandler:
             select(func.count(Set.id))
         ).fetchone()[0])
 
+    def delete_cost_tables(self):
+        self.execute_in_session(delete(ReadListCostSamples))
+        self.execute_in_session(delete(ReadSetCostSamples))
+
+    def read_list_cost(self, length: int) -> float:
+        cost = self.read_list_cost_slope * float(length) + self.read_list_cost_intercept
+        if cost < self.min_read_cost:
+            cost = self.min_read_cost
+        return cost / 1000000.0
+
+    def read_set_cost(self, size: int) -> float:
+        cost = self.read_set_cost_slope * float(size) + self.read_set_cost_intercept
+        if cost < self.min_read_cost:
+            cost = self.min_read_cost
+        return cost / 1000000.0
+
+    def read_set_cost_reduction(self, size: int, truncation: int) -> float:
+        return self.read_set_cost(size) - self.read_set_cost(size - truncation)
+
     def reset_cost_function_parameters(self, verbose: bool) -> None:
         with Session(self.engine) as session:
+            # TODO 
             q = f"""SELECT regr_slope(cost, frequency), regr_intercept(cost, frequency)
                 FROM {ReadListCostSamples.__tablename__};"""
             slope, intercept = session.execute(text(q)).fetchone()
@@ -332,24 +355,22 @@ class JOSIEDBHandler:
             self.read_set_cost_slope = slope
             self.read_set_cost_intercept = intercept
 
-    def delete_cost_tables(self):
-        self.execute_in_session(delete(ReadListCostSamples))
-        self.execute_in_session(delete(ReadSetCostSamples))
-
     def sample_costs(self, 
                      min_length:int = 0, 
                      max_length:int = 20_000, 
                      step:int = 500, 
-                     sample_size_per_step:int = 10):
-        # the table should have been already created 
-        # when the JOSIE has built the main indexes
+                     sample_size_per_step:int = 100):
+        """
+        Sample costs. Pay attention to tune the parameters in order to avoid sampling with zero-variance 
+        or similar numeric problems, that will end with NULL values for the results of regression computation
+        """
         sample_set_ids = self.get_queries_agg_id()
 
         for set_id in sample_set_ids:
             start = time.time()
             s = self.get_set_tokens(set_id)
             duration = time.time() - start  # Duration in seconds
-            self.insert_read_set_cost(set_id, len(s), int(duration * 1e9))
+            self.insert_read_set_cost(set_id, len(s), int(duration * 1e6))
 
         for l in range(min_length, max_length, step):
             self.insert_read_list_cost(l, l+step, sample_size_per_step)
@@ -359,20 +380,5 @@ class JOSIEDBHandler:
             start = time.time()
             self.get_inverted_list(token)
             duration = time.time() - start
-            self.update_read_list_cost(token, int(duration * 1e9))
-
-    def read_list_cost(self, length: int) -> float:
-        cost = self.read_list_cost_slope * float(length) + self.read_list_cost_intercept
-        if cost < self.min_read_cost:
-            cost = self.min_read_cost
-        return cost / 1000000.0
-
-    def read_set_cost(self, size: int) -> float:
-        cost = self.read_set_cost_slope * float(size) + self.read_set_cost_intercept
-        if cost < self.min_read_cost:
-            cost = self.min_read_cost
-        return cost / 1000000.0
-
-    def read_set_cost_reduction(self, size: int, truncation: int) -> float:
-        return self.read_set_cost(size) - self.read_set_cost(size - truncation)
+            self.update_read_list_cost(token, int(duration * 1e6))
 
