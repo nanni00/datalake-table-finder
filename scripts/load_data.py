@@ -199,7 +199,8 @@ def santos2local(path_tables, mapping_id_path, valid_columns_path, n):
 
     mapping_id = bidict()
     numeric_columns = dict()
-
+    
+    print(f'Scanning tables from {path_tables} and creating IDs mapping and checking for valid columns...')
     for table_file in tqdm(os.listdir(path_tables), total=ntables):
         try:
             mapping_id[counter] = table_file.removesuffix('.csv')
@@ -225,6 +226,7 @@ def santos2local(path_tables, mapping_id_path, valid_columns_path, n):
 
     print('Completed.')
 
+
 def main_wiki():
     # CHECK THE HEADER FORMAT!!!!!
     path_tables = f'{os.environ["HOME"]}/datasets_datalakes/WikiTables/tables.json'
@@ -239,7 +241,7 @@ def main_wiki():
     
 
 def main_gittables():
-    path_tables = f'{os.environ["HOME"]}/datasets_datalakes/GitTables'
+    # path_tables = f'{os.environ["HOME"]}/datasets_datalakes/GitTables'
     
     client = MongoClient()  # connect to MongoDB
     db = client.datasets  # define the database to use
@@ -251,7 +253,7 @@ def main_gittables():
     mongodb_detect_valid_columns('set', 1, 'mongodb', 'gittables', [table_collection.full_name])
     
 
-def main_santos():
+def main_santos_large():
     path_tables =           f'{os.environ["HOME"]}/datasets_datalakes/SantosLarge/tables'
     mapping_id_path =       f'{os.environ["HOME"]}/datasets_datalakes/SantosLarge/mapping_id.pickle'
     valid_columns_path =    f'{os.environ["HOME"]}/datasets_datalakes/SantosLarge/valid_columns.pickle'
@@ -269,5 +271,6 @@ def main_santos_small():
 
 if __name__ == "__main__":
     # main_wiki()
-    main_gittables()
-    # main_santos_small()
+    # main_gittables()
+    main_santos_small()
+    # main_santos_large()

@@ -69,7 +69,20 @@ def main_pipeline(test_name:str, algorithm:str, mode:str, tasks:list[str],
 
     p = get_all_paths(test_name, datalake_name, k, str_num_query_samples)
     TEST_DATASET_DIR = p['TEST_DATASET_DIR']
-    statistics_dir, results_base_dir, results_extr_dir, forest_dir, embedding_dir = p['statistics_dir'], p['results_base_dir'], p['results_extr_dir'], p['forest_dir'], p['embedding_dir']
+    
+    (
+        statistics_dir, 
+        results_base_dir, 
+        results_extr_dir, 
+        forest_dir, 
+        embedding_dir
+    ) = (
+        p['statistics_dir'], 
+        p['results_base_dir'], 
+        p['results_extr_dir'], 
+        p['forest_dir'], 
+        p['embedding_dir']
+    )
 
     if not os.path.exists(TEST_DATASET_DIR):
         os.makedirs(TEST_DATASET_DIR)

@@ -11,6 +11,8 @@ dependencies:
   - tqdm
   - nltk
   - pip:
+    - psycopg2
+    - scikit-learn
     - bidict
     - matplotlib
     - sqlalchemy
@@ -20,4 +22,4 @@ dependencies:
     - datasketch
     - fasttext
     - compress-fasttext
-    - faiss
+    - faiss-cpu # that's the basic installation for the CPU-only version

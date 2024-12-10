@@ -110,7 +110,7 @@ class LocalFileDataLakeHandler(DataLakeHandler):
         raise NotImplementedError()
 
     def get_table_by_numeric_id(self, _id_numeric):
-        content = pl.read_csv(f'{self.datalake_location}/{self.mapping_id[_id_numeric]}.csv', has_header=False, infer_schema_length=0, encoding='latin1').rows()
+        content = pl.read_csv(f'{self.datalake_location}/tables/{self.mapping_id[_id_numeric]}.csv', has_header=False, infer_schema_length=0, encoding='latin1').rows()
         valid_columns = self.valid_columns[_id_numeric]
         headers = content[0]
         return {'_id_numeric': _id_numeric, 'content': content, 'headers': headers, 'valid_columns': valid_columns}

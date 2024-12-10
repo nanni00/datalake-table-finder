@@ -18,6 +18,8 @@ export PYTHONPATH=$PYTHONPATH:$DLTHPATH
 
 5. If you want to use JOSIE or MATE, you have to create a database that will store their index structures. Download the required driver (e.g. postgresql_42.7.4.jar from Maven) and set the path into the JSON configuration files (see below).
 
+6. If you want to use fastText to create the embeddings, download the model you'd like to use and pass its path in the run configuration file (see scripts/download_fasttext.py).
+
 ## Testing
 
 Once you've completed the setup, to run tests create JSON configuration files, which provide all the details needed for the execution. Some examples of such files are at scripts/configurations/base. You'll need to configure some paths, such as Spark temporary folder, and connection parameters used by database and Spark.
