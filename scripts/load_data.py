@@ -86,7 +86,7 @@ def mongodb_detect_valid_columns(task, num_cpu, *datalake_args):
     else:
         for collection in collections:
             print(f'Start unsetting field "numeric_columns" from {collection.database.name}.{collection.name}...')
-            collection.update_many({}, {"$unset": {"numeric_columns": 1}})
+            collection.update_many({}, {"$unset": {"valid_columns": 1}})
             print(f'{collection.database.name}.{collection.name} updated.')
             
 
@@ -232,12 +232,12 @@ def main_wiki():
     path_tables = f'{os.environ["HOME"]}/datasets_datalakes/WikiTables/tables.json'
     
     client = MongoClient()  # connect to MongoDB
-    db = client.datasets  # define the database to use
-    table_collection = db.wikitables  # define the collection in the database to store the tables
+    db = client.optitab  # define the database to use
+    table_collection = db.turl_training_set  # define the collection in the database to store the tables
     milestone = 10000  # table interval to use for tracking the progress
     n = 100
     wiki2mongo(path_tables, table_collection, milestone, n)
-    mongodb_detect_valid_columns('set', 8, 'mongodb', 'wikitables', [table_collection.full_name])
+    mongodb_detect_valid_columns('set', 16, 'mongodb', 'wikiturlsnap', [table_collection.full_name])
     
 
 def main_gittables():
@@ -270,7 +270,7 @@ def main_santos_small():
     
 
 if __name__ == "__main__":
-    # main_wiki()
+    main_wiki()
     # main_gittables()
-    main_santos_small()
+    # main_santos_small()
     # main_santos_large()

@@ -122,7 +122,8 @@ class EmbeddingTester(AlgorithmTester):
                 xb_ids = np.concatenate((xb_ids, xb_ids_batch))
                 if xb.shape[0] >= training_size:
                     break
-
+        
+        info(f"FAISS index: OPQ32,IVF{K}_HNSW{HNSW_links_per_vertex},PQ32")
         index = faiss.index_factory(d, f"OPQ32,IVF{K}_HNSW{HNSW_links_per_vertex},PQ32")
         info('Training column index...')
         start_training = time()

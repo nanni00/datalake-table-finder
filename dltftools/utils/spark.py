@@ -40,7 +40,7 @@ def get_spark_session(dlh:DataLakeHandler, **spark_config) -> tuple[SparkSession
 
                 init_rdd = (
                     init_rdd
-                    .map(lambda tabid_tabf: (tabid_tabf[0], pl.read_csv(f'{dlh.datalake_location}/{tabid_tabf[1]}.csv', infer_schema_length=0, encoding='latin1').rows()))
+                    .map(lambda tabid_tabf: (tabid_tabf[0], pl.read_csv(f'{dlh.datalake_location}/tables/{tabid_tabf[1]}.csv', infer_schema_length=0, has_header=False, encoding='latin1').rows()))
                     .map(lambda tid_tab: (tid_tab[0], tid_tab[1], dlh.valid_columns[tid_tab[0]]))
                 )
 

@@ -4,7 +4,7 @@ from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import Session
 from sqlalchemy.engine import URL, Engine
 from sqlalchemy import (
-    create_engine, MetaData, 
+    Table, create_engine, MetaData, 
     text, inspect, func,
     select, insert, delete,
     Column,
@@ -15,53 +15,15 @@ from dltftools.utils.loghandler import info, error
 from dltftools.testers.josie.josie_io import RawTokenSet, ListEntry
 
 
-Base = declarative_base()
+# Base = declarative_base()
 
-
-# Table Classes
-# TODO create indexes on InvertedList and Set
-class InvertedList(Base):
-    __tablename__ =         'inverted_lists'
-    token =                 Column(Integer, primary_key=True)
-    frequency =             Column(Integer)
-    duplicate_group_id =    Column(Integer)
-    duplicate_group_count = Column(Integer)
-    raw_token =             Column(LargeBinary)
-    set_ids =               Column(ARRAY(Integer))
-    set_sizes =             Column(ARRAY(Integer))
-    match_positions =       Column(ARRAY(Integer))
-
-
-class Set(Base):
-    __tablename__ =         'sets'
-    id =                    Column(Integer, primary_key=True)
-    size =                  Column(Integer)
-    num_non_singular_token = Column(Integer)
-    tokens =                Column(ARRAY(Integer))
-
-
-class Query(Base):
-    __tablename__ =         'queries'
-    id =                    Column(Integer, primary_key=True)
-    tokens =                Column(ARRAY(Integer))
-
-
-class ReadListCostSamples(Base):
-    __tablename__ =         'read_list_cost_samples'
-    token =                 Column(Integer, primary_key=True)
-    frequency =             Column(Integer)
-    cost =                  Column(Integer)
-
-
-class ReadSetCostSamples(Base):
-    __tablename__ =         'read_set_cost_samples'
-    id =                    Column(Integer, primary_key=True)
-    size =                  Column(Integer)
-    cost =                  Column(Integer)
+# TODO handle dynamic custom tablename in some good way
+InvertedList = Set = Query = ReadListCostSamples = ReadSetCostSamples = None
 
 
 class JOSIEDBHandler:
-    def __init__(self, url: URL | None = None, engine: Engine | None = None, **connection_info) -> None:
+    def __init__(self, mode:str, url: URL | None = None, engine: Engine | None = None, **connection_info) -> None:
+        self.mode = mode
         if url and engine:
             self.url = url
             self.engine = engine
@@ -69,14 +31,6 @@ class JOSIEDBHandler:
             self.url = URL.create(**connection_info)
             self.engine = create_engine(self.url)
 
-        # SqlAlchemy==1.4
-        # self.metadata = MetaData(self.engine)
-        # self.metadata.reflect()
-
-        # SqlAlchemy==2.0
-        self.metadata = MetaData()
-        self.metadata.reflect(bind=self.engine)
-        
         # initial cost values 
         self.min_read_cost = 1000000.0
         self.read_set_cost_slope = 1253.19054300781
@@ -84,22 +38,101 @@ class JOSIEDBHandler:
         self.read_list_cost_slope = 1661.93366983753
         self.read_list_cost_intercept = 1007857.48225696
 
-    def execute_in_session(self, q, **kwargs):
-        with Session(self.engine) as session:
-            results = session.execute(q, kwargs)
-            session.commit()
-        return results
+        self.session = Session(bind=self.engine)
 
-    def drop_tables(self):
+    def execute_read(self, q, fetch, **kwargs):
+        results = self.session.execute(q, kwargs)
+        match fetch:
+            case 'one': return results.fetchone()
+            case 'all': return results.fetchall()
+    
+    def execute_write(self, q, fetch, **kwargs):
+        results = self.session.execute(q, kwargs)
+        match fetch:
+            case 'all': results = results.fetchall()
+            case 'one': results = results.fetchone()
+            case 'nofetch': pass
+        self.session.commit()
+        self.session.close()
+        self.session = Session(bind=self.engine)
+        return results
+        
+    def create_tables(self):
+        global InvertedList, Set, Query, ReadListCostSamples, ReadSetCostSamples
+        metadata = MetaData()
+
+        # InvertedList Table
+        inverted_list_table = Table(
+            f'{self.mode}__inverted_lists', metadata,
+            Column('token', Integer, primary_key=True, index=True),
+            Column('frequency', Integer),
+            Column('duplicate_group_id', Integer),
+            Column('duplicate_group_count', Integer),
+            Column('raw_token', LargeBinary),
+            Column('set_ids', ARRAY(Integer)),
+            Column('set_sizes', ARRAY(Integer)),
+            Column('match_positions', ARRAY(Integer))
+        )
+
+        # Set Table
+        set_table = Table(
+            f'{self.mode}__sets', metadata,
+            Column('id', Integer, primary_key=True, index=True),
+            Column('size', Integer),
+            Column('num_non_singular_token', Integer),
+            Column('tokens', ARRAY(Integer))
+        )
+
+        # Query Table
+        query_table = Table(
+            f'{self.mode}__queries', metadata,
+            Column('id', Integer, primary_key=True),
+            Column('tokens', ARRAY(Integer))
+        )
+
+        # ReadListCostSamples Table
+        read_list_cost_samples_table = Table(
+            f'{self.mode}__read_list_cost_samples', metadata,
+            Column('token', Integer, primary_key=True, index=True),
+            Column('frequency', Integer),
+            Column('cost', Integer)
+        )
+
+        # ReadSetCostSamples Table
+        read_set_cost_samples_table = Table(
+            f'{self.mode}__read_set_cost_samples', metadata,
+            Column('id', Integer, primary_key=True, index=True),
+            Column('size', Integer),
+            Column('cost', Integer)
+        )
+
+        Set = set_table
+        Query = query_table
+        InvertedList = inverted_list_table
+        ReadListCostSamples = read_list_cost_samples_table
+        ReadSetCostSamples = read_set_cost_samples_table
+
+        # Base.metadata.create_all(self.engine)
+        metadata.reflect(self.engine)
+        metadata.create_all(self.engine, checkfirst=True)
+
         for table_class in [InvertedList, Set, Query, ReadListCostSamples, ReadSetCostSamples]:
             try:
-                table_class.__table__.drop(self.engine, checkfirst=True)
+                self.execute_write(delete(table_class), 'nofetch')
             except Exception as e:
-                error(f"Failed to drop table {table_class.__tablename__}: {e}")
+                error(f"Failed to drop table {table_class}: {e}")
                 continue
 
-    def create_tables(self):
-        Base.metadata.create_all(self.engine)
+    def load_tables(self):
+        global InvertedList, Set, Query, ReadListCostSamples, ReadSetCostSamples
+        metadata = MetaData()
+        metadata.reflect(bind=self.engine)
+
+        Set = metadata.tables[f'{self.mode}__sets']
+        Query = metadata.tables[f'{self.mode}__queries']
+        InvertedList = metadata.tables[f'{self.mode}__inverted_lists']
+        ReadListCostSamples = metadata.tables[f'{self.mode}__read_list_cost_samples']
+        ReadSetCostSamples = metadata.tables[f'{self.mode}__read_set_cost_samples']
 
     def clear_query_table(self):
         with Session(self.engine) as session:
@@ -107,28 +140,22 @@ class JOSIEDBHandler:
             session.commit()
 
     def add_queries_from_existent_tables(self, table_ids: list[int] = None):
-        with Session(self.engine) as session:
-            set_table = Set
-            query_table = Query
-            session.execute(
-                insert(query_table)
-                .from_select(
-                    ['id', 'tokens'],
-                    select(set_table.id, set_table.tokens).where(set_table.id.in_(table_ids))
-                )
-            )
-            session.commit()
+        self.execute_write(        
+            insert(Query)
+            .from_select(
+                ['id', 'tokens'],
+                select(Set.c.id, Set.c.tokens)
+                .where(Set.c.id.in_(table_ids))
+            ),
+            'nofetch'
+        )
 
     def add_queries(self, table_ids: int = None, tokens_ids: list[int] = None):
         values = [{'id': table_id, 'tokens': tokens} for table_id, tokens in zip(table_ids, tokens_ids)]
-        with Session(self.engine) as session:
-            session.execute(insert(Query).values(values))
-            session.commit()
-
-    def exist_cost_tables(self):
-        return inspect(self.engine).has_table(self._READ_LIST_COST_SAMPLES_TABLE_NAME) or inspect(self.engine).has_table(self._READ_SET_COST_SAMPLES_TABLE_NAME)
-
+        self.execute_write(insert(Query).values(values), 'nofetch')
+        
     def get_statistics(self):
+        """Get statistics from the database about the tables and indexes storage size (PostgreSQL oriented now)"""
         q = f"""
             SELECT 
                 i.relname AS "table_name",
@@ -139,30 +166,32 @@ class JOSIEDBHandler:
                 reltuples::bigint AS "estimated_table_row_count"
             FROM pg_stat_all_indexes i 
             JOIN pg_class c ON i.relid = c.oid
+            WHERE i.relname LIKE '{self.mode}\_\_%'
         """
-        with Session(self.engine) as session:
-            return list(session.execute(text(q)))
+        return list(self.execute_read(text(q), 'all'))
+        # with Session(self.engine) as session:
+        #     return list(session.execute(text(q)))
 
     def are_costs_sampled(self):
         q = f""" 
             SELECT 
-                (SELECT COUNT(*) FROM {ReadListCostSamples.__tablename__}),
-                (SELECT COUNT(*) FROM {ReadSetCostSamples.__tablename__});"""
-        return all(x != 0 for x in self.execute_in_session(text(q)).first())
+                (SELECT COUNT(*) FROM {ReadListCostSamples.name}),
+                (SELECT COUNT(*) FROM {ReadSetCostSamples.name});"""
+        return all(x != 0 for x in self.execute_read(text(q), 'one'))
 
     def close(self):
         self.engine.dispose()
 
     def count_posting_lists(self) -> int:
-        return self.execute_in_session(select(func.count()).select_from(InvertedList)).fetchone()[0]
+        return self.execute_read(select(func.count()).select_from(InvertedList), 'one')[0]
 
     def max_duplicate_group_id(self):
-        return self.execute_in_session(select(func.max(InvertedList.duplicate_group_id))).fetchone()[0]
+        return self.execute_read(select(func.max(InvertedList.c.duplicate_group_id)), 'one')[0]
     
     def posting_lists__memproc(self):
-        return self.execute_in_session(
-            select(InvertedList.raw_token, InvertedList.token,
-                   InvertedList.frequency, InvertedList.duplicate_group_id)).fetchall()
+        return self.execute_read(
+            select(InvertedList.c.raw_token, InvertedList.c.token,
+                   InvertedList.c.frequency, InvertedList.c.duplicate_group_id), 'all')
 
     def posting_lists__diskproc(self, raw_token_set:RawTokenSet, ignore_self: bool):
         """
@@ -171,31 +200,31 @@ class JOSIEDBHandler:
         if ignore_self:
             q = f"""
                 SELECT token, frequency - 1 AS count, duplicate_group_id
-                FROM {InvertedList.__tablename__}
+                FROM {InvertedList.name}
                 WHERE token = ANY(:tokens) AND frequency > 1
                 ORDER BY token ASC;
             """
         else:
             q = f"""
                 SELECT token, frequency - 1 AS count, duplicate_group_id
-                FROM {InvertedList.__tablename__}
+                FROM {InvertedList.name}
                 WHERE token = ANY(:tokens)
                 ORDER BY token ASC;
             """
-        return self.execute_in_session(text(q), tokens=raw_token_set.tokens).fetchall()
+        return self.execute_read(text(q), 'all', tokens=raw_token_set.tokens)
 
     def get_set_tokens(self, set_id):
-        return self.execute_in_session(select(Set.tokens).filter(Set.id == set_id)).fetchone()[0]
+        return self.execute_read(select(Set.c.tokens).filter(Set.c.id == set_id), 'one')[0]
     
     # TODO check is this works correctly
     def get_set_tokens_by_prefix(self, set_id, end_pos):
         with Session(self.engine) as session:
             try:
-                return session.execute(select(Set.tokens[1:end_pos]).filter(Set.id == set_id)).fetchone()[0]
+                return session.execute(select(Set.c.tokens[1:end_pos]).filter(Set.c.id == set_id)).fetchone()[0]
             except:
                 return (
                     row
-                    for i, row in enumerate(session.execute(select(Set.tokens).filter(Set.id == set_id)).all())
+                    for i, row in enumerate(session.execute(select(Set.c.tokens).filter(Set.c.id == set_id)).all())
                     if i <= end_pos
                 )
     
@@ -205,13 +234,13 @@ class JOSIEDBHandler:
             try:
                 # print('#1 ::: ', session.execute(select(Set.tokens[start_pos:1e9]).filter(Set.id == set_id)).fetchone()[0])
                 # print(select(Set.tokens[start_pos:1e9]).filter(Set.id == set_id).compile(bind=self.engine))
-                return session.execute(select(Set.tokens[start_pos:1e9]).filter(Set.id == set_id)).fetchone()[0]
+                return session.execute(select(Set.c.tokens[start_pos:1e9]).filter(Set.c.id == set_id)).fetchone()[0]
             except:
                 # print('#2 ::: ', session.execute(select(Set.tokens).where(Set.id == set_id)).fetchone()[0])
                 # print(select(Set.tokens[start_pos:]).filter(Set.id == set_id).compile(bind=self.engine))
                 return [
                         row
-                        for i, row in enumerate(session.execute(select(Set.tokens).where(Set.id == set_id)).fetchone()[0])
+                        for i, row in enumerate(session.execute(select(Set.c.tokens).where(Set.c.id == set_id)).fetchone()[0])
                         if i >= start_pos
                 ]
         
@@ -219,18 +248,19 @@ class JOSIEDBHandler:
     def get_set_tokens_subset(self, set_id, start_pos, end_pos):
         with Session(self.engine) as session:
             try:
-                return session.execute(select(Set.tokens[start_pos:end_pos]).filter(Set.id == set_id)).fetchone()[0]
+                return session.execute(select(Set.c.tokens[start_pos:end_pos]).filter(Set.c.id == set_id)).fetchone()[0]
             except:
                 return (
                         row
-                        for i, row in enumerate(session.execute(select(Set.tokens).filter(Set.id == set_id)).all())
+                        for i, row in enumerate(session.execute(select(Set.c.tokens).filter(Set.c.id == set_id)).all())
                         if start_pos <= i <= end_pos
                     )
     
     def get_inverted_list(self, token:int) -> list[ListEntry]:
-        set_ids, sizes, match_positions = self.execute_in_session(
-            select(InvertedList.set_ids, InvertedList.set_sizes, InvertedList.match_positions)
-            .filter(InvertedList.token == token)).fetchone()
+        results = self.execute_read(
+            select(InvertedList.c.set_ids, InvertedList.c.set_sizes, InvertedList.c.match_positions)
+            .filter(InvertedList.c.token == token), 'one')
+        set_ids, sizes, match_positions = results
     
         entries = []
         for i in range(len(set_ids)):
@@ -244,16 +274,16 @@ class JOSIEDBHandler:
 
     def get_query_sets(self):
         # TODO translate this into sqlalchemy code
-        q = """
+        q = f"""
         SELECT id, (
 			SELECT array_agg(raw_token)
-			FROM inverted_lists
+			FROM {self.mode}__inverted_lists
 			WHERE token = any(tokens)
-		), tokens FROM queries
+		), tokens FROM {self.mode}__queries
         ORDER BY id
         """
 
-        rows = self.execute_in_session(text(q))
+        rows = self.execute_read(text(q), 'all')
 
         queries = []
 
@@ -265,20 +295,19 @@ class JOSIEDBHandler:
         return queries
     
     def get_queries_agg_id(self):
-        return self.execute_in_session(
-            select(func.array_agg(Query.id))
-        ).fetchone()[0]
+        return self.execute_read(select(func.array_agg(Query.c.id)), 'one')[0]
 
     def insert_read_set_cost(self, set_id, size, cost):
-        self.execute_in_session(
+        self.execute_write(
             insert(ReadSetCostSamples)
-            .values(id=set_id, size=size, cost=cost)
+            .values(id=set_id, size=size, cost=cost),
+            'nofetch'
         )
 
     def insert_read_list_cost(self, min_freq, max_freq, sample_size_per_step):
         subq = (
-            select(InvertedList.token, InvertedList.frequency)
-            .where(min_freq <= InvertedList.frequency, InvertedList.frequency <= max_freq)
+            select(InvertedList.c.token, InvertedList.c.frequency)
+            .where(min_freq <= InvertedList.c.frequency, InvertedList.c.frequency < max_freq)
             .order_by(func.random())
             .limit(sample_size_per_step)
         )
@@ -286,34 +315,31 @@ class JOSIEDBHandler:
             insert(ReadListCostSamples)
             .from_select(['token', 'frequency'], subq)
         )
-        self.execute_in_session(q)
+        self.execute_write(q, 'nofetch')
 
     def count_token_from_read_list_cost(self, min_freq, max_freq):
-        return self.execute_in_session(
-            select(func.count(ReadListCostSamples.token))
-            .where(min_freq <= ReadListCostSamples.frequency, ReadListCostSamples.frequency <= max_freq)
-        ).fetchone()[0]
+        return self.execute_read(
+            select(func.count(ReadListCostSamples.c.token))
+            .where(min_freq <= ReadListCostSamples.c.frequency, ReadListCostSamples.c.frequency <= max_freq),
+            'one')[0]
     
     def get_array_agg_token_read_list_cost(self):
-        return self.execute_in_session(
-            select(func.array_agg(ReadListCostSamples.token))
-        ).fetchone()[0]
+        return self.execute_read(select(func.array_agg(ReadListCostSamples.c.token)), 'one')[0]
     
     def update_read_list_cost(self, token, cost):
-        self.execute_in_session(
+        self.execute_write(
             update(ReadListCostSamples)
             .values(cost=cost)
-            .where(ReadListCostSamples.token == token)
+            .where(ReadListCostSamples.c.token == token),
+            'nofetch'
         )
 
     def count_number_of_sets(self) -> int:
-        return int(self.execute_in_session(
-            select(func.count(Set.id))
-        ).fetchone()[0])
+        return int(self.execute_read(select(func.count(Set.c.id)), 'one')[0])
 
     def delete_cost_tables(self):
-        self.execute_in_session(delete(ReadListCostSamples))
-        self.execute_in_session(delete(ReadSetCostSamples))
+        self.execute_write(delete(ReadListCostSamples), 'nofetch')
+        self.execute_write(delete(ReadSetCostSamples), 'nofetch')
 
     def read_list_cost(self, length: int) -> float:
         cost = self.read_list_cost_slope * float(length) + self.read_list_cost_intercept
@@ -334,7 +360,7 @@ class JOSIEDBHandler:
         with Session(self.engine) as session:
             # TODO 
             q = f"""SELECT regr_slope(cost, frequency), regr_intercept(cost, frequency)
-                FROM {ReadListCostSamples.__tablename__};"""
+                FROM {ReadListCostSamples.name};"""
             slope, intercept = session.execute(text(q)).fetchone()
 
             if verbose:
@@ -345,7 +371,7 @@ class JOSIEDBHandler:
             self.read_list_cost_intercept = intercept
 
             q = f"""SELECT regr_slope(cost, size), regr_intercept(cost, size)
-                    FROM {ReadSetCostSamples.__tablename__};"""
+                    FROM {ReadSetCostSamples.name};"""
             slope, intercept = session.execute(text(q)).fetchone()
 
             if verbose:
@@ -365,7 +391,7 @@ class JOSIEDBHandler:
         or similar numeric problems, that will end with NULL values for the results of regression computation
         """
         sample_set_ids = self.get_queries_agg_id()
-
+        
         for set_id in sample_set_ids:
             start = time.time()
             s = self.get_set_tokens(set_id)
@@ -378,7 +404,7 @@ class JOSIEDBHandler:
         sample_list_tokens = self.get_array_agg_token_read_list_cost()
         for token in sample_list_tokens:
             start = time.time()
-            self.get_inverted_list(token)
+            _ = self.get_inverted_list(token)
             duration = time.time() - start
             self.update_read_list_cost(token, int(duration * 1e6))
 

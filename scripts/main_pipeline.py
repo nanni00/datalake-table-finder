@@ -1,3 +1,9 @@
+"""
+The main pipeline. For each tester, here you can do the data preparation and query steps
+Headers are considered as part of table, to modify that see how each tester loads tables
+from the datalake
+"""
+
 import os
 
 import pandas as pd
@@ -54,8 +60,7 @@ def main_pipeline(test_name:str, algorithm:str, mode:str, tasks:list[str],
     assert int(num_perm) > 0
     assert int(l) > 0
     assert int(embedding_model_size) > 0
-    assert not embedding_model_path or os.path.exists(embedding_model_path)
-
+    assert (not embedding_model_path and algorithm != 'embedding') or os.path.exists(embedding_model_path)
     
     test_name = test_name.lower()
     num_query_samples = int(num_query_samples)

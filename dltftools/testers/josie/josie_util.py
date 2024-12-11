@@ -1,5 +1,6 @@
 from typing import Any, List
 from dltftools.testers.josie.common import next_distinct_list
+from dltftools.testers.josie.db import JOSIEDBHandler
 
 
 class CandidateEntry:
@@ -30,7 +31,7 @@ class CandidateEntry:
         self.estimated_overlap = min(self.estimated_overlap, self.upperbound_overlap(query_size, query_current_position))
         return self.estimated_overlap
 
-    def est_cost(self, db):
+    def est_cost(self, db:JOSIEDBHandler):
         self.estimated_cost = db.read_set_cost(self.suffix_length())
         return self.estimated_cost
 
@@ -51,10 +52,6 @@ class CandidateEntry:
 
     def check_min_sample_size(self, query_current_position, batch_size):
         return (query_current_position - self.query_first_match_position + 1) > batch_size
-
-
-def min(a, b):
-    return a if a < b else b
 
 
 class ByEstimatedOverlap:
@@ -105,14 +102,14 @@ def prefix_length(query_size, kth_overlap):
     return query_size - kth_overlap + 1
 
 
-def read_lists_benefit_for_candidate(db, ce, kth_overlap):
+def read_lists_benefit_for_candidate(db:JOSIEDBHandler, ce:CandidateEntry, kth_overlap):
     if kth_overlap >= ce.estimated_next_upperbound:
         return ce.estimated_cost
     return ce.estimated_cost - db.read_set_cost(ce.suffix_length() - ce.estimated_next_truncation)
 
 
-def process_candidates_init(db, query_size, query_current_position, next_batch_end_index,
-                            kth_overlap, min_sample_size, candidates:dict[int:CandidateEntry], ignores) -> tuple[float|Any, int, List[CandidateEntry]] :
+def process_candidates_init(db:JOSIEDBHandler, query_size, query_current_position, next_batch_end_index,
+                            kth_overlap, min_sample_size, candidates:dict[int,CandidateEntry], ignores) -> tuple[float|Any, int, List[CandidateEntry]] :
     read_lists_benefit = 0.0
     qualified = []
     num_with_benefit = 0

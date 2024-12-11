@@ -10,8 +10,9 @@ import polars as pl
 import numpy as np
 
 import pyspark.storagelevel
+from tqdm import tqdm
 
-from dltftools.utils.loghandler import info
+from dltftools.utils.loghandler import error, info
 from dltftools.utils.misc import convert_to_giga
 from dltftools.utils.spark import get_spark_session
 from dltftools.utils.datalake import DataLakeHandler
@@ -44,28 +45,27 @@ class JOSIETester(AlgorithmTester):
         self.josie_db_connection_info = josie_db_connection_info
         self.spark_config = spark_config
         
-        self.josiedb = JOSIEDBHandler(**self.josie_db_connection_info)
+        self.josiedb = JOSIEDBHandler(mode=self.mode, **self.josie_db_connection_info)
         
     def data_preparation(self):
         info('Creating integer sets and inverted index tables...')
         start = time()
-        self.josiedb.drop_tables()
         self.josiedb.create_tables()
         
         mode, blacklist, dlh, token_translators = self.mode, self.blacklist, self.dlh, self.token_translators
         
-        logging.getLogger('TestLog').info('Preparing inverted index and integer set tables...')
+        info('Preparing inverted index and integer set tables...')
         spark, initial_rdd = get_spark_session(dlh, **self.spark_config)
         
         token_sets = (
             initial_rdd
             .filter(
-                # (_id_numeric, content, numeric_columns)
+                # (_id_numeric, content, valid_columns)
                 lambda t: is_valid_table(t[1], t[2])
             )
             .map(
                 # PySpark cannot access self.arg, like self.mode
-                # (_id_numeric, content, numeric_columns) -> (_id_numeric, [token1, token2, token3, ...])
+                # (_id_numeric, content, valid_columns) -> (_id_numeric, [token1, token2, token3, ...])
                 lambda t: [t[0], table_to_tokens(t[1], t[2], mode=mode, encode=None, blacklist=blacklist, string_transformers=token_translators)]
             ).flatMap(
                     # (set_id, [tok1, tok2, tok3, ...]) -> [(tok1, set_id), (tok2, set_id), ...]
@@ -146,7 +146,7 @@ class JOSIETester(AlgorithmTester):
         integer_sets = (
             posting_lists_with_group_ids
             .flatMap(
-                # (tokenIndex, (_, _, sids))
+                # (tokenIndex, (group_id, raw_token, sids))
                 lambda t: [(sid, t[0]) for sid in t[1][2]])
             .groupByKey()
             .map(
@@ -220,7 +220,7 @@ class JOSIETester(AlgorithmTester):
             .write
             .jdbc(
                 f'jdbc:{url}',
-                f"sets",
+                f"{mode}__sets",
                 'append',
                 properties=properties
             )
@@ -234,7 +234,7 @@ class JOSIETester(AlgorithmTester):
             .write
             .jdbc(
                 f'jdbc:{url}',
-                f"inverted_lists", 
+                f"{mode}__inverted_lists", 
                 'append', 
                 properties=properties
             )
@@ -258,22 +258,16 @@ class JOSIETester(AlgorithmTester):
 
         start_query = time()
         # insert the queries into the Queries table
+        self.josiedb.load_tables()
         self.josiedb.clear_query_table()
         self.josiedb.add_queries_from_existent_tables(query_ids)
-
-        # if cost sampling tables already exist 
-        # we assume they are correct and won't recreate them
-        # sample_costs_tables_exist = self.josiedb.are_costs_sampled()
-        # info(f'Sample costs tables exist? {sample_costs_tables_exist}')
-        # if not sample_costs_tables_exist:
-        #     info('Sampling costs...')
-        #     self.josiedb.sample_costs()
         
-        info('Sampling costs...')
-        self.josiedb.delete_cost_tables()
-        self.josiedb.sample_costs()
-        self.josiedb.close()
-
+        if not self.josiedb.are_costs_sampled():
+            info('Deleting old cost tables values...')
+            self.josiedb.delete_cost_tables()
+            info('Sampling costs...')
+            self.josiedb.sample_costs()
+            
         # we are not considering the query preparation steps, since in some cases this will 
         # include also the cost sampling phase and in other cases it won't
         info(f'Using token table on memory: {token_table_on_memory}')
@@ -308,15 +302,19 @@ class JOSIETester(AlgorithmTester):
         perfs = []
         start = time()
 
-        for q in queries:
-            perfs.append(JOSIE(self.josiedb, tb, q, k, True, True)[1])
+        # execute the JOSIE algorithm for each query
+        for q in tqdm(queries):
+            try:
+                perfs.append(JOSIE(self.josiedb, tb, q, k, ignore_self=True)[1])
+            except Exception as e:
+                error(f'JOSIE error with query={q.set_id}: {e}')
+
 
         if verbose: info(f"Finished experiment for {k=} in {round((time() - start) / 60, 3)} minutes")
         
-        write_all_results(perfs, f'{results_file}.raw')        
-
         # rewrite the results in a common format, i.e.
         # tuples <query_id, duration (s), list[result_table_ids]>
+        write_all_results(perfs, f'{results_file}.raw')        
         (
             pl.read_csv(f'{results_file}.raw').select(['query_id', 'duration', 'results'])
             .with_columns((pl.col('duration') / 1000).name.keep())

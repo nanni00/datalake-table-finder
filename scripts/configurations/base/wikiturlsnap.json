@@ -2,22 +2,23 @@
     "general": {
         "test_name": "base",
         "datalake_config": {
-            "location": "/home/nanni/datasets_datalakes/SantosSmall",
-            "name": "santossmall",
-            "options": []
+            "location": "mongodb",
+            "name": "wikiturlsnap",
+            "options": [
+                "optitab.turl_training_set"
+            ]
         },
-        
         "blacklist": [],
         "k": 20,
         "num_query_samples": 100,
-        "num_cpu": 32,
+        "num_cpu": 64,
         "token_translators": [
             "whitespace", "lowercase"
         ],
         
         "josie_db_connection_info": {
             "drivername":   "postgresql",
-            "database":     "DLTFSantosSmall",
+            "database":     "DLTFWikiTurlSnap",
             "username":     "nanni",
             "password":     "",
             "port":         5442,
@@ -30,10 +31,10 @@
     
     "data_preparation": {
         "algorithms": [
-            "josie"
+            "embedding"
         ],
         "modes": [
-            "set", "bag", "ft"
+            "bag", "ft"
         ],
         "spark_config": {
             "spark.app.name":               "JOSIE Data Preparation",
@@ -57,7 +58,7 @@
 
     "query": {
         "algorithms": [
-            "josie"
+            "josie", "lshforest", "embedding"
         ],
         "modes": [
             "set", "bag", "ft"
@@ -66,15 +67,15 @@
     },
 
     "extract": {
-        "clear_results_table": true,
-        "exec_now": true
+        "clear_results_table": false,
+        "exec_now": false
     },
 
     "analyses": {
         "p_values": [
             1, 5, 10, 20
         ],
-        "exec_now": false
+        "exec_now": true
     },
 
     "clean": {

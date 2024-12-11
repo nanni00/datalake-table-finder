@@ -1,131 +1,91 @@
 from typing import Any
 
-from sqlalchemy import exc
+from sqlalchemy import Float, delete, exc
 from sqlalchemy.engine import URL
 from sqlalchemy.orm import Session
 from sqlalchemy import (
     create_engine, 
     select, insert,
-    MetaData, Table, Column, Integer
+    MetaData, Column, Integer
 )
+from sqlalchemy.ext.declarative import declarative_base
 
 
-class OverlapDB:
+Base = declarative_base()
+
+
+class Overlaps(Base):
+    __tablename__ = 'overlaps'
+    r_id = Column(Integer, primary_key=True, index=True)
+    s_id = Column(Integer, primary_key=True, index=True)
+    table_overlap = Column(Integer)
+    set_q_size = Column(Integer)
+    set_r_size = Column(Integer)
+    set_overlap = Column(Integer)
+    set_union_size = Column(Integer)
+    bag_q_size = Column(Integer)
+    bag_r_size = Column(Integer)
+    bag_overlap = Column(Integer)
+    sloth_time = Column(Float)
+    set_time = Column(Float)
+    bag_time = Column(Float)
+
+
+class OverlapsDBHandler:
     """ Used only for testing, in order to avoid computing each time the SLOTH overlap """
-    def __init__(self, table_name='overlaps', url:Any|None=None, engine:Any|None=None, connection_info:dict|None=None):
-        self.table_name = table_name
-        if engine and url:
-            self.url = url
-            self.engine = engine
-        else:
-            self.url = URL.create(**connection_info)
-            self.engine = create_engine(self.url)
+    def __init__(self, connection_info:dict|None=None):
+        self.url = URL.create(**connection_info)
+        self.engine = create_engine(self.url)
         
-        self.inner_engine = not (engine and url)
-
-        self.results_table_name = table_name
-        self.metadata = MetaData(self.engine)
-        self.metadata.reflect()
+        self.metadata = MetaData()
+        self.metadata.reflect(bind=self.engine)
         
     def create_table(self):
-        Table(
-            self.results_table_name, self.metadata,
-            Column('r_id', Integer, primary_key=True),
-            Column('s_id', Integer, primary_key=True),
-            Column('overlap', Integer),
-            keep_existing=True
-        )
-        self.metadata.create_all(self.engine)
-        
-    def add_overlaps(self, values:list[list[int,int,int]]):
+        Base.metadata.create_all(self.engine)
+
+    def add_overlaps(self, values:list[list[int,int,int,int,int]]):
         """
+        # TODO these rollbacks are not really nice
         Inserts a list of computed overlap, where each entry is a list of three elements:
-        (r_id, s_id, overlap), assuming r_id < s_id
+        (r_id, s_id, table_overlap, set_q_size, set_r_size, set_overlap, bag_q_size, bag_q_size, bag_overlap, sloth_time, set_time, bag_time), assuming r_id < s_id
         """
-        values = [{'r_id': r_id, 's_id': s_id, 'overlap': o} for r_id, s_id, o in values]
-        table = self.metadata.tables[self.results_table_name]
+        values = [{
+            'r_id': r_id, 's_id': s_id, 
+            'table_overlap': to, 
+            'set_q_size': sqs, 'set_r_size': srs, 'set_overlap': so, 'set_union_size': sus,
+            'bag_q_size': bqs, 'bag_r_size': brs, 'bag_overlap': bo,
+            'sloth_time': slt, 'set_time': st, 'bag_time': bt} 
+            for r_id, s_id, to, sqs, srs, so, sus, bqs, brs, bo, slt, st, bt in values]
+        
         with Session(self.engine) as session:
             try:
-                session.execute(insert(table).values(values))
+                session.execute(insert(Overlaps).values(values))
                 session.commit()
             except exc.IntegrityError:
                 session.rollback()
                 for value in values:
                     try:
-                        session.execute(insert(table).values([value]))
+                        session.execute(insert(Overlaps).values([value]))
                         session.commit()
                     except exc.IntegrityError:
                         session.rollback()
                         continue
 
-    def lookup(self, r_id, s_id) -> int|None:
+    def lookup(self, r_id, s_id):
         """ 
-        Returns the stored overlap for the pair (r_id, s_id), assuming that r_id < s_id 
+        Returns the stored overlaps and timings for the pair (r_id, s_id), assuming that r_id < s_id 
         """
-        table = self.metadata.tables[self.results_table_name]
-        stmt = select(table.c.overlap).where(table.c.r_id == r_id, table.c.s_id == s_id)
-
         with Session(self.engine) as session:
-            return session.execute(stmt).scalar()
+            return session.execute(select(Overlaps.table_overlap, 
+                                          Overlaps.set_q_size, Overlaps.set_r_size, Overlaps.set_overlap, Overlaps.set_union_size,
+                                          Overlaps.bag_q_size, Overlaps.bag_r_size, Overlaps.bag_overlap,
+                                          Overlaps.sloth_time, Overlaps.set_time, Overlaps.bag_time)
+                                   .where(Overlaps.r_id == r_id, Overlaps.s_id == s_id)).fetchone()
 
-    def clear(self):
-        table = self.metadata.tables[self.results_table_name]
-        table.drop(self.engine)
-
-    def close(self):
-        if self.inner_engine:
-            self.engine.dispose()
+    def drop_table(self):
+        with Session(bind=self.engine) as session:
+            session.execute(delete(Overlaps))
+            session.commit()
         
-
-if __name__ == '__main__':
-    db_connection_info = {
-        'drivername':   'postgresql',
-        'database':     'JOSIEWikiTables',
-        'username':     'nanni',
-        'password':     '',
-        'port':         5442,
-        'host':         '127.0.0.1',
-    }
-    table_name = 'full_overlap'
-
-    print('Creating OverlapDB object...')
-    resultsdb = OverlapDB(table_name, connection_info=db_connection_info)
-
-    print('Clear already existent data...')
-    resultsdb.clear()
-
-    print('Creating overlap table...')
-    resultsdb.create_table()
-    
-    values = [
-        [0, 1, 22],
-        [0, 2, 16],
-        [1, 2, 34]
-    ]
-
-    print('Inserting new overlaps into the db...')
-    resultsdb.add_overlaps(values)
-
-    print('Closing connection...')
-    resultsdb.close()
-
-    print('Reopening the connection...')
-    url = URL.create(**db_connection_info)
-    engine = create_engine(url)
-    resultsdb = OverlapDB(table_name, url, engine)
-    
-    print('Inserting new overlaps into the db (with duplicates!)...')
-    values = [
-        [1, 2, 36],
-        [3, 4, 98]
-    ]
-    resultsdb.add_overlaps(values)
-
-    print('Looking for some table pairs...')
-    keys = [[0, 1], [1, 2], [2, 3], [3, 4], [4, 5]]
-    for key in keys:
-        print(f'{key} --> {resultsdb.lookup(*key)}')
-
-    print('Closing connection...')
-    resultsdb.close()
-    engine.dispose()
+    def close(self):
+        self.engine.dispose()

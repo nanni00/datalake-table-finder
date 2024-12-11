@@ -11,12 +11,7 @@ from dltftools.utils.query import sample_queries
 from dltftools.utils.settings import get_all_paths 
 
 
-if __name__ == '__main__':
-    parser = ArgumentParser()
-    parser.add_argument('configuration_file', help='path to the test configuration file')
-
-    configuration_file = parser.parse_args().configuration_file
-
+def run(configuration_file):
     with open(configuration_file, 'r') as fp:
         configuration = json.load(fp)
     
@@ -24,6 +19,7 @@ if __name__ == '__main__':
     g_config = configuration['general']
 
     # datalake configuration
+    # used for data preparation, query and extraction steps
     datalake_location = g_config['datalake_config']['location']
     datalake_name = g_config['datalake_config']['name']
     datalake_options = g_config['datalake_config']['options']
@@ -34,8 +30,9 @@ if __name__ == '__main__':
         dp_config = configuration['data_preparation']
         if dp_config['exec_now']:
             algorithms = dp_config['algorithms']
-            del dp_config['algorithms']
             modes = dp_config['modes']
+            # drop these to avoid keyword errors in function call
+            del dp_config['algorithms']
             del dp_config['modes']
             del dp_config['exec_now']
 
@@ -69,8 +66,8 @@ if __name__ == '__main__':
         q_config = configuration['query']
         if q_config['exec_now']:
             algorithms = q_config['algorithms']
-            del q_config['algorithms']
             modes = q_config['modes']
+            del q_config['algorithms']
             del q_config['modes']
             del q_config['exec_now']
 
@@ -87,8 +84,8 @@ if __name__ == '__main__':
         q_config = configuration['clean']
         if q_config['exec_now']:
             algorithms = q_config['algorithms']
-            del q_config['algorithms']
             modes = q_config['modes']
+            del q_config['algorithms']
             del q_config['modes']
             del q_config['exec_now']
 
@@ -101,18 +98,38 @@ if __name__ == '__main__':
                                   **g_config,
                                   **q_config)
 
+    
+    # delete these parameters, they're no longer needed
     if 'embedding_model_path' in g_config:
         del g_config['embedding_model_path']
+    if 'embedding_model_size' in g_config:
+        del g_config['embedding_model_size']
 
 
     if 'extract' in configuration:
         e_config = configuration['extract']
         if e_config['exec_now']:
-            extract_results(connection_info=g_config['josie_db_connection_info'], **g_config)
+            clear_results_table = e_config['clear_results_table']
+            connection_info=g_config['josie_db_connection_info']
+            del g_config['josie_db_connection_info']
+            extract_results(datalake_location=datalake_location,
+                            datalake_name=datalake_name,
+                            datalake_options=datalake_options,
+                            clear_results_table=clear_results_table,
+                            connection_info=connection_info, **g_config)
 
 
     if 'analyses' in configuration:
         a_config = configuration['analyses']
         if a_config['exec_now']:
-            analyses(**g_config, p_values=a_config['p_values'])
+            analyses(datalake_name=datalake_name, **g_config, p_values=a_config['p_values'])
 
+
+if __name__ == '__main__':
+    parser = ArgumentParser()
+    parser.add_argument('configuration_file', help='path to the test configuration file')
+    configuration_file = parser.parse_args().configuration_file
+
+    # configuration_file = 'scripts/configurations/base/santossmall.json'
+    
+    run(configuration_file=configuration_file)
