@@ -16,14 +16,15 @@ from dltftools.utils.tables import is_valid_table, table_to_tokens
 
 
 def worker_lshforest_data_preparation(data):
-    global dlhargs, mode, blacklist, token_translators, num_perm, hash_func, dlhargs
-    
+    global dlhargs, mode, num_cpu, blacklist, token_translators, num_perm, hash_func, dlhargs
+    debug_process = os.getpid() % num_cpu == 0 and mode == 'bag'
     id_tables_range = data[0]
     results = []
-
+    
     dlh = DataLakeHandlerFactory.create_handler(*dlhargs)
-    for i in id_tables_range:
+    for i in tqdm(id_tables_range, disable=False if debug_process else True):
         table_obj = dlh.get_table_by_numeric_id(i)
+    
         _id_numeric, table, valid_columns = table_obj['_id_numeric'], table_obj['content'], table_obj['valid_columns']
 
         if is_valid_table(table, valid_columns):
@@ -31,10 +32,9 @@ def worker_lshforest_data_preparation(data):
             m = MinHash(num_perm, hashfunc=hash_func)
             m.update_batch(token_set)
             results.append([_id_numeric, m])
+
+    dlh.close()
     return results
-
-
-
 
 
 def initializer( _mode, _num_cpu, _blacklist, _token_translators, _num_perm, _hash_func, *_dlhargs):
@@ -79,7 +79,7 @@ class LSHForestTester(AlgorithmTester):
         work = range(self.dlh.count_tables())
 
         info(f"Start processing tables...")
-        with mp.Pool(processes=self.num_cpu, initializer=initializer, initargs=initargs) as pool:
+        with mp.get_context('spawn').Pool(processes=self.num_cpu, initializer=initializer, initargs=initargs) as pool:
             r = pool.map(worker_lshforest_data_preparation, chunks(work, max(len(work) // self.num_cpu, 1)))
             for process_results in r:
                 for result in process_results:
@@ -99,7 +99,6 @@ class LSHForestTester(AlgorithmTester):
     def query(self, results_file, k, query_ids, **kwargs):
         start = time()
         results = []
-        
 
         if not self.forest:
             info('Loading forest...')
@@ -137,38 +136,3 @@ class LSHForestTester(AlgorithmTester):
     def clean(self):
         if os.path.exists(self.forest_file):
             os.remove(self.forest_file)
-
-
-
-
-if __name__ == '__main__':
-    from dltftools.utils.query import read_query_ids
-    from dltftools.utils.settings import DefaultPath as dp
-    from dltftools.utils.misc import mmh3_hashfunc, whitespace_translator, punctuation_translator, lowercase_translator
-
-
-    mode = 'set'
-    datalake = 'wikitables'
-    blacklist = []
-    dlh = DataLakeHandlerFactory.create_handler('mongodb', datalake, ['datasets.wikitables'])
-    token_translators = [whitespace_translator, punctuation_translator, lowercase_translator]
-    num_cpu = 64
-    num_perm = 256
-    l = 16
-    hash_func = mmh3_hashfunc
-
-    
-    test_dir = f"{dp.data_path.base}/examples/{datalake}/lshforest"
-    if not os.path.exists(test_dir):
-        os.makedirs(test_dir)
-    logfile = f"{test_dir}/.logfile"
-    query_file = f"{test_dir}/../queries.json"
-    results_file = f"{test_dir}/results.csv"
-    forest_file = f"{test_dir}/{mode}_forest.index"
-
-    tester = LSHForestTester(mode, blacklist, dlh, token_translators, 
-                             num_cpu, forest_file, num_perm, l, hash_func)
-    
-    print(tester.data_preparation())
-
-    print(tester.query(results_file, 10, read_query_ids(query_file),))

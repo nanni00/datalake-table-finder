@@ -8,7 +8,7 @@
         },
         
         "blacklist": [],
-        "num_cpu": 32,
+        "num_cpu": 96,
         "token_translators": [
             "whitespace", "lowercase"
         ],
@@ -26,10 +26,10 @@
         "embedding_model_size": 128,
         
         "algorithms": [
-            "josie", "lshforest", "embedding"
+            "lshforest", "embedding", "josie"
         ],
         "modes": [
-            "set", "bag", "ft"
+            "set", "bag",  "ft"
         ]
     },
 
@@ -52,7 +52,7 @@
         "token_table_on_mem": false,
         "num_perm": 256,
         "l": 32,
-        "exec": true
+        "exec": false
     },
 
     "query": {

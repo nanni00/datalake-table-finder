@@ -113,10 +113,10 @@ def run(configuration_file):
 
 
 if __name__ == '__main__':
-    parser = ArgumentParser()
-    parser.add_argument('configuration_file', help='path to the test configuration file')
-    configuration_file = parser.parse_args().configuration_file
+    # parser = ArgumentParser()
+    # parser.add_argument('configuration_file', help='path to the test configuration file')
+    # configuration_file = parser.parse_args().configuration_file
 
-    # configuration_file = 'scripts/configurations/base/wikiturlsnap.json'
+    configuration_file = 'scripts/configurations/base/santossmall.json'
     
     run(configuration_file=configuration_file)

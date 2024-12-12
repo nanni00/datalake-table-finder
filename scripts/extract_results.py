@@ -25,20 +25,10 @@ def worker_result_extractor(data):
     # sort of info/debug here?
     global blacklist, num_cpu, string_transformers, connection_info, dlhargs
     debug_process = os.getpid() % (num_cpu) == 0
-    if debug_process:
-        print(f'Process {os.getpid()} debug: {debug_process}')
-
+    
     chunk = data[0]
-    # if debug_process:
-    #     print(f">>> Debug process {os.getpid()} working on chunk with size {len(chunk)}...")
-    
     dlh = DataLakeHandlerFactory.create_handler(*dlhargs)
-    # if debug_process:
-    #     print(f">>> Debug process {os.getpid()} accessed datalake...")
-    
     resultsdb = OverlapsDBHandler(connection_info=connection_info)
-    # if debug_process:
-    #     print(f">>> Debug process {os.getpid()} accessed overlaps database...")
     
     rv = []
     hit = 0
@@ -64,10 +54,7 @@ def worker_result_extractor(data):
         # if already exists a couple with these ID, take its computed SLOTH overlap
         r_id, s_id = (query_id, result_id) if query_id <= result_id else (result_id, query_id)
         lookup_results = resultsdb.lookup(r_id, s_id)
-        # if debug_process:
-        #     print(f'{lookup_results=}')
-        # print(f'{lookup_results=}')
-        
+
         if lookup_results:
             hit += 1
             sloth_overlap, set_q_size, set_r_size, set_overlap, bag_q_size, bag_r_size, bag_overlap, set_union_size, sloth_time, set_time, bag_time = lookup_results
@@ -82,6 +69,7 @@ def worker_result_extractor(data):
             sstart = time()
             set_overlap = len(set_q & set_r)
             set_time = time() - sstart
+            assert set_overlap <= min(len(set_q), len(set_r))
 
             set_union_size = len(set_q | set_r)
 
@@ -90,6 +78,7 @@ def worker_result_extractor(data):
             bstart = time()
             bag_overlap = len(bag_q & bag_r)
             bag_time = time() - bstart
+            assert bag_overlap <= min(len(bag_q), len(bag_r))
 
             set_q_size, set_r_size = len(set_q), len(set_r)
             bag_q_size, bag_r_size = len(bag_q), len(bag_r)
@@ -114,12 +103,14 @@ def worker_result_extractor(data):
             jaccard_sim = multi_jaccard_sim = containment = overlap_set_similarity = area_ratio = prox = 0
 
         rv.append([
+            # 0         1           2       3       4            5
             query_id, result_id, algorithm, mode, sloth_overlap, algorithm_overlap,
-                
+            # 6...12 
             set_q_size, set_r_size, set_overlap, 
             bag_q_size, bag_r_size, bag_overlap,
             set_union_size,
-                
+            
+            # 13...18
             jaccard_sim, 
             multi_jaccard_sim, 
             containment,
@@ -127,6 +118,7 @@ def worker_result_extractor(data):
             prox,
             area_ratio,
             
+            # 
             round(sloth_time, 5),
             round(set_time, 5),
             round(bag_time, 5)
@@ -193,6 +185,7 @@ def extract_results(test_name,
 
     test_name = test_name.lower()
     num_query_samples = numerize(num_query_samples, asint=True)
+    info(f' {test_name.upper()} - {k} - {num_query_samples} - EXTRACTION '.center(150, '#'))
 
     p = get_all_paths(test_name, datalake_name, k, num_query_samples)
     final_results_file = f"{p['results_extr_dir']}/final_results_k{k}_q{num_query_samples}.csv"
@@ -219,7 +212,6 @@ def extract_results(test_name,
     initargs = (blacklist, num_cpu, token_translators,
                 connection_info, dlhargs)
 
-    info(f' {test_name.upper()} - {k} - {num_query_samples} - EXTRACTION '.center(150, '#'))
 
     with mp.get_context('spawn').Pool(processes=num_cpu, initializer=initializer, initargs=initargs) as pool:
         for result_file in os.listdir(results_base_dir):
@@ -249,9 +241,9 @@ def extract_results(test_name,
             for h, r in extr_res:
                 hit += h
                 data += r
-                overlaps_dbhandler.add_overlaps([[x[0], x[1], x[4], *x[6:13], x[18], x[19], x[20]] 
+                overlaps_dbhandler.add_overlaps([[x[0], x[1], x[4], *x[6:13], *x[18:]] 
                                                  if x[0] < x[1] else 
-                                                 [x[1], x[0], x[4], *x[6:13], x[18], x[19], x[20]] 
+                                                 [x[1], x[0], x[4], *x[6:13], *x[18:]] 
                                                  for x in r if x[4] != None])
 
             info(f'hit = {hit} ({round(100 * hit / len(data), 3)}%)')

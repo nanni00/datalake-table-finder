@@ -104,7 +104,7 @@ class EmbeddingTester(AlgorithmTester):
 
         initargs = (self.mode, self.num_cpu, self.blacklist, self.token_translators, self.model_path, self.dlh.config())
 
-        with mp.Pool(self.num_cpu, initializer=initializer, initargs=initargs) as pool:
+        with mp.get_context('spawn').Pool(self.num_cpu, initializer=initializer, initargs=initargs) as pool:
             info(f'Start embedding tables, chunk-size={chunk_size}...')
             results = pool.map(worker_embedding_data_preparation, chunks(work, chunk_size))            
             info('Tables embedded.')
@@ -196,39 +196,3 @@ class EmbeddingTester(AlgorithmTester):
     def clean(self):
         if os.path.exists(self.cidx_file):
             os.remove(self.cidx_file)
-        
-
-
-if __name__ == '__main__':
-    from dltftools.utils.loghandler import logging_setup
-    from dltftools.utils.settings import DefaultPath as dp
-    from dltftools.utils.misc import whitespace_translator, punctuation_translator, lowercase_translator
-
-    mode = 'ft'
-    blacklist = []
-    
-    datalake = 'gittables'
-    dlhargs = ['mongodb', datalake, ['datasets.gittables']]
-    dlh = DataLakeHandlerFactory.create_handler(*dlhargs)
-    token_translators = [whitespace_translator, punctuation_translator, lowercase_translator]
-    num_cpu = 1
-    ft_emb_size = 128
-
-    test_dir = f"{dp.data_path.tests}/examples/{datalake}"
-    if not os.path.exists(test_dir):
-        os.makedirs(test_dir)
-    logfile = f"{test_dir}/.logfile"
-    logging_setup(logfile)
-
-    model_path =   f'{dp.model_path.base}/fasttext/cc.en.{ft_emb_size}.bin'
-    db_stat_file = f"{test_dir}/.dbstat"
-    col_idx_file = f"{test_dir}/columnidx.index"
-    results_file = f"{test_dir}/results.csv"
-
-    tester = EmbeddingTester(mode, blacklist, dlh, token_translators, 
-                             num_cpu, model_path, col_idx_file, ft_emb_size)
-    
-    print(tester.data_preparation())
-
-    query_ids = [0, 1, 2, 3, 4, 5]
-    print(tester.query(results_file, 10, query_ids))
