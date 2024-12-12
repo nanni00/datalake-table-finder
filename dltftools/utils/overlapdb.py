@@ -83,9 +83,10 @@ class OverlapsDBHandler:
                                    .where(Overlaps.r_id == r_id, Overlaps.s_id == s_id)).fetchone()
 
     def drop_table(self):
-        with Session(bind=self.engine) as session:
-            session.execute(delete(Overlaps))
-            session.commit()
+        Overlaps.__table__.drop(self.engine, checkfirst=True)
+        # with Session(bind=self.engine) as session:
+        #     session.execute(delete(Overlaps))
+        #     session.commit()
         
     def close(self):
         self.engine.dispose()

@@ -74,7 +74,8 @@ DATALAKES = [
     'gittables',
     'wikitables',
     'wikiturlsnap',
-    'santoslarge'
+    'santoslarge',
+    'santossmall'
 ]
 
 MONGODB_DATALAKES = [
@@ -90,7 +91,7 @@ DATALAKE_SIZES = [
 
 
 
-def get_all_paths(test_name, datalake_name, k, num_query_samples):
+def get_all_paths(test_name, datalake_name, k=None, num_query_samples=None):
     p = {}
 
     # output files and directories
@@ -104,15 +105,17 @@ def get_all_paths(test_name, datalake_name, k, num_query_samples):
     
     # embedding stuff
     p['embedding_dir'] =        f'{TEST_DATASET_DIR}/embedding'
+    
+    if k:
+        # results stuff
+        p['results_base_dir'] =     f'{TEST_DATASET_DIR}/results/base/k{k}_q{num_query_samples}'
+        p['results_extr_dir'] =     f'{TEST_DATASET_DIR}/results/extracted'
 
-    # results stuff
-    p['results_base_dir'] =      f'{TEST_DATASET_DIR}/results/base/k{k}_q{num_query_samples}'
-    p['results_extr_dir'] =      f'{TEST_DATASET_DIR}/results/extracted'
-
-    # statistics stuff
-    p['statistics_dir'] = statistics_dir = TEST_DATASET_DIR  + '/statistics'
-    p['runtime_stat_file'] =     statistics_dir + '/runtime.csv'     
-    p['storage_stat_file'] =     statistics_dir + '/storage.csv'
+    if num_query_samples:
+        # statistics stuff
+        p['statistics_dir'] =       statistics_dir = TEST_DATASET_DIR  + '/statistics'
+        p['runtime_stat_file'] =    statistics_dir + '/runtime.csv'     
+        p['storage_stat_file'] =    statistics_dir + '/storage.csv'
 
     return p
 

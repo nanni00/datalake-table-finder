@@ -8,8 +8,6 @@
         },
         
         "blacklist": [],
-        "k": 20,
-        "num_query_samples": 100,
         "num_cpu": 32,
         "token_translators": [
             "whitespace", "lowercase"
@@ -25,16 +23,22 @@
         },
 
         "embedding_model_path": "/home/nanni/datalake-table-finder/models/fasttext/cc.en.128.bin",
-        "embedding_model_size": 128
-    },
-    
-    "data_preparation": {
+        "embedding_model_size": 128,
+        
         "algorithms": [
-            "josie"
+            "josie", "lshforest", "embedding"
         ],
         "modes": [
             "set", "bag", "ft"
-        ],
+        ]
+    },
+
+    "sample_queries": {
+        "num_query_samples": 100,
+        "exec": true
+    },
+    
+    "data_preparation": {
         "spark_config": {
             "spark.app.name":               "JOSIE Data Preparation",
             "spark.master":                 "local[64]",
@@ -48,42 +52,27 @@
         "token_table_on_mem": false,
         "num_perm": 256,
         "l": 32,
-        "exec_now": false
-    },
-
-    "sample_queries": {
-        "exec_now": false
+        "exec": true
     },
 
     "query": {
-        "algorithms": [
-            "josie"
-        ],
-        "modes": [
-            "set", "bag", "ft"
-        ],
-        "exec_now": false
+        "k": 20,
+        "exec": true
     },
 
     "extract": {
         "clear_results_table": true,
-        "exec_now": true
+        "exec": true
     },
 
     "analyses": {
-        "p_values": [
+        "k_values": [
             1, 5, 10, 20
         ],
-        "exec_now": false
+        "exec": true
     },
 
     "clean": {
-        "algorithms": [
-            "josie", "lshforest", "embedding"
-        ],
-        "modes": [
-            "set", "bag", "ft", "cft"
-        ],
-        "exec_now": false
+        "exec": false
     }
 }

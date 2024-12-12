@@ -19,9 +19,11 @@ from dltftools.utils.parallel import worker_fp_per_query, worker_ndcg, worker_pr
 
 def analyses(test_name, k, num_query_samples, num_cpu, 
              datalake_name, 
-             p_values, 
+             k_values, 
              save_silver_standard_to:str=None, load_silver_standard_from:str=None, *args, **kwargs):
-    assert int(k) > 0
+    
+    k_search = k
+    assert int(k_search) > 0
     assert int(num_cpu) > 0
     assert datalake_name in DATALAKES
     
@@ -31,10 +33,10 @@ def analyses(test_name, k, num_query_samples, num_cpu,
     test_name = test_name.lower()
     q = numerize(num_query_samples, asint=True)
     
-    paths = get_all_paths(test_name, datalake_name, k, num_query_samples)
+    paths = get_all_paths(test_name, datalake_name, k_search, num_query_samples)
     TEST_DATASET_DIR =      paths['TEST_DATASET_DIR']
     analyses_dir =          f'{TEST_DATASET_DIR}/results/analyses'
-    analyses_query_dir =    f'{analyses_dir}/k{k}_q{q}'
+    analyses_query_dir =    f'{analyses_dir}/k{k_search}_q{q}'
     
 
     if not os.path.exists(analyses_dir):
@@ -46,14 +48,14 @@ def analyses(test_name, k, num_query_samples, num_cpu,
     analyses_dir = analyses_query_dir
 
     logging_setup(paths['logfile'])
-    info(f' {test_name.upper()} - {datalake_name.upper()} - ANALYSES - {k} - {q} '.center(150, '-'))
+    info(f' {test_name.upper()} - {datalake_name.upper()} - ANALYSES - {k_search} - {q} '.center(150, '-'))
 
     all_colors = colors = list(mcolors.TABLEAU_COLORS.keys())
     methods = ALGORITHM_MODE_CONFIG
     markers = {m: 'o' if m[0] == 'josie' else 'x' if m[0] == 'lshforest' else 'd' for m in methods}
     methods = {m: c for m, c in zip(methods, colors[:len(methods)])}
 
-    results = pl.read_csv(f"{paths['results_extr_dir']}/final_results_k{k}_q{q}.csv")
+    results = pl.read_csv(f"{paths['results_extr_dir']}/final_results_k{k_search}_q{q}.csv")
     results = results.filter(pl.struct(['algorithm', 'mode']).is_in(list(map(lambda am: {'algorithm': am[0], 'mode': am[1]}, methods.keys()))))
 
     results = results.drop_nulls() # queries without any results
@@ -61,12 +63,12 @@ def analyses(test_name, k, num_query_samples, num_cpu,
 
     results = results.with_columns((pl.col('algorithm_overlap') - pl.col('sloth_overlap')).alias('difference_overlap'))
 
-    info(f'Filtering those groups where any method has returned less than K={k} values...')
+    info(f'Filtering those groups where any method has returned less than K={k_search} values...')
     start_filtering = time()
     bad_groups = []
     for query_id, q_group in tqdm(results.to_pandas().groupby('query_id'), total=results.select('query_id').unique().shape[0], leave=False):
         for (alg, mode), data in q_group.groupby(['algorithm', 'mode']):
-            if data.shape[0] < k:
+            if data.shape[0] < k_search:
                 bad_groups.append(query_id)
                 break
     results = results.filter(~pl.col('query_id').is_in(bad_groups))
@@ -190,7 +192,7 @@ def analyses(test_name, k, num_query_samples, num_cpu,
         # next analyses, just to avoid corner cases with groups with just N<<P values (however, this
         # shouldn't happen since we've already filtered on the returned list size of each algorithm...)
         for query_id, ids_overlaps in tqdm(results_ids, total=nqueries, leave=False):
-            if ids_overlaps.shape[0] < max(p_values):
+            if ids_overlaps.shape[0] < max(k_values):
                 continue
             s = set()
             s.update(map(tuple, ids_overlaps.to_numpy()[:, 1:].tolist()))
@@ -212,44 +214,44 @@ def analyses(test_name, k, num_query_samples, num_cpu,
 
     # Parallel version
     with mp.Pool(processes=num_cpu) as pool:
-        info('Computing precision@p...')
+        info('Computing precision@K...')
         start_prec = time()
         prec_rec_results = pool.map(
             worker_precision, 
-            ((name, data, p_values, silver_standard[name]) for name, data in query_groups))
+            ((name, data, k_values, silver_standard[name]) for name, data in query_groups))
         end_prec = time()
         info(f'Finished. Total time: {round(end_prec - start_prec, 3)}s')
 
     prec_rec_results = [x for qres in prec_rec_results for x in qres]
-    prec_rec_results = pd.DataFrame(prec_rec_results, columns=['query_id', 'silver_std_size', 'algorithm', 'mode', 'p', 'precision', 'RP', 'recall', 'f1'])
+    prec_rec_results = pd.DataFrame(prec_rec_results, columns=['query_id', 'silver_std_size', 'algorithm', 'mode', 'k', 'precision', 'RP', 'recall', 'f1'])
 
-    res_pivot = pd.pivot_table(prec_rec_results, values=['precision', 'RP', 'recall', 'f1'], index=['algorithm', 'mode'], columns=['p'], aggfunc=['mean', 'std', 'max'])
-    res_pivot.to_csv(analyses_dir + f'/precision_recall@p.csv')
+    res_pivot = pd.pivot_table(prec_rec_results, values=['precision', 'RP', 'recall', 'f1'], index=['algorithm', 'mode'], columns=['k'], aggfunc=['mean', 'std', 'max'])
+    res_pivot.to_csv(analyses_dir + f'/precision_recall@K.csv')
 
     # basic plot
     # for measure in ['precision', 'precision_v2', 'recall', 'f1']:
     measures = ['RP']
     for measure in measures:
         for row, label in zip(res_pivot['mean', measure].values, res_pivot.index):
-            plt.plot(p_values, row, f'{markers[(label)]}-', label=f'{label[0]}-{label[1]}', color=methods[(label[0], label[1])])
-        plt.xticks(p_values, p_values)
-        plt.xlabel('P')
-        plt.ylabel(f'mean {measure}@P')
-        plt.title(f"{measure}@P graph for dataset {datalake_name}")
+            plt.plot(k_values, row, f'{markers[(label)]}-', label=f'{label[0]}-{label[1]}', color=methods[(label[0], label[1])])
+        plt.xticks(k_values, k_values)
+        plt.xlabel('K')
+        plt.ylabel(f'mean {measure}@K')
+        plt.title(f"{measure}@K graph for dataset {datalake_name}")
         plt.legend()
         plt.grid()
-        plt.savefig(f'{analyses_dir}/graph_{measure}@p.png', bbox_inches='tight')
+        plt.savefig(f'{analyses_dir}/graph_{measure}@k.png', bbox_inches='tight')
         plt.close()
 
     # boxplots with precision@p
-    data = [(amp[0], amp[1], amp[2], group) for amp, group in prec_rec_results.groupby(by=['algorithm', 'mode', 'p'])]
+    data = [(amp[0], amp[1], amp[2], group) for amp, group in prec_rec_results.groupby(by=['algorithm', 'mode', 'k'])]
     for measure in measures:
-        fig, axes = plt.subplots(1, len(p_values), figsize=(15, 7), sharey=True)
-        for i, p in enumerate(p_values):
-            labels = [f'{d[0]}\n{d[1]}' for d in data if d[2] == p]
-            colors = [methods[(d[0], d[1])] for d in data if d[2] == p]
+        fig, axes = plt.subplots(1, len(k_values), figsize=(15, 7), sharey=True)
+        for i, k in enumerate(k_values):
+            labels = [f'{d[0]}\n{d[1]}' for d in data if d[2] == k]
+            colors = [methods[(d[0], d[1])] for d in data if d[2] == k]
 
-            bplot = axes[i].boxplot([d[3][measure] for d in data if d[2] == p],
+            bplot = axes[i].boxplot([d[3][measure] for d in data if d[2] == k],
                         patch_artist=True,
                         showfliers=showfliers,
                         showmeans=True,
@@ -265,57 +267,57 @@ def analyses(test_name, k, num_query_samples, num_cpu,
                 patch.set_facecolor(color)
                 patch.set_alpha(alpha)
 
-            axes[i].set_title(f'P = {p}')
+            axes[i].set_title(f'K = {k}')
             axes[i].set_xticks(axes[i].get_xticks(), axes[i].get_xticklabels(), rotation=45)
-        fig.savefig(f'{analyses_dir}/boxplot_{measure}@p.png', bbox_inches='tight')
+        fig.savefig(f'{analyses_dir}/boxplot_{measure}@k.png', bbox_inches='tight')
         plt.close()
 
 
     ###########################################################################
-    ########### Normalised Discounted Cumulative Gain at P (nDCG@p) ###########
+    ########### Normalised Discounted Cumulative Gain at K (nDCG@K) ###########
     ###########################################################################
 
     query_groups = results.select('query_id', 'result_id', 'algorithm', 'mode', 'sloth_overlap').to_pandas().groupby("query_id", group_keys=True)
-    work = ((query_id, data, p_values, silver_standard[query_id]) for query_id, data in query_groups)
+    work = ((query_id, data, k_values, silver_standard[query_id]) for query_id, data in query_groups)
 
     with mp.Pool(num_cpu) as pool:
-        info('Computing nDCG@p...')
+        info('Computing nDCG@K...')
         start_ndcg = time()
         ndcg_results = pool.map(worker_ndcg, work, chunksize=results.select('query_id').unique().shape[0] // num_cpu)
         end_ndcg = time()
         info(f'Finished. Total time: {round(end_ndcg - start_ndcg, 3)}s')
         ndcg_results = [x for qres in ndcg_results for x in qres]
 
-    df = pd.DataFrame(ndcg_results, columns=['query_id', 'silver_standard_size', 'algorithm', 'mode', 'p', 'ndcg_p'])
+    df = pd.DataFrame(ndcg_results, columns=['query_id', 'silver_standard_size', 'algorithm', 'mode', 'k', 'ndcg@k'])
 
     # consider only those groups that have more than X elements
-    silver_standard_size_threshold = max(p_values)
+    silver_standard_size_threshold = max(k_values)
     df_thr = df[df['silver_standard_size'] >= silver_standard_size_threshold]
 
-    ndcg_pivot = df_thr.pivot_table(index=['algorithm', 'mode'], columns=['p'], values=['ndcg_p'], aggfunc=['mean', 'max']).convert_dtypes()
-    ndcg_pivot.to_csv(analyses_dir + f'/ndcg@p.csv')
+    ndcg_pivot = df_thr.pivot_table(index=['algorithm', 'mode'], columns=['k'], values=['ndcg@k'], aggfunc=['mean', 'max']).convert_dtypes()
+    ndcg_pivot.to_csv(analyses_dir + f'/ndcg@k.csv')
 
-    for row, label in zip(ndcg_pivot['mean', 'ndcg_p'].values, ndcg_pivot.index):
-        plt.plot(p_values, row, f'{markers[(label)]}-', label=f'{label[0]}-{label[1]}', color=methods[(label[0], label[1])])
-    plt.xticks(p_values, p_values)
-    plt.xlabel("P")
-    plt.ylabel("mean nDCG@P")
+    for row, label in zip(ndcg_pivot['mean', 'ndcg@k'].values, ndcg_pivot.index):
+        plt.plot(k_values, row, f'{markers[(label)]}-', label=f'{label[0]}-{label[1]}', color=methods[(label[0], label[1])])
+    plt.xticks(k_values, k_values)
+    plt.xlabel("K")
+    plt.ylabel("mean nDCG@K")
 
-    plt.title(f"nDCG@P graph for dataset {datalake_name}")
+    plt.title(f"nDCG@K graph for dataset {datalake_name}")
     plt.legend()
     plt.grid()
-    plt.savefig(f'{analyses_dir}/graph_ndcg@p.png', bbox_inches='tight')
+    plt.savefig(f'{analyses_dir}/graph_ndcg@k.png', bbox_inches='tight')
     plt.close()
     
-    # boxplots with nDCG@p
-    data = [(amp[0], amp[1], amp[2], group) for amp, group in df.groupby(by=['algorithm', 'mode', 'p'])]
+    # boxplots with nDCG@K
+    data = [(amp[0], amp[1], amp[2], group) for amp, group in df.groupby(by=['algorithm', 'mode', 'k'])]
     
-    fig, axes = plt.subplots(1, len(p_values), figsize=(15, 7), sharey=True)
-    for i, p in enumerate(p_values):
-        labels = [f'{d[0]}\n{d[1]}' for d in data if d[2] == p]
-        colors = [methods[(d[0], d[1])] for d in data if d[2] == p]
+    fig, axes = plt.subplots(1, len(k_values), figsize=(15, 7), sharey=True)
+    for i, k in enumerate(k_values):
+        labels = [f'{d[0]}\n{d[1]}' for d in data if d[2] == k]
+        colors = [methods[(d[0], d[1])] for d in data if d[2] == k]
 
-        bplot = axes[i].boxplot([d[3]['ndcg_p'] for d in data if d[2] == p],
+        bplot = axes[i].boxplot([d[3]['ndcg@k'] for d in data if d[2] == k],
                     patch_artist=True,
                     showmeans=True,
                     meanline=True,
@@ -331,8 +333,8 @@ def analyses(test_name, k, num_query_samples, num_cpu,
             patch.set_facecolor(color)
             patch.set_alpha(alpha)
 
-        axes[i].set_title(f'P = {p}')
+        axes[i].set_title(f'K = {k}')
         axes[i].set_xticks(axes[i].get_xticks(), axes[i].get_xticklabels(), rotation=45)
 
-    fig.savefig(f'{analyses_dir}/boxplot_ndcg@p.png', bbox_inches='tight')
+    fig.savefig(f'{analyses_dir}/boxplot_ndcg@k.png', bbox_inches='tight')
     plt.close()

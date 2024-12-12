@@ -123,6 +123,13 @@ class JOSIEDBHandler:
                 error(f"Failed to drop table {table_class}: {e}")
                 continue
 
+    def drop_tables(self):
+        metadata = MetaData()
+        metadata.reflect(self.engine)
+
+        for _, table_cls in metadata.tables.items():
+            self.execute_write(delete(table_cls), 'nofetch')
+
     def load_tables(self):
         global InvertedList, Set, Query, ReadListCostSamples, ReadSetCostSamples
         metadata = MetaData()
