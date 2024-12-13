@@ -241,9 +241,9 @@ def extract_results(test_name,
             for h, r in extr_res:
                 hit += h
                 data += r
-                overlaps_dbhandler.add_overlaps([[x[0], x[1], x[4], *x[6:13], *x[18:]] 
+                overlaps_dbhandler.add_overlaps([[x[0], x[1], x[4], *x[6:13], *x[19:]] 
                                                  if x[0] < x[1] else 
-                                                 [x[1], x[0], x[4], *x[6:13], *x[18:]] 
+                                                 [x[1], x[0], x[4], *x[6:13], *x[19:]] 
                                                  for x in r if x[4] != None])
 
             info(f'hit = {hit} ({round(100 * hit / len(data), 3)}%)')

@@ -280,13 +280,18 @@ def analyses(test_name, k, num_query_samples, num_cpu,
     query_groups = results.select('query_id', 'result_id', 'algorithm', 'mode', 'sloth_overlap').to_pandas().groupby("query_id", group_keys=True)
     work = ((query_id, data, k_values, silver_standard[query_id]) for query_id, data in query_groups)
 
-    with mp.Pool(num_cpu) as pool:
+    with mp.get_context('spawn').Pool(num_cpu) as pool:
         info('Computing nDCG@K...')
         start_ndcg = time()
-        ndcg_results = pool.map(worker_ndcg, work, chunksize=results.select('query_id').unique().shape[0] // num_cpu)
+        chunk_size = max(results.select('query_id').unique().shape[0] // num_cpu, 1)
+        
+        ndcg_results = pool.map(worker_ndcg, work, chunksize=chunk_size)
         end_ndcg = time()
         info(f'Finished. Total time: {round(end_ndcg - start_ndcg, 3)}s')
-        ndcg_results = [x for qres in ndcg_results for x in qres]
+        try:
+            ndcg_results = [x for qres in ndcg_results for x in qres]
+        except:
+            print(ndcg_results)
 
     df = pd.DataFrame(ndcg_results, columns=['query_id', 'silver_standard_size', 'algorithm', 'mode', 'k', 'ndcg@k'])
 

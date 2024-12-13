@@ -40,7 +40,6 @@ def worker_precision(inp):
 def worker_ndcg(inp):
     query_id, query_res, k_values, query_silver_standard = inp
     all_ndcg_results = []
-
     true_relevances = [x[1] for x in query_silver_standard]
 
     for (algorithm, mode), data in query_res.groupby(by=['algorithm', 'mode']):

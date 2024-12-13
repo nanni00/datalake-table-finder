@@ -35,7 +35,7 @@
 
     "sample_queries": {
         "num_query_samples": 100,
-        "exec": true
+        "exec": false
     },
     
     "data_preparation": {
@@ -57,12 +57,12 @@
 
     "query": {
         "k": 20,
-        "exec": true
+        "exec": false
     },
 
     "extract": {
         "clear_results_table": true,
-        "exec": true
+        "exec": false
     },
 
     "analyses": {
