@@ -4,12 +4,12 @@ from itertools import product
 from argparse import ArgumentParser
 
 from scripts.analysis import analyses
-from main_pipeline import main_pipeline
+from scripts.tester_pipeline import tester_pipeline
 from extract_results import extract_results
 
-from dltftools.utils.misc import numerize
-from dltftools.utils.query import sample_queries
-from dltftools.utils.settings import get_all_paths 
+from dltf.utils.misc import numerize
+from dltf.utils.query import sample_queries
+from dltf.utils.settings import get_all_paths 
 
 
 def run(configuration_file):
@@ -35,7 +35,7 @@ def run(configuration_file):
     num_query_samples = configurations['sample_queries']['num_query_samples']
 
     if configurations['sample_queries']['exec']:
-        str_num_query_samples = numerize(num_query_samples, asint=True)
+        str_num_query_samples = numerize(num_query_samples)
 
         paths = get_all_paths(g_conf['test_name'], datalake_name, num_query_samples=str_num_query_samples)
         query_file = paths['query_file']
@@ -70,7 +70,7 @@ def run(configuration_file):
 
     if any(tasks):
         for algorithm, mode in product(algorithms, modes):
-            main_pipeline(
+            tester_pipeline(
                 algorithm=algorithm, 
                 mode=mode, 
                 tasks=tasks,
@@ -113,10 +113,8 @@ def run(configuration_file):
 
 
 if __name__ == '__main__':
-    # parser = ArgumentParser()
-    # parser.add_argument('configuration_file', help='path to the test configuration file')
-    # configuration_file = parser.parse_args().configuration_file
+    parser = ArgumentParser()
+    parser.add_argument('configuration_file', help='path to the test configuration file')
+    configuration_file = parser.parse_args().configuration_file
 
-    configuration_file = 'scripts/configurations/base/santossmall.json'
-    
     run(configuration_file=configuration_file)

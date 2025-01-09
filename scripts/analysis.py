@@ -11,10 +11,63 @@ from tqdm import tqdm
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
 
-from dltftools.utils.misc import numerize
-from dltftools.utils.loghandler import logging_setup, info
-from dltftools.utils.settings import get_all_paths, ALGORITHM_MODE_CONFIG, DATALAKES
-from dltftools.utils.parallel import worker_fp_per_query, worker_ndcg, worker_precision
+from dltf.utils.metrics import *
+from dltf.utils.misc import numerize
+from dltf.utils.loghandler import logging_setup, info
+from dltf.utils.settings import get_all_paths, ALGORITHM_MODE_CONFIG, DATALAKES
+
+
+
+
+def worker_fp_per_query(inp):
+    am, am_group = inp
+    y = []
+    for _, q_group in am_group.groupby(['query_id']):
+        cnt = q_group[q_group['sloth_overlap'] == 0].shape[0]
+        num_query_results = q_group.shape[0]
+        
+        y.append([am[0], am[1], cnt, cnt / num_query_results])
+    return y
+
+
+def worker_precision(inp):
+    query_id, data, k_values, query_silver_standard = inp
+
+    results = []
+    true_relevances = [x[1] for x in query_silver_standard]    
+    
+    for (algorithm, mode), data in data.groupby(['algorithm', 'mode']):
+        result_relevances = data['sloth_overlap'].values.tolist()    
+        for k in k_values:
+            if k > len(true_relevances):
+                continue            
+            rec = recall_at_k(true_relevances, result_relevances, k)
+            prec = precision_at_k(true_relevances, result_relevances, k)
+            rel_prec = relevance_precision_at_k(true_relevances, result_relevances, k)
+            f1 = f_score(prec, rec)
+            results.append([query_id, len(query_silver_standard), algorithm, mode, k, prec, rel_prec, rec, f1])
+    return results
+
+
+def worker_ndcg(inp):
+    query_id, query_res, k_values, query_silver_standard = inp
+    all_ndcg_results = []
+    true_relevances = [x[1] for x in query_silver_standard]
+
+    for (algorithm, mode), data in query_res.groupby(by=['algorithm', 'mode']):
+        result_relevances = data['sloth_overlap'].values.tolist()
+        for k in k_values:
+            if len(true_relevances) == 0:
+                all_ndcg_results.append([query_id, len(true_relevances), algorithm, mode, k, 0])
+                continue
+            # there could be errors in those cases where there isn't any actual relevant documents
+            # i.e. all the retrivied documents doesn't have a non-zero SLOTH overlap                
+            ndcg = ndcg_at_k(true_relevances, result_relevances, k)
+
+            all_ndcg_results.append([query_id, len(true_relevances), algorithm, mode, k, ndcg])
+    return all_ndcg_results
+
+
 
 
 def analyses(test_name, k, num_query_samples, num_cpu, 
@@ -31,7 +84,7 @@ def analyses(test_name, k, num_query_samples, num_cpu,
     showfliers = False
 
     test_name = test_name.lower()
-    q = numerize(num_query_samples, asint=True)
+    q = numerize(num_query_samples)
     
     paths = get_all_paths(test_name, datalake_name, k_search, num_query_samples)
     TEST_DATASET_DIR =      paths['TEST_DATASET_DIR']
@@ -213,7 +266,7 @@ def analyses(test_name, k, num_query_samples, num_cpu,
     query_groups = results.select('query_id', 'algorithm', 'mode', 'sloth_overlap').to_pandas().groupby("query_id", group_keys=True)
 
     # Parallel version
-    with mp.Pool(processes=num_cpu) as pool:
+    with mp.get_context('spawn').Pool(processes=num_cpu) as pool:
         info('Computing precision@K...')
         start_prec = time()
         prec_rec_results = pool.map(

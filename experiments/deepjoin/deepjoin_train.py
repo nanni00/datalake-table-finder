@@ -16,9 +16,9 @@ from sentence_transformers.evaluation import TripletEvaluator
 from sentence_transformers.training_args import BatchSamplers
 from tqdm import tqdm
 
-from dltftools.utils.parallel import chunks
-from dltftools.utils.datalake import SimpleDataLakeHelper
-from dltftools.utils.misc import (
+from dltf.utils.parallel import chunks
+from dltf.utils.datalake import SimpleDataLakeHelper
+from dltf.utils.misc import (
     is_valid_table, table_rows_to_columns, are_joinable_columns, create_minhash,
     whitespace_translator, lowercase_translator, punctuation_translator
 )

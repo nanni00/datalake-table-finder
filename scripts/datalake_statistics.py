@@ -4,10 +4,10 @@ import pandas as pd
 from tqdm import tqdm
 import multiprocessing as mp
 
-from dltftools.utils.parallel import chunks
-from dltftools.utils.settings import DefaultPath as defpath
-from dltftools.utils.datalake import DataLakeHandlerFactory
-from dltftools.utils.tables import is_valid_table, table_rows_to_rows
+from dltf.utils.parallel import chunks
+from dltf.utils.settings import DefaultPath as defpath
+from dltf.utils.datalake import DataLakeHandlerFactory
+from dltf.utils.tables import is_valid_table, table_rows_to_rows
 
 
 def task(data):
@@ -27,9 +27,11 @@ def task(data):
 
     for table_id in tqdm(table_ids, disable=False if os.getpid() % num_cpu == 0 else True):
         table_obj = dlh.get_table_by_numeric_id(table_id)
+        if not table_obj:
+            print(table_id, table_obj)
         table = table_obj['content']
         valid_columns = table_obj['valid_columns']
-
+        
         nrows.append(len(table))        
         ncols.append(len(table[0]) if len(table) > 0 else 0)
         area.append(len(table[0]) * len(table) if len(table) > 0 else 0)
@@ -55,13 +57,13 @@ def task(data):
     return accepted_tables, nrows, nrows_final, ncols, ncols_final, area, area_final, n_numeric_cols, nan
 
 
-def initializer(_num_cpu, _dlhconfig):
-    global num_cpu, dlhconfig
-    num_cpu = _num_cpu
+def initializer(_dlhconfig, _num_cpu):
+    global dlhconfig, num_cpu
     dlhconfig = _dlhconfig
+    num_cpu = _num_cpu
 
 
-def main(dlhconfig, num_cpu):
+def main(dlhconfig, num_cpu=os.cpu_count()):
     dlh = DataLakeHandlerFactory.create_handler(*dlhconfig)
     ntables = dlh.count_tables()
 
@@ -70,7 +72,7 @@ def main(dlhconfig, num_cpu):
         os.mkdir(os.path.dirname(statistics_path))
 
     work = range(ntables)
-    with mp.Pool(num_cpu, initializer, (dlhconfig, num_cpu)) as pool:
+    with mp.get_context('spawn').Pool(num_cpu, initializer, (dlhconfig, num_cpu)) as pool:
         results = pool.map(task, chunks(work, ntables // num_cpu))
 
     accepted_tables = sum(r[0] for r in results)
@@ -140,4 +142,12 @@ def main(dlhconfig, num_cpu):
 
 
 if __name__ == '__main__':
-    main(['mongodb', 'wikitables', ['datasets.wikitables'], 8])
+    # main(['mongodb', 'wikitables', ['datasets.wikitables']])
+    # main(['mongodb', 'wikiturlsnap', ['optitab.turl_training_set', 'sloth.latest_snapshot_tables']])
+    main(['mongodb', 'latestsnapshot', ['sloth.latest_snapshot_tables']])
+    # main(['mongodb', 'wikilatestsnapshot', ['sloth.demo']])
+    # main(['mongodb', 'wikiturl', ['optitab.turl_training_set']])
+    # main(dlhconfig=['mongodb', 'gittables', ['sloth.gittables']])
+    # main(dlhconfig=[f'{os.environ["HOME"]}/datasets_datalakes/SantosLarge', 'santoslarge', []])
+
+

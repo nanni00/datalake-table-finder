@@ -5,12 +5,12 @@ dependencies:
   - pip
   - numpy
   - pandas
-  - polars
   - pyspark
   - mmh3
   - tqdm
   - nltk
   - pip:
+    - polars
     - psycopg2
     - scikit-learn
     - bidict
@@ -23,3 +23,4 @@ dependencies:
     - fasttext
     - compress-fasttext
     - faiss-cpu # that's the basic installation for the CPU-only version
+    - efficient-apriori # just for MATE testing

@@ -8,9 +8,8 @@ from tqdm import tqdm
 from bidict import bidict
 from pymongo import MongoClient, InsertOne, UpdateOne
 
-from dltftools.utils.tables import naive_detect_valid_columns
-from dltftools.utils.settings import DefaultPath as dp
-from dltftools.utils.datalake import DataLakeHandlerFactory
+from dltf.utils.tables import naive_detect_valid_columns
+from dltf.utils.datalake import DataLakeHandlerFactory
     
 
 def create_numeric_index_on_mongodb(*table_collections):
@@ -30,9 +29,9 @@ def create_numeric_index_on_mongodb(*table_collections):
             if len(batch_update) == batch_size:
                 collection.bulk_write(batch_update, ordered=False)
                 batch_update = []
-        collection.bulk_write(batch_update, ordered=False)
+        if batch_update:
+            collection.bulk_write(batch_update, ordered=False)
     print('Completed.')
-
 
 
 def insert_tables(batch_tables, table_collection):
@@ -49,8 +48,6 @@ def insert_tables(batch_tables, table_collection):
     return errors
 
 
-
-
 def _columns_detection_worker(t: tuple[str, list[list]]):
     return (t[0], naive_detect_valid_columns(t[1]))
     
@@ -64,7 +61,7 @@ def mongodb_detect_valid_columns(task, num_cpu, *datalake_args):
     collections = dlh._collections
 
     if task == 'set':
-        with mp.Pool(processes=num_cpu) as pool:
+        with mp.get_context('spawn').Pool(processes=num_cpu) as pool:
             for collection in collections:
                 collsize = collection.count_documents({})
                 batch_update = []
@@ -85,7 +82,7 @@ def mongodb_detect_valid_columns(task, num_cpu, *datalake_args):
                 print(f'{collection.database.name}.{collection.name} updated.')
     else:
         for collection in collections:
-            print(f'Start unsetting field "numeric_columns" from {collection.database.name}.{collection.name}...')
+            print(f'Start unsetting field "valid_columns" from {collection.database.name}.{collection.name}...')
             collection.update_many({}, {"$unset": {"valid_columns": 1}})
             print(f'{collection.database.name}.{collection.name} updated.')
             
@@ -110,9 +107,9 @@ def gittables2mongo(path_tables, table_collection, milestone, n):
             except Exception:
                 errors += 1
                 continue
-            
+            pl.read_csv()
             table_obj = dict()
-            table_obj["_id"] = f"{subdir}.{table_id}".replace('_csv', '').replace('_licensed', '').replace('.parquet', '')
+            table_obj["_id"] = f"{subdir}.{table_id}".replace('_csv', '').replace('_licensed', '').replace('.parquet', '').replace('.csv', '')
             table_obj["_id_numeric"] = counter
             table_obj["content"] = table_df.rows()
             table_obj["headers"] = list(table_df.columns)
@@ -198,7 +195,7 @@ def santos2local(path_tables, mapping_id_path, valid_columns_path, n):
     counter = 0
 
     mapping_id = bidict()
-    numeric_columns = dict()
+    valid_columns = dict()
     
     print(f'Scanning tables from {path_tables} and creating IDs mapping and checking for valid columns...')
     for table_file in tqdm(os.listdir(path_tables), total=ntables):
@@ -207,7 +204,7 @@ def santos2local(path_tables, mapping_id_path, valid_columns_path, n):
             table = pl.read_csv(f'{path_tables}/{table_file}', infer_schema_length=0, encoding='latin8', has_header=False).rows()
             nrows += len(table)
             ncols += len(table[0])
-            numeric_columns[counter] = naive_detect_valid_columns(table)
+            valid_columns[counter] = naive_detect_valid_columns(table)
             counter += 1
             if counter >= n:
                 break
@@ -220,9 +217,9 @@ def santos2local(path_tables, mapping_id_path, valid_columns_path, n):
     with open(mapping_id_path, 'wb') as fw:
         pickle.dump(mapping_id, fw)
 
-    print('Saving numeric columns...')
+    print('Saving valid columns...')
     with open(valid_columns_path, 'wb') as fw:
-        pickle.dump(numeric_columns, fw)
+        pickle.dump(valid_columns, fw)
 
     print('Completed.')
 
@@ -244,13 +241,13 @@ def main_gittables():
     # path_tables = f'{os.environ["HOME"]}/datasets_datalakes/GitTables'
     
     client = MongoClient()  # connect to MongoDB
-    db = client.datasets  # define the database to use
+    db = client.sloth  # define the database to use
     table_collection = db.gittables  # define the collection in the database to store the tables
     milestone = 10000  # table interval to use for tracking the progress
     n = 100
     # gittables2mongo(path_tables, table_collection, milestone, n)
     print("Detecting valid columns of the loaded tables...")
-    mongodb_detect_valid_columns('set', 1, 'mongodb', 'gittables', [table_collection.full_name])
+    mongodb_detect_valid_columns('set', os.cpu_count(), 'mongodb', 'gittables', [table_collection.full_name])
     
 
 def main_santos_large():
@@ -267,10 +264,16 @@ def main_santos_small():
     valid_columns_path =    f'{os.environ["HOME"]}/datasets_datalakes/SantosSmall/valid_columns.pickle'
     n = 1000
     santos2local(path_tables, mapping_id_path, valid_columns_path, n)
-    
+
+
+def set_index_on_small_wiki_collections():
+    mongoclient = MongoClient()
+    collections = [mongoclient.sloth.latest_snapshot_tables, mongoclient.optitab.turl_training_set]
+    create_numeric_index_on_mongodb(*collections)
 
 if __name__ == "__main__":
-    main_wiki()
+    # main_wiki()
     # main_gittables()
     # main_santos_small()
     # main_santos_large()
+    set_index_on_small_wiki_collections()

@@ -1,16 +1,12 @@
-# the directory containing the JOSIE and MATE databases, results, ...
 data
+models
 
-# Go (keep only the JOSIE code subfolder)
-go
-# !go/src/github.com
-
-TaBERT
+sloth/data_preparation
+sloth/experiments
 
 MATE/*
 !MATE/src
 
-models
 
 deepjoin
 table_bert
@@ -19,7 +15,11 @@ experiments/multi_key_join/*
 
 .git
 .vscode
+.gitignore
 
 cache
 **__pycache__**
 pyrightconfig.json
+
+local
+local_small

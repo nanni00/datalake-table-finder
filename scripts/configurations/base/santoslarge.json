@@ -8,7 +8,7 @@
         },
         
         "blacklist": [],
-        "num_cpu": 32,
+        "num_cpu": 64,
         "token_translators": [
             "whitespace", "lowercase"
         ],

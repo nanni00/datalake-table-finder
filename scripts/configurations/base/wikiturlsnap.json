@@ -1,6 +1,6 @@
 {
     "general": {
-        "test_name": "base",
+        "test_name": "small",
         "datalake_config": {
             "location": "mongodb",
             "name": "wikiturlsnap",
@@ -17,7 +17,7 @@
         
         "josie_db_connection_info": {
             "drivername":   "postgresql",
-            "database":     "DLTFSantosSmall",
+            "database":     "DLTFWikiTurlSnap",
             "username":     "nanni",
             "password":     "",
             "port":         5442,
@@ -28,7 +28,7 @@
         "embedding_model_size": 128,
         
         "algorithms": [
-            "lshforest", "josie", "embedding"
+            "josie", "lshforest", "embedding"
         ],
         "modes": [
             "set", "bag", "ft"
@@ -59,6 +59,7 @@
 
     "query": {
         "k": 20,
+        "force_sampling_cost": true,
         "exec": true
     },
 

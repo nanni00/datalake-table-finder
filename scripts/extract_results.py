@@ -8,14 +8,14 @@ warnings.filterwarnings('ignore')
 import polars as pl
 from tqdm import tqdm
 
-from dltftools.utils.tables import table_to_tokens
-from dltftools.utils.parallel import chunks
-from dltftools.utils.metrics import proximity
-from dltftools.utils.overlapdb import OverlapsDBHandler
-from dltftools.utils.settings import get_all_paths
-from dltftools.utils.loghandler import logging_setup, info
-from dltftools.utils.datalake import DataLakeHandlerFactory
-from dltftools.utils.misc import largest_overlap_sloth, numerize
+from dltf.utils.tables import table_to_tokens
+from dltf.utils.misc import chunks
+from dltf.utils.metrics import proximity
+from dltf.utils.overlapdb import OverlapsDBHandler
+from dltf.utils.settings import get_all_paths
+from dltf.utils.loghandler import logging_setup, info
+from dltf.utils.datalake import DataLakeHandlerFactory
+from dltf.utils.misc import largest_overlap_sloth, numerize
 
 
 def worker_result_extractor(data):
@@ -39,6 +39,7 @@ def worker_result_extractor(data):
         
         # retrieve the query information
         doc_table_q = dlh.get_table_by_numeric_id(query_id)
+        assert doc_table_q is not None, print(query_id)
 
         assert query_id == doc_table_q['_id_numeric']
         table_q = doc_table_q['content']
@@ -57,7 +58,12 @@ def worker_result_extractor(data):
 
         if lookup_results:
             hit += 1
-            sloth_overlap, set_q_size, set_r_size, set_overlap, bag_q_size, bag_r_size, bag_overlap, set_union_size, sloth_time, set_time, bag_time = lookup_results
+            (
+                sloth_overlap, 
+                set_q_size, set_r_size, set_overlap, set_union_size,
+                bag_q_size, bag_r_size, bag_overlap, 
+                sloth_time, set_time, bag_time
+            ) = lookup_results
         else:
             sloth_overlap, sloth_time = largest_overlap_sloth(table_q, table_r, valid_columns_q, valid_columns_r, blacklist=blacklist)
             sloth_overlap = max(sloth_overlap, 0)
@@ -103,12 +109,12 @@ def worker_result_extractor(data):
             jaccard_sim = multi_jaccard_sim = containment = overlap_set_similarity = area_ratio = prox = 0
 
         rv.append([
-            # 0         1           2       3       4            5
+            # 0...5
             query_id, result_id, algorithm, mode, sloth_overlap, algorithm_overlap,
+            
             # 6...12 
-            set_q_size, set_r_size, set_overlap, 
+            set_q_size, set_r_size, set_overlap, set_union_size,
             bag_q_size, bag_r_size, bag_overlap,
-            set_union_size,
             
             # 13...18
             jaccard_sim, 
@@ -118,7 +124,7 @@ def worker_result_extractor(data):
             prox,
             area_ratio,
             
-            # 
+            # 19...21
             round(sloth_time, 5),
             round(set_time, 5),
             round(bag_time, 5)
@@ -184,7 +190,7 @@ def extract_results(test_name,
     )
 
     test_name = test_name.lower()
-    num_query_samples = numerize(num_query_samples, asint=True)
+    num_query_samples = numerize(num_query_samples)
     info(f' {test_name.upper()} - {k} - {num_query_samples} - EXTRACTION '.center(150, '#'))
 
     p = get_all_paths(test_name, datalake_name, k, num_query_samples)
