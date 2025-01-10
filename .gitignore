@@ -1,8 +1,8 @@
 data
 models
 
-sloth/data_preparation
-sloth/experiments
+dltf/sloth/data_preparation
+dltf/sloth/experiments
 
 MATE/*
 !MATE/src
