@@ -3,7 +3,7 @@ import binascii
 from itertools import chain
 
 from sqlalchemy.orm import Session
-from sqlalchemy.engine import URL, Engine
+from sqlalchemy.engine import URL
 from sqlalchemy import (
     Table, MetaData, Column,
     Integer, LargeBinary, ARRAY,
@@ -20,14 +20,10 @@ InvertedList = Set = Query = ReadListCostSamples = ReadSetCostSamples = None
 
 
 class JOSIEDBHandler:
-    def __init__(self, mode:str, url: URL | None = None, engine: Engine | None = None, **connection_info) -> None:
+    def __init__(self, mode:str, **connection_info) -> None:
         self.mode = mode
-        if url and engine:
-            self.url = url
-            self.engine = engine
-        else:
-            self.url = URL.create(**connection_info)
-            self.engine = create_engine(self.url)
+        self.url = URL.create(**connection_info)
+        self.engine = create_engine(self.url)
 
         # initial cost values 
         self.min_read_cost = 1000000.0
@@ -115,7 +111,6 @@ class JOSIEDBHandler:
         ReadListCostSamples = read_list_cost_samples_table
         ReadSetCostSamples = read_set_cost_samples_table
 
-        # Base.metadata.create_all(self.engine)
         metadata.reflect(self.engine)
         metadata.create_all(self.engine, checkfirst=True)
 
@@ -181,13 +176,6 @@ class JOSIEDBHandler:
         return list(self.execute_read(text(q), 'all'))
         # with Session(self.engine) as session:
         #     return list(session.execute(text(q)))
-
-    def are_costs_sampled(self):
-        q = f""" 
-            SELECT 
-                (SELECT COUNT(*) FROM {ReadListCostSamples.name}),
-                (SELECT COUNT(*) FROM {ReadSetCostSamples.name});"""
-        return all(x != 0 for x in self.execute_read(text(q), 'one'))
 
     def close(self):
         self.engine.dispose()
@@ -296,12 +284,11 @@ class JOSIEDBHandler:
     
     def get_raw_tokens(self, tokens):
         q = f"""
-        SELECT array_agg(raw_token)
-        FROM {self.mode}__inverted_lists
-        WHERE token = ANY(:tokens)
+            SELECT array_agg(raw_token)
+            FROM {self.mode}__inverted_lists
+            WHERE token = ANY(:tokens)
         """
-
-        return self.execute_read(text(q), 'all', tokens=tokens)
+        return [r[0] for r in self.execute_read(text(q), 'all', tokens=tokens)][0]
     
     def get_queries_agg_id(self):
         return self.execute_read(select(func.array_agg(Query.c.id)), 'one')[0]
@@ -387,6 +374,17 @@ class JOSIEDBHandler:
             self.read_set_cost_slope = slope
             self.read_set_cost_intercept = intercept
 
+    def are_costs_sampled(self):
+        q = f""" 
+            SELECT 
+                (SELECT COUNT(*) FROM {ReadListCostSamples.name}),
+                (SELECT COUNT(*) FROM {ReadSetCostSamples.name});"""
+        return all(x != 0 for x in self.execute_read(text(q), 'one'))
+
+    def random_set_ids(self, n):
+        q = select(Set.c.id).order_by(func.random()).limit(n)
+        return self.execute_read(q, 'all')
+
     def sample_costs(self, 
                      min_length:int = 0, 
                      max_length:int = 20_000, 
@@ -396,7 +394,9 @@ class JOSIEDBHandler:
         Sample costs. Pay attention to tune the parameters in order to avoid sampling with zero-variance 
         or similar numeric problems, that will end with NULL values for the results of regression computation
         """
-        sample_set_ids = self.get_queries_agg_id()
+        # sample_set_ids = self.get_queries_agg_id()
+        random_ids = list(self.random_set_ids(100))
+        sample_set_ids = [row[0] for row in random_ids]
         
         for set_id in sample_set_ids:
             start = time.time()
@@ -413,16 +413,3 @@ class JOSIEDBHandler:
             _ = self.get_inverted_list(token)
             duration = time.time() - start
             self.update_read_list_cost(token, int(duration * 1e6))
-
-
-    def get_tokens_from_column_bags(self, column_bags):
-        tableids_tokens = list(self.execute_read(select(Set.c.id, Set.c.tokens).where(Set.c.id.in_(column_bags.keys())), 'all'))
-        all_token_ids = set(chain(*[row[1] for row in tableids_tokens]))
-        
-        return [
-            [row[0], row[1], binascii.unhexlify(row[1]).decode('utf-8')]
-            for row in self.execute_read(
-                select(InvertedList.c.token, InvertedList.c.raw_token).where(InvertedList.c.token.in_(all_token_ids)),
-                'all'
-            )
-        ]

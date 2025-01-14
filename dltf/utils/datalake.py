@@ -58,10 +58,10 @@ class MongoDBDataLakeHandler(DataLakeHandler):
             if (document := collection.find_one({'_id': _id})) != None:
                 return self.doc_to_table(document)
             
-    def get_table_by_numeric_id(self, numeric_id):
+    def get_table_by_numeric_id(self, numeric_id, return_original_doc=False):
         for collection in self._collections:
             if (document := collection.find_one({'_id_numeric': numeric_id})) != None:
-                return self.doc_to_table(document)
+                return document if return_original_doc else self.doc_to_table(document)
 
     def count_tables(self):
         return sum(c.count_documents({}, hint='_id_') for c in self._collections)

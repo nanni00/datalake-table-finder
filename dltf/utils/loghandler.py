@@ -2,20 +2,21 @@ import sys
 import logging
 
 
-def logging_setup(logfile):
+def logging_setup(logfile=None, on_stdout=True):
     logger = logging.getLogger('TestLog')
     
     if not logger.handlers:
-        handler_sysout = logging.StreamHandler(sys.stdout)
-        handler_file = logging.FileHandler(logfile)
-        
         formatter = logging.Formatter("%(asctime)s [%(levelname)s] %(message)s", datefmt="%Y-%m-%d %H:%M:%S")
         
-        handler_sysout.setFormatter(formatter)
-        handler_file.setFormatter(formatter)
-
-        logger.addHandler(handler_sysout)
-        logger.addHandler(handler_file)
+        if logfile:
+            handler_file = logging.FileHandler(logfile)
+            handler_file.setFormatter(formatter)
+            logger.addHandler(handler_file)
+            
+        if on_stdout:
+            handler_sysout = logging.StreamHandler(sys.stdout)
+            handler_sysout.setFormatter(formatter)
+            logger.addHandler(handler_sysout)
 
         logger.setLevel(logging.INFO)
         logger.propagate = False

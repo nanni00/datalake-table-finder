@@ -1,17 +1,13 @@
+tmp
 data
 models
 
 sloth/data_preparation
 sloth/experiments
 
-MATE/*
-!MATE/src
-
-
 deepjoin
 table_bert
-experiments/multi_key_join/*
-!experiments/multi_key_join/*.py
+multi_key_join/headers
 
 .git
 .vscode

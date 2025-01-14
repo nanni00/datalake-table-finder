@@ -25,7 +25,7 @@ class LSHForestTester(AlgorithmTester):
     
     def data_preparation(self):
         spark, rdd = get_spark_session(self.dlh, **self.spark_config)
-        mode, blacklist, token_translators, num_perm, hash_func = self.mode, self.blacklist, self.token_translators, self.num_perm, self.hash_func
+        mode, blacklist, token_translators, num_perm, hash_func = self.mode, self.blacklist, self.string_translators, self.num_perm, self.hash_func
         forest = MinHashLSHForest(num_perm=self.num_perm, l=self.l)
 
         def create_minhash(table, valid_columns):
@@ -83,7 +83,7 @@ class LSHForestTester(AlgorithmTester):
                 table_q = self.dlh.get_table_by_numeric_id(query_id)
                 valid_columns_q, content_q = table_q['valid_columns'], table_q['content']
                 
-                token_set_q = table_to_tokens(content_q, valid_columns_q, self.mode, blacklist=self.blacklist, string_transformers=self.token_translators)
+                token_set_q = table_to_tokens(content_q, valid_columns_q, self.mode, blacklist=self.blacklist, string_translators=self.string_translators)
 
                 minhash_q = MinHash(num_perm=self.num_perm, hashfunc=self.hash_func)
                 minhash_q.update_batch(token_set_q)

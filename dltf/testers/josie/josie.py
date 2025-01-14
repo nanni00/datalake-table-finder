@@ -56,13 +56,14 @@ class JOSIETester(AlgorithmTester):
         start = time()
         self.db.create_tables()
         
-        mode, blacklist, dlh, token_translators = self.mode, self.blacklist, self.dlh, self.token_translators
+        # PySpark cannot access self.arg, like self.mode
+        mode, blacklist, dlh, string_translators = self.mode, self.blacklist, self.dlh, self.string_translators
         
         info('Preparing inverted index and integer set tables...')
         spark, initial_rdd = get_spark_session(dlh, **self.spark_config)
 
-        initial_rdd = initial_rdd.filter(lambda t: t['num_header_rows'] == 1)
-        info(f'Tables with num_header_rows=1: {initial_rdd.count()}')
+        # initial_rdd = initial_rdd.filter(lambda t: t['num_header_rows'] == 1)
+        # info(f'Tables with num_header_rows=1: {initial_rdd.count()}')
         
         token_sets = (
             initial_rdd
@@ -74,10 +75,12 @@ class JOSIETester(AlgorithmTester):
                 lambda t: is_valid_table(t[1], t[2])
             )
             .map(
-                # PySpark cannot access self.arg, like self.mode
                 # (_id_numeric, content, valid_columns) -> (_id_numeric, [token1, token2, token3, ...])
                 lambda t: [t[0], table_to_tokens(t[1], t[2], 
-                                                 mode=mode, encode=None, blacklist=blacklist, string_transformers=token_translators)]
+                                                 mode=mode, 
+                                                 encode=None, 
+                                                 blacklist=blacklist, 
+                                                 string_translators=string_translators)]
             ).flatMap(
                     # (set_id, [tok1, tok2, tok3, ...]) -> [(tok1, set_id), (tok2, set_id), ...]
                     lambda t: [(token, t[0]) for token in t[1]]
@@ -196,7 +199,9 @@ class JOSIETester(AlgorithmTester):
 
         # STAGE 4: SAVE INTEGER SETS AND FINAL POSTING LISTS
         n_posting_lists = posting_lists.count()
+        n_sets = integer_sets.count()
         info(f"Total posting lists: {n_posting_lists}")
+        info(f"Total integer sets: {n_sets}")
         
         def _integer_set_format(t):
             sid, indices = t
@@ -250,9 +255,9 @@ class JOSIETester(AlgorithmTester):
             )
         )
         
-        spark.sparkContext.stop()
+        spark.stop()
 
-        # TODO this is quite inefficient, maybe could be improved/there are different ways?
+        # TODO this is inefficient, maybe could be improved/there are different ways?
         # create a bidict between the token IDs and the original string
         # store the original strings on the database is expensive, 
         # and also an index on such strings is unfeasible
@@ -261,9 +266,10 @@ class JOSIETester(AlgorithmTester):
         raw_tokens = self.db.get_raw_tokens_from_to(0, n_posting_lists)
         info('Start creating the dictionary...')
         tokens_bidict = bidict({token: binascii.unhexlify(raw_token).decode('utf-8') for token, raw_token in raw_tokens})
+        info(f'Bidictionary size: {len(tokens_bidict)}')
         info(f'Saving the dictionary to {self.tokens_bidict_file}...')
         with open(self.tokens_bidict_file, 'wb') as fw:
-            pickle.dump(tokens_bidict, fw)
+            pickle.dump(tokens_bidict, fw, protocol=pickle.HIGHEST_PROTOCOL)
         info('Done.')
 
         # save database statistics
@@ -273,64 +279,55 @@ class JOSIETester(AlgorithmTester):
             dbstat.write_csv(fw, include_header=False if append else True)
         
         info('Completed JOSIE data preparation.')
-        return round(time() - start, 3), dbstat['total_size'].map_elements(convert_to_giga).sum()
+        return round(time() - start, 3), dbstat['total_size'].map_elements(convert_to_giga, return_dtype=pl.Float64).sum()
         
-    def query(self, results_file, k, queries:List[int]|Dict[int,List[int]], **kwargs):
-        force_sampling_cost = kwargs['force_sampling_cost']
-        info('Starting JOSIE tests...')
-        results_directory = kwargs['results_directory']
-        token_table_on_memory = kwargs['token_table_on_memory']
-        verbose = True # False if 'verbose' not in kwargs else kwargs['verbose']
-
+    def query(self, results_file, k, queries:List[int]|Dict[int,List[int]], reset_cost_function_parameters=False, force_sampling_cost=False, token_table_on_memory=False, verbose=False):
+        """Run the query with the passed queries. If it is a list of integer, it assumes that 
+        it's a list of table IDs already present in the index. Otherwise, it assumes that it's a 
+        dictionary with pairs <QueryID, QueryTokenIDs>, where the token IDs are relative to tokens
+        in the index, and they are already sorted. """
+        
+        if verbose: info('Starting JOSIE tests...')
+        self.db.load_tables()
+        
         start_query = time()
         if isinstance(queries, list):
             # insert the queries into the Queries table
-            self.db.load_tables()
             self.db.clear_query_table()
             self.db.add_queries_from_existing_tables(queries)
             # get the queries as tuples 
             # <query/set_id, list[token_ids], list[raw_tokens]>
             queries = [RawTokenSet(*row) for row in self.db.get_query_sets()]
         else:
+            self.db.clear_query_table()
+            self.db.add_queries(*zip(*queries.items()))
             queries = [RawTokenSet(qid, qtokens, self.db.get_raw_tokens(qtokens)) for qid, qtokens in queries.items()]
 
         if not self.db.are_costs_sampled() or force_sampling_cost:
-            info('Deleting old cost tables values...')
+            if verbose: info('Deleting old cost tables values...')
             self.db.delete_cost_tables()
-            info('Sampling costs...')
+            if verbose: info('Sampling costs...')
             self.db.sample_costs()
-
-        # we are not considering the query preparation steps, since in some cases this will 
-        # include also the cost sampling phase and in other cases it won't
-        info(f'Using token table on memory: {token_table_on_memory}')
 
         # reset the cost function parameters used by JOSIE 
         # for the cost estimation
-        self.db.reset_cost_function_parameters(verbose)
+        if reset_cost_function_parameters:
+            if verbose: info(f'Resetting cost function parameters...')
+            self.db.reset_cost_function_parameters(verbose)
 
-        if verbose:
-            info("Counting total number of sets")
-        total_number_of_sets = float(self.db.count_sets())
-        if verbose:
-            info(f"Number of sets: {total_number_of_sets}")
+        if verbose: info(f"Number of sets: {self.db.count_sets()}")
 
         # create the token table, on memory or on disk
-        if token_table_on_memory:
-            if verbose: info("Creating token table on memory...")
-            tb = TokenTableMem(self.db, True)
-        else:
-            if verbose: info("Creating token table on disk...")
-            tb = TokenTableDisk(self.db, True)
+        if verbose: info(f"Creating token table on {'memory' if token_table_on_memory else 'disk'}...")
+        tb = TokenTableMem(self.db, True) if token_table_on_memory else TokenTableDisk(self.db, True)
 
-        if verbose: info(f"Begin experiment for {k=}")
-        if not os.path.exists(results_directory):
-            os.mkdir(results_directory)
+        if verbose: info(f"Begin experiment for {k=}...")
         
         perfs = []
         start = time()
 
         # execute the JOSIE algorithm for each query
-        for q in tqdm(queries):
+        for q in tqdm(queries, disable=not verbose):
             try:
                 perfs.append(JOSIE(self.db, tb, q, k, ignore_self=True)[1])
             except Exception as e:
@@ -350,7 +347,7 @@ class JOSIETester(AlgorithmTester):
             .write_csv(results_file)
         )
 
-        info('Completed JOSIE tests.')
+        if verbose: info('Completed JOSIE tests.')
         return round(time() - start_query, 5)
 
     def clean(self):

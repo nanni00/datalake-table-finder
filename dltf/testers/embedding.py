@@ -102,7 +102,7 @@ class EmbeddingTester(AlgorithmTester):
         work = range(self.dlh.count_tables())
         chunk_size = max(len(work) // self.num_cpu, 1)
 
-        initargs = (self.mode, self.num_cpu, self.blacklist, self.token_translators, self.model_path, self.dlh.config())
+        initargs = (self.mode, self.num_cpu, self.blacklist, self.string_translators, self.model_path, self.dlh.config())
 
         with mp.get_context('spawn').Pool(self.num_cpu, initializer=initializer, initargs=initargs) as pool:
             info(f'Start embedding tables, chunk-size={chunk_size}...')
@@ -173,7 +173,7 @@ class EmbeddingTester(AlgorithmTester):
 
             doc = self.dlh.get_table_by_numeric_id(int(qid))
             
-            colemb = model.embed_columns(doc['content'], doc['valid_columns'], self.blacklist, *self.token_translators)
+            colemb = model.embed_columns(doc['content'], doc['valid_columns'], self.blacklist, *self.string_translators)
             ids = np.expand_dims(np.repeat([qid], colemb.shape[0]), axis=0)
             xq_ids = np.concatenate((xq_ids, ids.T))
             xq = np.concatenate((xq, colemb), axis=0)

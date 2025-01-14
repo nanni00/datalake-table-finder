@@ -26,7 +26,7 @@ class BruteForceTester(AlgorithmTester):
                                                     self.mode,
                                                     encode=None,
                                                     blacklist=[],
-                                                    string_transformers=self.token_translators))
+                                                    string_translators=self.string_translators))
         info("Tokenized tables created.")
 
         info("All-to-all comparisons...")

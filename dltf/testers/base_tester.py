@@ -8,7 +8,7 @@ class AlgorithmTester(ABC):
         self.mode = mode
         self.blacklist = blacklist
         self.dlh = dlh
-        self.token_translators = token_translators
+        self.string_translators = token_translators
 
     @abstractmethod
     def data_preparation(self) -> None:

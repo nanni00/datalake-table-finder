@@ -15,19 +15,20 @@ punctuation_translator =    str.maketrans(punctuation, ' ' * len(punctuation))
 lowercase_translator =      str.maketrans(ascii_uppercase, ascii_lowercase)
 
 
-def clean_string(s, *translators):
-    if len(translators) == 0:
-        translators = [str.maketrans('\n|', '  ')]
-    return reduce(lambda si, tr: str(si).translate(tr), translators, str(s)).strip()
-
-
 def get_string_translator(tr):
     match tr:
         case 'whitespace':  return whitespace_translator
         case 'digits':      return digits_translator
         case 'punctuation': return punctuation_translator
         case 'lowercase':   return lowercase_translator
-        case _:            raise ValueError(f'Unknown translator: {tr}')
+        case _:             raise ValueError(f'Unknown translator: {tr}')
+
+
+def clean_string(s, *translators):
+    if len(translators) == 0:
+        translators = [str.maketrans('\n|', '  ')]
+    translators = [t if isinstance(t, dict) else get_string_translator(t) for t in translators]
+    return reduce(lambda si, tr: str(si).translate(tr), translators, str(s)).strip()
 
 
 def mmh3_hashfunc(d):

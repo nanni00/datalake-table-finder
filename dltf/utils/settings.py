@@ -59,12 +59,12 @@ ALGORITHM_MODE_CONFIG = [
 
 
 class TablesThresholds(IntEnum):
-    MIN_ROWS = 5
-    MAX_ROWS = 1_000_000_000
-    MIN_COLUMNS = 2
+    MIN_ROWS    = 10
+    MAX_ROWS    = 1_000_000_000
+    MIN_COLUMNS = 3
     MAX_COLUMNS = 1_000_000_000
-    MIN_AREA = 0
-    MAX_AREA = 1_000_000_000
+    MIN_AREA    = 0
+    MAX_AREA    = 1_000_000_000
     
 
 

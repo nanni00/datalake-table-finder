@@ -70,8 +70,8 @@ def worker_result_extractor(data):
             
             # the intersection size is used for computing Jaccard Similarity or other metrics like containment, 
             # so compute using the set semantic, since it considers the intersection of the table "basic" values
-            set_q = set(table_to_tokens(table_q, valid_columns_q, 'set', blacklist=blacklist, string_transformers=string_transformers))
-            set_r = set(table_to_tokens(table_r, valid_columns_r, 'set', blacklist=blacklist, string_transformers=string_transformers))
+            set_q = set(table_to_tokens(table_q, valid_columns_q, 'set', blacklist=blacklist, string_translators=string_transformers))
+            set_r = set(table_to_tokens(table_r, valid_columns_r, 'set', blacklist=blacklist, string_translators=string_transformers))
             sstart = time()
             set_overlap = len(set_q & set_r)
             set_time = time() - sstart
@@ -79,8 +79,8 @@ def worker_result_extractor(data):
 
             set_union_size = len(set_q | set_r)
 
-            bag_q = set(table_to_tokens(table_q, valid_columns_q, 'bag', blacklist=blacklist, string_transformers=string_transformers))
-            bag_r = set(table_to_tokens(table_r, valid_columns_r, 'bag', blacklist=blacklist, string_transformers=string_transformers))
+            bag_q = set(table_to_tokens(table_q, valid_columns_q, 'bag', blacklist=blacklist, string_translators=string_transformers))
+            bag_r = set(table_to_tokens(table_r, valid_columns_r, 'bag', blacklist=blacklist, string_translators=string_transformers))
             bstart = time()
             bag_overlap = len(bag_q & bag_r)
             bag_time = time() - bstart
