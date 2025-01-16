@@ -38,12 +38,12 @@ def get_result_overlaps(s):
 
 
 class JOSIETester(AlgorithmTester):
-    def __init__(self, mode, blacklist, datalake_handler:DataLakeHandler, token_translators,
+    def __init__(self, mode, blacklist, datalake_handler:DataLakeHandler, string_translators, string_patterns,
                  dbstatfile:str,
                  tokens_bidict_file:str,
                  josie_db_connection_info:dict,
                  spark_config:dict) -> None:
-        super().__init__(mode, blacklist, datalake_handler, token_translators)
+        super().__init__(mode, blacklist, datalake_handler, string_translators, string_patterns)
         self.db_stat_file = dbstatfile
         self.tokens_bidict_file = tokens_bidict_file
         self.josie_db_connection_info = josie_db_connection_info
@@ -57,7 +57,7 @@ class JOSIETester(AlgorithmTester):
         self.db.create_tables()
         
         # PySpark cannot access self.arg, like self.mode
-        mode, blacklist, dlh, string_translators = self.mode, self.blacklist, self.dlh, self.string_translators
+        mode, blacklist, dlh, string_translators, string_patterns = self.mode, self.blacklist, self.dlh, self.string_translators, self.string_patterns
         
         info('Preparing inverted index and integer set tables...')
         spark, initial_rdd = get_spark_session(dlh, **self.spark_config)
@@ -80,7 +80,8 @@ class JOSIETester(AlgorithmTester):
                                                  mode=mode, 
                                                  encode=None, 
                                                  blacklist=blacklist, 
-                                                 string_translators=string_translators)]
+                                                 string_translators=string_translators,
+                                                 string_patterns=string_patterns)]
             ).flatMap(
                     # (set_id, [tok1, tok2, tok3, ...]) -> [(tok1, set_id), (tok2, set_id), ...]
                     lambda t: [(token, t[0]) for token in t[1]]

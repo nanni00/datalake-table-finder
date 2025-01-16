@@ -4,11 +4,12 @@ from dltf.utils.datalake import DataLakeHandler
 
 
 class AlgorithmTester(ABC):
-    def __init__(self, mode, blacklist, dlh:DataLakeHandler, token_translators) -> None:
+    def __init__(self, mode, blacklist, dlh:DataLakeHandler, string_translators, string_patterns) -> None:
         self.mode = mode
         self.blacklist = blacklist
         self.dlh = dlh
-        self.string_translators = token_translators
+        self.string_translators = string_translators
+        self.string_patterns = string_patterns
 
     @abstractmethod
     def data_preparation(self) -> None:

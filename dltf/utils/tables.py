@@ -58,7 +58,7 @@ def naive_detect_valid_columns(table: list[list], tokenize=lambda cell: cell) ->
         else [int(_is_valid_column(column, tokenize)) for column in table_rows_to_columns(table, 0, len(table[0]), [1] * len(table[0]))]
 
 
-def table_to_tokens(table, valid_columns, mode, encode=None, blacklist:set=set(), string_translators:list|None=None):
+def table_to_tokens(table, valid_columns, mode, encode=None, blacklist:set=set(), string_translators:list=[], string_patterns:list=[]):
     """ 
     Create the tokens set for the given table
     :param table: a list of list (row-view) of the table content 
@@ -68,18 +68,19 @@ def table_to_tokens(table, valid_columns, mode, encode=None, blacklist:set=set()
     :param encode: if set, tokens will be encoded as specified (e.g. 'utf-8')
     :param blacklist: a set of tokens that won't be considered
     """
+    table = [[clean_string(token, string_translators, string_patterns) for token in row] for row in table]
     if mode == 'set':
-        tokens = list({clean_string(token, *string_translators) for row in table for icol, token in enumerate(row) 
-                     if not pd.isna(token) and token and valid_columns[icol] == 1 and clean_string(token, *string_translators) not in blacklist})
+        tokens = list({token for row in table for icol, token in enumerate(row) 
+                     if not pd.isna(token) and token and valid_columns[icol] == 1 and token not in blacklist})
     elif mode == 'bag':
         counter = defaultdict(int)
         
-        def _create_token_tag(token):
+        def create_token_tag(token):
             counter[token] += 1
             return f'{token}{_TOKEN_TAG_SEPARATOR}{counter[token]}'
         
-        tokens = [_create_token_tag(clean_string(token, *string_translators)) for row in table for icol, token in enumerate(row)
-                if not pd.isna(token) and token and valid_columns[icol] == 1 and clean_string(token, *string_translators) not in blacklist]
+        tokens = [create_token_tag(token) for row in table for icol, token in enumerate(row)
+                if not pd.isna(token) and token and valid_columns[icol] == 1 and token not in blacklist]
     else:
         raise Exception('Unknown mode: ' + str(mode))
     return tokens if not encode else [token.encode(encode) for token in tokens]

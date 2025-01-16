@@ -3,12 +3,14 @@ import itertools as it
 import math
 import pandas as pd
 import time
-import timeout_decorator
+# import timeout_decorator
+from wrapt_timeout_decorator import timeout
 from . import variables as var
 from .utils import to_bag_counter
 
 
-@timeout_decorator.timeout(var.timeout_s)
+# @timeout_decorator.timeout(var.timeout_s)
+@timeout(var.timeout_s, timeout_exception=Exception)
 def detect_seeds(r_tab, s_tab, r_w, s_w, min_h):
     """
     Detect the seeds (i.e., the single-column-mappings whose area is greater than zero)
@@ -68,7 +70,8 @@ def compute_bag_intersection(r_tab, s_tab, seed_ids, seeds):
     return r_bag & s_bag
 
 
-@timeout_decorator.timeout(var.timeout_a)
+# @timeout_decorator.timeout(var.timeout_a)
+@timeout(var.timeout_a, timeout_exception=Exception)
 def approximate_algorithm(bw, r_tab, s_tab, seeds, num_seeds, top_lev, theta, min_w, max_w, min_h, max_h, results,
                           res_h, complete, verbose, metrics):
     """
@@ -241,7 +244,8 @@ def exact_algorithm_setup(seeds, top_lev, theta, min_w, max_w):
     return gen_pq
 
 
-@timeout_decorator.timeout(var.timeout_e)
+# @timeout_decorator.timeout(var.timeout_e)
+@timeout(var.timeout_e, timeout_exception=Exception)
 def exact_algorithm(r_tab, s_tab, r_w, s_w, seeds, num_seeds, top_lev, theta, min_w, max_w, min_h, max_h, results,
                     res_h, complete, verbose, metrics):
     """
@@ -506,17 +510,16 @@ def sloth(r_tab, s_tab, min_a=0, min_w=0, max_w=math.inf, min_h=0, max_h=math.in
     try:
         results, metrics = exact_algorithm(r_tab, s_tab, r_w, s_w, seeds, num_seeds, top_lev, theta, min_w, max_w,
                                            min_h, max_h, results, res_h, complete, verbose, metrics)
-    except Exception as exc:
-        print(exc)
-        print('SLOTH - Exact failed')
+    except: # (TimeoutError, Exception) as exc:
+        print('Exact failed')
         if var.run_approximate:
             try:
                 results, metrics = approximate_algorithm(bw, r_tab, s_tab, seeds, num_seeds, top_lev, theta, min_w,
                                                          max_w, min_h, max_h, results, res_h, complete, verbose,
                                                          metrics)
-            except Exception as exc:
-                print(exc)
-                print('SLOTH - Approximate failed')
+            except: # (TimeoutError, Exception) as exc:
+                # print(exc)
+                print('Approximate failed')
 
     tot_time = time.time() - start_time
     if verbose:

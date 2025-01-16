@@ -10,6 +10,9 @@ dependencies:
   - tqdm
   - nltk
   - pip:
+    - pyside6
+    - ipykernel
+    - tabulate
     - polars
     - psycopg2
     - scikit-learn

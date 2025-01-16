@@ -109,7 +109,7 @@ def multi_key_search(dlhconfig,
     josie = JOSIETester(mode=mode, 
                         blacklist=blacklist, 
                         datalake_handler=dlh, 
-                        token_translators=[lowercase_translator, whitespace_translator], 
+                        string_translators=[lowercase_translator, whitespace_translator], 
                         dbstatfile=None, 
                         spark_config=None,
                         josie_db_connection_info=db_connection_info)

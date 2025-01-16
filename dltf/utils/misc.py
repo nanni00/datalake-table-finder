@@ -24,10 +24,11 @@ def get_string_translator(tr):
         case _:             raise ValueError(f'Unknown translator: {tr}')
 
 
-def clean_string(s, *translators):
+def clean_string(s, translators=[], replace_patterns=[]):
     if len(translators) == 0:
         translators = [str.maketrans('\n|', '  ')]
     translators = [t if isinstance(t, dict) else get_string_translator(t) for t in translators]
+    s = reduce(lambda ss, rp: re.sub(rp[0], rp[1], ss), replace_patterns, s)
     return reduce(lambda si, tr: str(si).translate(tr), translators, str(s)).strip()
 
 
@@ -49,10 +50,8 @@ def convert_to_giga(x):
 
 
 
-def largest_overlap_sloth(table1, table2, valid_cols1, valid_cols2, verbose=False, blacklist=[], **sloth_args) -> tuple[int, float]:
-    num_null = 0
-
-    def format_value_for_excluding_nan(t):
+def largest_overlap_sloth(r_tab, s_tab, r_valid_cols, s_valid_cols, blacklist=[], **sloth_args) -> tuple[int, float]:
+    def format_bad_values(t):
         nonlocal num_null
         if not t or pd.isna(t) or t in blacklist:
             num_null += 1
@@ -60,21 +59,18 @@ def largest_overlap_sloth(table1, table2, valid_cols1, valid_cols2, verbose=Fals
         t = clean_string(t)
         return t
     
-    table1 = [[format_value_for_excluding_nan(row[i]) for row in table1] for i in range(len(table1[0])) if valid_cols1[i] == 1]
-    table2 = [[format_value_for_excluding_nan(row[i]) for row in table2] for i in range(len(table2[0])) if valid_cols2[i] == 1]
-
+    num_null = 0
+    r_tab = [[format_bad_values(row[i]) for row in r_tab] for i in range(len(r_tab[0])) if r_valid_cols[i] == 1]
+    s_tab = [[format_bad_values(row[i]) for row in s_tab] for i in range(len(s_tab[0])) if s_valid_cols[i] == 1]
+    
     metrics = []
-    start_sloth = time.time()
-    try:
-        results, metrics = sloth(table1, table2, metrics=metrics, verbose=verbose, **sloth_args)
-        if results == []:
-            return -2, round(time.time() - start_sloth, 3)
-        largest_ov_sloth = metrics[-2]
-        return largest_ov_sloth, round(time.time() - start_sloth, 3)
-    except TimeoutError:
-        return -1, round(time.time() - start_sloth, 3)
-    except IndexError:        
-        return -2, round(time.time() - start_sloth, 3)
+    _, metrics = sloth(r_tab, s_tab, metrics=metrics, **sloth_args)
+    # print(f'{metrics=}')
+    if len(metrics) < 8:
+        return 0, 0
+    largest_ov_sloth = metrics[-2]
+    return largest_ov_sloth, round(metrics[-1], 3)
+    
 
 
 

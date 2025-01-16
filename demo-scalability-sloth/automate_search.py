@@ -9,11 +9,11 @@ from dltf.utils import tables
 from dltf.utils.misc import clean_string, largest_overlap_sloth
 from dltf.testers.josie.josie import JOSIETester
 from dltf.utils.datalake import MongoDBDataLakeHandler
-from dltf.utils.loghandler import logging_setup, info
+from dltf.utils.loghandler import error, logging_setup, info
 
 
-def prepare_query(qdoc, mode='bag', blacklist=set()):    
-    global tokens_bidict
+def prepare_query(qdoc):    
+    global tokens_bidict, string_translators, string_patterns, blacklist, mode
 
     # Extract a bag of tokens from the document's content
     query_sets = [
@@ -24,7 +24,8 @@ def prepare_query(qdoc, mode='bag', blacklist=set()):
                 valid_columns=doc['valid_columns'], 
                 mode=mode, 
                 blacklist=blacklist,
-                string_translators=token_translators
+                string_translators=string_translators,
+                string_patterns=string_patterns
             )
         ]
         for doc in [qdoc]
@@ -35,9 +36,9 @@ def prepare_query(qdoc, mode='bag', blacklist=set()):
         [
             query_id, 
             sorted([
-                tokens_bidict.inverse[clean_string(token, 'lowercase', 'whitespace')]
+                tokens_bidict.inverse[clean_string(token, string_translators, string_patterns)]
                 for token in query_set 
-                if clean_string(token, 'lowercase', 'whitespace') in tokens_bidict.inverse
+                if clean_string(token, string_translators, string_patterns) in tokens_bidict.inverse
             ])
         ]
         for query_id, query_set in query_sets
@@ -61,9 +62,10 @@ collection = mongoclient.sloth.latest_snapshot_tables
 
 # Query and general parameters
 data_path                   = f'{os.path.dirname(__file__)}/data'
-k                           = 5
-blacklist                   = set()
-regex_replace_pattern       = re.compile('')
+k                           = 15
+blacklist                   = set(['–', '—', '-', '&nbsp', '&nbsp;', 'yes', 'no' 'n/a', 'none', '{{y}}', '{{n}}', '{{yes}}', '{{no}}', '{{n/a}}'] + list(map(str, range(1000))))
+string_translators          = ['whitespace', 'lowercase']
+string_patterns             = []
 
 # Set up the DataLake handler
 datalake_name               = 'demo'
@@ -73,13 +75,15 @@ dlh                         = MongoDBDataLakeHandler(datalake_location, datalake
 
 # JOSIE (global search tool) parameters
 mode                        = 'bag'
-blacklist                   = set()
-token_translators           = ['whitespace', 'lowercase']
 force_sampling_cost         = False # force JOSIE to do cost sampling before querying
 token_table_on_memory       = False # build the token table used by JOSIE directly on disk
 tokens_bidict_file          = f'{data_path}/josie-tokens-bidict.pickle'
 results_file                = f'{data_path}/results/tmp.csv'
 logfile                     = f'{data_path}/.log'
+
+# SLOTH parameters
+min_w                       = 3
+min_h                       = 10
 
 # set up the logging to trace results
 logging_setup(logfile=logfile, on_stdout=True)
@@ -99,7 +103,8 @@ josie = JOSIETester(
     mode=mode,
     blacklist=blacklist,
     datalake_handler=dlh,
-    token_translators=token_translators,
+    string_translators=string_translators,
+    string_patterns=string_patterns,
     dbstatfile=None,
     tokens_bidict_file=tokens_bidict_file,
     josie_db_connection_info=db_config,
@@ -114,40 +119,68 @@ with open(tokens_bidict_file, 'rb') as fr:
 
 
 # Define what we want to search and what not
-search_tokens = {' city', 'cancer', 'patho', 'environ', 'space', 'population'}
-filter_tokens = {'champ', 'disc', 'race', 'olymp', 'result', 'minist', 'member', 'list', 'york', 'kansas', 'toronto', 'junction', 'minnesota'}
+search_tokens = set() # {'city', 'cancer', 'pathol', 'hospital', 'town', 'open', 'agency', 'environ', 'space', 'population', 'ethn', 'country', 'party', 'univers', 'distri', 'book'}
+filter_tokens = {'city', 'cancer', 'pathol', 'hospital', 'town', 'open', 'agency', 'environ', 'space', 'population', 'ethn', 'country', 'party', 'univers', 'distri', 'book', 'career', 'disc', 'f. c.', 'open', 'winner', 'champ', 'disc', 'race', 'olymp', 'result', 'minist', 'member', 'list', 'york', 'kansas', 'toronto', 'junction', 'minnesota', 'season', 'f. c.'}
 start_from = 0
 
 
-info(f' Start searching for tokens {search_tokens}, filtering tokens {filter_tokens} '.center(200, '#'))
-
-for i, doc in enumerate(collection.find({})):
-    if not tables.is_valid_table(doc['content'][doc['num_header_rows']:], doc['valid_columns']):
+info(f' Start search '.center(100, '#'))
+info(f' {min_w=}, {min_h=} '.center(100, '#'))
+info(f'{blacklist=}')
+for i, qdoc in enumerate(collection.find({})):
+    if i < start_from:
         continue
 
-    if any(token in str(doc['context']).lower() for token in search_tokens) and not any(token in str(doc['context']).lower() for token in filter_tokens):
-        josie.query(results_file, k, prepare_query(doc, mode, blacklist))
-        josie_results = [[q, list(zip(get_result_ids(r), get_result_overlaps(r)))] for q, r in pl.read_csv(f'{results_file}.raw').select('query_id', 'results').rows()][0][1]
-        if len(josie_results) == 0:
-            continue
-        
-        sloth_results = [
-            [rid, collection.find_one({'_id_numeric': rid})]
-            for rid, _ in josie_results
-        ]
+    if search_tokens and not any(token in str(qdoc['context']).lower() for token in search_tokens):
+        continue
 
-        sloth_results = sorted([
-                [
-                    rid,
-                    largest_overlap_sloth(doc['content'][doc['num_header_rows']:], rtable['content'][rtable['num_header_rows']:],
-                                          doc['valid_columns'], rtable['valid_columns'],
-                                          verbose=False, blacklist=set())[0]
-                ]
-                for rid, rtable in sloth_results
-            ], key=lambda x: x[1], reverse=True
-        )
+    if filter_tokens and any(token in str(qdoc['context']).lower() for token in filter_tokens):
+        continue
 
-        if any(jrid != srid and srid >= 0 for (jrid, _), (srid, _) in zip(josie_results, sloth_results)):        
-            info(f'{doc["_id"]} - {doc["_id_numeric"]} - {doc["context"]}')
+    if not tables.is_valid_table(qdoc['content'][qdoc['num_header_rows']:], qdoc['valid_columns']):
+        continue
+
+    try:
+        josie.query(results_file, k, prepare_query(qdoc))
+        josie_results = [[q, list(zip(get_result_ids(r), get_result_overlaps(r)))] for q, r in pl.read_csv(f'{results_file}.raw').select('query_id', 'results').rows() if r]
+    except Exception as exc:
+        error(exc) 
+        continue
+
+    if len(josie_results) == 0:
+        continue
+
+    josie_results = josie_results[0][1]
+    if all(ov <= min_w * min_h for _, ov in josie_results):
+        continue
+    
+    sloth_results = [
+        [rid, collection.find_one({'_id_numeric': rid})]
+        for rid, _ in josie_results
+    ]
+
+    sloth_results = sorted([
+            [
+                rid,
+                largest_overlap_sloth(
+                    r_tab=qdoc['content'][qdoc['num_header_rows']:], 
+                    s_tab=rdoc['content'][rdoc['num_header_rows']:],
+                    r_valid_cols=qdoc['valid_columns'], 
+                    s_valid_cols=rdoc['valid_columns'],
+                    blacklist=set(),
+                    verbose=False,
+                    min_w=min_w, 
+                    min_h=min_h
+                )[0]
+            ]
+            for rid, rdoc in sloth_results
+        ], key=lambda x: x[1], reverse=True
+    )
+
+    if all(ov <= 0 for _, ov in sloth_results):
+        continue
+
+    if any(jrid != srid and srid >= 0 for (jrid, _), (srid, _) in zip(josie_results, sloth_results)):        
+        info(f'{qdoc["_id"]};{qdoc["_id_numeric"]};{str(sloth_results)};{str(qdoc["context"]).replace(";", " ")}')
 
         
