@@ -62,8 +62,9 @@ collection = mongoclient.sloth.latest_snapshot_tables
 
 # Query and general parameters
 data_path                   = f'{os.path.dirname(__file__)}/data'
-k                           = 15
-blacklist                   = set(['–', '—', '-', '&nbsp', '&nbsp;', 'yes', 'no' 'n/a', 'none', '{{y}}', '{{n}}', '{{yes}}', '{{no}}', '{{n/a}}'] + list(map(str, range(1000))))
+k                           = 5
+blacklist                   = set(['–', '—', '-', '●', '&nbsp', '&nbsp;', '&nbsp; &nbsp;', 'yes', 'no', 'n/a', 'none', '{{y}}', '{{n}}', '{{yes}}', '{{no}}', '{{n/a}}'] + list(map(str, range(1000))))
+
 string_translators          = ['whitespace', 'lowercase']
 string_patterns             = []
 
@@ -78,12 +79,15 @@ mode                        = 'bag'
 force_sampling_cost         = False # force JOSIE to do cost sampling before querying
 token_table_on_memory       = False # build the token table used by JOSIE directly on disk
 tokens_bidict_file          = f'{data_path}/josie-tokens-bidict.pickle'
-results_file                = f'{data_path}/results/tmp.csv'
-logfile                     = f'{data_path}/.log'
+results_file                = f'{data_path}/tmp/josie-results.csv'
 
 # SLOTH parameters
 min_w                       = 3
 min_h                       = 10
+
+# Log CSV file, related to parameters
+logfile                     = f'{data_path}/k{k}-w{min_w}-h{min_h}.csv'
+
 
 # set up the logging to trace results
 logging_setup(logfile=logfile, on_stdout=True)
@@ -119,14 +123,22 @@ with open(tokens_bidict_file, 'rb') as fr:
 
 
 # Define what we want to search and what not
-search_tokens = set() # {'city', 'cancer', 'pathol', 'hospital', 'town', 'open', 'agency', 'environ', 'space', 'population', 'ethn', 'country', 'party', 'univers', 'distri', 'book'}
-filter_tokens = {'city', 'cancer', 'pathol', 'hospital', 'town', 'open', 'agency', 'environ', 'space', 'population', 'ethn', 'country', 'party', 'univers', 'distri', 'book', 'career', 'disc', 'f. c.', 'open', 'winner', 'champ', 'disc', 'race', 'olymp', 'result', 'minist', 'member', 'list', 'york', 'kansas', 'toronto', 'junction', 'minnesota', 'season', 'f. c.'}
-start_from = 0
+search_tokens = set(['city', 'state', 'country', 'env', 'path', 'cance', 'health'])
+filter_tokens = {'building', 'cup', 'fifa', 'team', 'finals', 'club', 'achievements', 'tour', 'open', 'environ', 
+                 'career', 'disc', 'dates',
+                 'f. c.', 'open', 'winner', 'champ', 'disc', 'olymp', 
+                 'result', 'minist', 'member',
+                 'york', 'kansas', 'toronto', 'junction', 'minnesota', 'season', 'f.', 'c.', 
+                 'player', 'performance', 'united state'
+                 }
+start_from = 866331
 
 
 info(f' Start search '.center(100, '#'))
 info(f' {min_w=}, {min_h=} '.center(100, '#'))
-info(f'{blacklist=}')
+if search_tokens:
+    info(f'{search_tokens=}')
+
 for i, qdoc in enumerate(collection.find({})):
     if i < start_from:
         continue
@@ -177,7 +189,8 @@ for i, qdoc in enumerate(collection.find({})):
         ], key=lambda x: x[1], reverse=True
     )
 
-    if all(ov <= 0 for _, ov in sloth_results):
+    # I want cases where at least 3 results actually have an overlap with the query table
+    if sum(ov > 0 for _, ov in sloth_results) <= 2:
         continue
 
     if any(jrid != srid and srid >= 0 for (jrid, _), (srid, _) in zip(josie_results, sloth_results)):        
