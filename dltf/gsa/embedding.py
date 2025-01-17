@@ -10,14 +10,14 @@ from tqdm import tqdm
 
 from dltf.utils.misc import chunks
 from dltf.utils.loghandler import info
-from dltf.testers.base_tester import AlgorithmTester
+from dltf.testers.base_tester import AbstractGlobalSearchAlgorithm
 from dltf.utils.datalake import DataLakeHandlerFactory
 from dltf.utils.table_embedder import table_embedder_factory
 from dltf.utils.tables import is_valid_table
 
 
 def worker_embedding_data_preparation(data) -> tuple[np.ndarray, np.ndarray]:
-    global mode, num_cpu, blacklist, token_translators, emb_model_path, dlhargs
+    global mode, num_cpu, blacklist, string_translators, string_patterns, emb_model_path, dlhargs
     
     dlh = DataLakeHandlerFactory.create_handler(*dlhargs)
     model = table_embedder_factory(mode, emb_model_path)
@@ -45,7 +45,7 @@ def worker_embedding_data_preparation(data) -> tuple[np.ndarray, np.ndarray]:
             xb_ids = np.concatenate((xb_ids, xb_ids_batch))
             xb_batch, xb_ids_batch = np.empty(shape=(0, d)), np.empty(shape=(0, 1))
         
-        colemb = model.embed_columns(table, valid_columns, blacklist, *token_translators)
+        colemb = model.embed_columns(table, valid_columns, blacklist, string_translators, string_patterns)
         if colemb.shape[0] == 0:
             continue
 
@@ -64,24 +64,22 @@ def worker_embedding_data_preparation(data) -> tuple[np.ndarray, np.ndarray]:
 
 
 
-def initializer( _mode, _num_cpu, _blacklist, _token_translators, _emb_model_path, *_dlhargs):
-    global mode, num_cpu, blacklist, token_translators, num_perm, hash_func, emb_model_path, dlhargs
-
-    dlhargs = _dlhargs[0]    
-
-    mode =              _mode
-    num_cpu =           _num_cpu
-    blacklist =         _blacklist
-    token_translators = _token_translators
-
-    emb_model_path =    _emb_model_path
+def initializer( _mode, _num_cpu, _blacklist, _string_translators, _string_patterns, _emb_model_path, *_dlhargs):
+    global mode, num_cpu, blacklist, string_translators, string_patterns, emb_model_path, dlhargs
+    dlhargs             = _dlhargs[0]
+    mode                = _mode
+    num_cpu             = _num_cpu
+    blacklist           = _blacklist
+    string_translators  = _string_translators
+    string_patterns     = _string_patterns
+    emb_model_path      = _emb_model_path
 
 
 
-class EmbeddingTester(AlgorithmTester):
-    def __init__(self, mode, blacklist, dlh, token_translators, 
+class EmbeddingGS(AbstractGlobalSearchAlgorithm):
+    def __init__(self, mode, blacklist, dlh, string_translators, string_patterns, 
                  num_cpu, model_path, column_index_file, embedding_dimension) -> None:
-        super().__init__(mode, blacklist, dlh, token_translators)
+        super().__init__(mode, blacklist, dlh, string_translators, string_patterns)
         self.num_cpu = num_cpu
         self.model_path = model_path
         self.cidx_file = column_index_file
@@ -102,7 +100,7 @@ class EmbeddingTester(AlgorithmTester):
         work = range(self.dlh.count_tables())
         chunk_size = max(len(work) // self.num_cpu, 1)
 
-        initargs = (self.mode, self.num_cpu, self.blacklist, self.string_translators, self.model_path, self.dlh.config())
+        initargs = (self.mode, self.num_cpu, self.blacklist, self.string_translators, self.string_patterns, self.model_path, self.dlh.config())
 
         with mp.get_context('spawn').Pool(self.num_cpu, initializer=initializer, initargs=initargs) as pool:
             info(f'Start embedding tables, chunk-size={chunk_size}...')
@@ -173,7 +171,7 @@ class EmbeddingTester(AlgorithmTester):
 
             doc = self.dlh.get_table_by_numeric_id(int(qid))
             
-            colemb = model.embed_columns(doc['content'], doc['valid_columns'], self.blacklist, *self.string_translators)
+            colemb = model.embed_columns(doc['content'], doc['valid_columns'], self.blacklist, self.string_translators, self.string_patterns)
             ids = np.expand_dims(np.repeat([qid], colemb.shape[0]), axis=0)
             xq_ids = np.concatenate((xq_ids, ids.T))
             xq = np.concatenate((xq, colemb), axis=0)

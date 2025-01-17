@@ -1,7 +1,7 @@
 import os
 import pickle
 
-from dltf.testers.josie.josie import JOSIETester
+from dltf.testers.josie.josie import JOSIEGS
 
 from dltf.utils import tables
 from dltf.utils.datalake import MongoDBDataLakeHandler
@@ -47,7 +47,7 @@ db_config = {
 logging_setup()
 
 # Instatiate JOSIE
-josie = JOSIETester(
+josie = JOSIEGS(
     mode=mode,
     blacklist=blacklist,
     datalake_handler=dlh,

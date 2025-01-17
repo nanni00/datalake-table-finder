@@ -1,6 +1,6 @@
 import os
 
-from dltf.testers.josie.josie import JOSIETester
+from dltf.testers.josie.josie import JOSIEGS
 from dltf.utils.datalake import MongoDBDataLakeHandler
 from dltf.utils.loghandler import logging_setup
 
@@ -56,7 +56,7 @@ spark_config = {
 logging_setup()
 
 # Instatiate JOSIE
-josie = JOSIETester(
+josie = JOSIEGS(
     mode=mode,
     blacklist=blacklist,
     datalake_handler=dlh,

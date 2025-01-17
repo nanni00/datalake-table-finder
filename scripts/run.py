@@ -4,7 +4,7 @@ from itertools import product
 from argparse import ArgumentParser
 
 from scripts.analysis import analyses
-from scripts.tester_pipeline import tester_pipeline
+from scripts.gsa_pipeline import tester_pipeline
 from extract_results import extract_results
 
 from dltf.utils.misc import numerize

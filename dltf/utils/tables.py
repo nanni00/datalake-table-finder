@@ -10,13 +10,13 @@ from dltf.utils.settings import TablesThresholds as tab_thresh
 _TOKEN_TAG_SEPARATOR = '@#'
 
 
-def column_to_text(column, *translators, blacklist=[], max_seq_len=512):
+def column_to_text(column, translators, patterns, blacklist=[], max_seq_len=512):
     def most_frequent_tokens(column):
         column = [token for token in column if token not in blacklist]
         if len(column) < max_seq_len: 
             return column
         return [x[0] for x in sorted(list(Counter(column).items()), key=lambda x: x[1], reverse=True)][:max_seq_len]
-    return clean_string(' '.join([str(token) for token in most_frequent_tokens(column)]), *translators)
+    return clean_string(' '.join([str(token) for token in most_frequent_tokens(column)]), translators, patterns)
 
 
 def table_columns_to_rows(columns):

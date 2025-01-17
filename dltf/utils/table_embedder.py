@@ -14,11 +14,12 @@ class TableEmbedder:
     def get_dimension(self) -> int:
         pass
 
-    def embed_columns(self, table, numeric_columns, *args):
+    def embed_columns(self, table, valid_columns, *args):
         pass
 
-    def embed_rows(self, table, numeric_columns, *args):
+    def embed_rows(self, table, valid_columns, *args):
         raise NotImplementedError()
+
 
 def table_embedder_factory(table_embedder:str, model_path) -> TableEmbedder:
     match table_embedder:
@@ -48,10 +49,10 @@ class FastTextTableEmbedder(TableEmbedder):
         embedding; then gets the average of the normalised embeddings
         """
 
-        blacklist, translators = args[0], args[1:]
+        blacklist, string_translators, string_patterns = args[0], args[1:]
         max_token_per_column = 512
 
-        table = [column_to_text(column, *translators, blacklist=blacklist, max_seq_len=max_token_per_column) 
+        table = [column_to_text(column, string_translators, string_patterns, blacklist, max_seq_len=max_token_per_column) 
                  for column in table_rows_to_columns(table, 0, len(table[0]), valid_columns)]
 
         return np.array([self.model.get_sentence_vector(column) for column in table if column])

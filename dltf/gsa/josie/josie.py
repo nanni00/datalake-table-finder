@@ -19,7 +19,7 @@ from dltf.utils.spark import get_spark_session
 from dltf.utils.datalake import DataLakeHandler
 from dltf.utils.tables import is_valid_table, table_to_tokens
 
-from dltf.testers.base_tester import AlgorithmTester
+from dltf.testers.base_tester import AbstractGlobalSearchAlgorithm
 from dltf.testers.josie.db import JOSIEDBHandler
 from dltf.testers.josie.exp import write_all_results
 from dltf.testers.josie.josie_io import RawTokenSet
@@ -37,7 +37,7 @@ def get_result_overlaps(s):
 
 
 
-class JOSIETester(AlgorithmTester):
+class JOSIEGS(AbstractGlobalSearchAlgorithm):
     def __init__(self, mode, blacklist, datalake_handler:DataLakeHandler, string_translators, string_patterns,
                  dbstatfile:str,
                  tokens_bidict_file:str,
