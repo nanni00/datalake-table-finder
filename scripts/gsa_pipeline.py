@@ -8,9 +8,9 @@ import os
 
 import pandas as pd
 
-from dltf.testers.josie import josie
+from dltf.gsa.josie import josie
 from dltf.utils.query import read_query_ids
-from dltf.testers import lshforest, embedding
+from dltf.gsa import lshforest, embedding
 from dltf.utils.datalake import DataLakeHandlerFactory
 from dltf.utils.loghandler import info, logging_setup
 
@@ -133,11 +133,11 @@ def tester_pipeline(test_name:str, algorithm:str, mode:str, tasks:list[str],
     default_args = (mode, blacklist, dlh, token_translators)
     match algorithm:
         case 'josie':
-            tester = josie.JOSIETester(*default_args, db_stat_file, tokens_bidict_file, josie_db_connection_info, spark_config)
+            tester = josie.JOSIEGS(*default_args, db_stat_file, tokens_bidict_file, josie_db_connection_info, spark_config)
         case 'lshforest':
-            tester = lshforest.LSHForestTester(*default_args, forest_file, num_perm, l, hash_func, spark_config)
+            tester = lshforest.LSHForestGS(*default_args, forest_file, num_perm, l, hash_func, spark_config)
         case 'embedding':
-            tester = embedding.EmbeddingTester(*default_args, num_cpu, embedding_model_path, cidx_file, embedding_model_size)
+            tester = embedding.EmbeddingGS(*default_args, num_cpu, embedding_model_path, cidx_file, embedding_model_size)
 
     
     if CLEAN:

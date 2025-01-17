@@ -7,7 +7,7 @@ import polars as pl
 
 from dltf.utils import tables
 from dltf.utils.misc import clean_string, largest_overlap_sloth
-from dltf.testers.josie.josie import JOSIETester
+from dltf.gsa.josie.josie import JOSIEGS
 from dltf.utils.datalake import MongoDBDataLakeHandler
 from dltf.utils.loghandler import error, logging_setup, info
 
@@ -79,7 +79,7 @@ mode                        = 'bag'
 force_sampling_cost         = False # force JOSIE to do cost sampling before querying
 token_table_on_memory       = False # build the token table used by JOSIE directly on disk
 tokens_bidict_file          = f'{data_path}/josie-tokens-bidict.pickle'
-results_file                = f'{data_path}/tmp/josie-results.csv'
+results_file                = f'{data_path}/tmp/results.csv'
 
 # SLOTH parameters
 min_w                       = 3
@@ -103,7 +103,7 @@ db_config = {
 }
 
 # Instatiate JOSIE
-josie = JOSIETester(
+josie = JOSIEGS(
     mode=mode,
     blacklist=blacklist,
     datalake_handler=dlh,
@@ -123,15 +123,17 @@ with open(tokens_bidict_file, 'rb') as fr:
 
 
 # Define what we want to search and what not
-search_tokens = set(['city', 'state', 'country', 'env', 'path', 'cance', 'health'])
-filter_tokens = {'building', 'cup', 'fifa', 'team', 'finals', 'club', 'achievements', 'tour', 'open', 'environ', 
+search_tokens = set(['cit']) # set(['city', 'state', 'country', 'env', 'path', 'cance', 'health', 'space', 'air', 'gdp', 'rich', 'poor', 'clima', 'weath'])
+'List of cities in the Democratic Republic of the Congo', 'Towns and cities'
+
+filter_tokens = {'election', 'building', 'cup', 'fifa', 'team', 'finals', 'club', 'achievements', 'tour', 'open', 
                  'career', 'disc', 'dates',
                  'f. c.', 'open', 'winner', 'champ', 'disc', 'olymp', 
                  'result', 'minist', 'member',
                  'york', 'kansas', 'toronto', 'junction', 'minnesota', 'season', 'f.', 'c.', 
-                 'player', 'performance', 'united state'
+                 'player', 'performance', 'united state', 'visa', 'city'
                  }
-start_from = 866331
+start_from = 0
 
 
 info(f' Start search '.center(100, '#'))
@@ -189,8 +191,8 @@ for i, qdoc in enumerate(collection.find({})):
         ], key=lambda x: x[1], reverse=True
     )
 
-    # I want cases where at least 3 results actually have an overlap with the query table
-    if sum(ov > 0 for _, ov in sloth_results) <= 2:
+    # I want cases where at least N results actually have an overlap with the query table
+    if sum(ov > 0 for _, ov in sloth_results) <= 1:
         continue
 
     if any(jrid != srid and srid >= 0 for (jrid, _), (srid, _) in zip(josie_results, sloth_results)):        

@@ -3,7 +3,7 @@ from abc import ABC, abstractmethod
 from dltf.utils.datalake import DataLakeHandler
 
 
-class AlgorithmTester(ABC):
+class AbstractGlobalSearchAlgorithm(ABC):
     def __init__(self, mode, blacklist, dlh:DataLakeHandler, string_translators, string_patterns) -> None:
         self.mode = mode
         self.blacklist = blacklist

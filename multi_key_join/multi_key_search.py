@@ -12,7 +12,7 @@ from tqdm import tqdm
 from sqlalchemy import create_engine
 from sqlalchemy.engine import URL
 
-from dltf.testers.josie.josie import JOSIETester
+from dltf.gsa.josie.josie import JOSIEGS
 from dltf.utils.datalake import DataLakeHandler, DataLakeHandlerFactory
 from dltf.utils.misc import chunks
 from dltf.utils.loghandler import logging_setup, info
@@ -106,7 +106,7 @@ def multi_key_search(dlhconfig,
 
     dlh = DataLakeHandlerFactory.create_handler(*dlhconfig)
     
-    josie = JOSIETester(mode=mode, 
+    josie = JOSIEGS(mode=mode, 
                         blacklist=blacklist, 
                         datalake_handler=dlh, 
                         string_translators=[lowercase_translator, whitespace_translator], 
