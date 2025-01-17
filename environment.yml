@@ -20,10 +20,13 @@ dependencies:
     - matplotlib
     - sqlalchemy
     - pymongo
-    - timeout_decorator
     - bitarray
     - datasketch
     - fasttext
-    - compress-fasttext
     - faiss-cpu # that's the basic installation for the CPU-only version
     - efficient-apriori # just for MATE testing
+    - wrapt_timeout_decorator # different timeout for sloth
+    # these are used just for the demo interface
+    - gtk3
+    - gobject-introspection
+    - adwaita-icon-theme

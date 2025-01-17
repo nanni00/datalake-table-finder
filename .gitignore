@@ -5,6 +5,7 @@ models
 dltf/sloth/data_preparation
 dltf/sloth/experiments
 
+queries
 deepjoin
 table_bert
 multi_key_join/headers
