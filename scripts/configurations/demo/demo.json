@@ -9,24 +9,22 @@
             ]
         },
         
-        "blacklist": [],
-        "num_cpu": 64,
-        "token_translators": [
-            "whitespace", "lowercase"
+        "num_cpu": 10,
+        "string_blacklist": [],
+        "string_translators": [
+            "whitespace", "lowercase", ["\"", " "]
         ],
+        "string_patterns": [],
         
         "josie_db_connection_info": {
             "drivername":   "postgresql",
-            "database":     "DLTFDemo",
-            "username":     "nanni",
-            "password":     "",
+            "database":     "DEMODB",
+            "username":     "demo",
+            "password":     "demo",
             "port":         5442,
             "host":         "127.0.0.1"
         },
 
-        "embedding_model_path": "/home/nanni/datalake-table-finder/models/fasttext/cc.en.128.bin",
-        "embedding_model_size": 128,
-        
         "algorithms": [
             "josie"
         ],
@@ -38,7 +36,7 @@
     "data_preparation": {
         "spark_config": {
             "spark.app.name":               "JOSIE Data Preparation",
-            "spark.master":                 "local[64]",
+            "spark.master":                 "local[10]",
             "spark.executor.memory":        "100g",
             "spark.driver.memory":          "20g",
             "spark.local.dir":              "/home/nanni/datalake-table-finder/data/tmp_spark",
@@ -46,7 +44,6 @@
             "spark.jars.packages":          "org.mongodb.spark:mongo-spark-connector_2.12:10.3.0",
             "spark.driver.extraClassPath":  "/home/nanni/.ivy2/jars/org.postgresql_postgresql-42.7.3.jar"
         },
-        "token_table_on_mem": false,
         "num_perm": 256,
         "l": 32,
         "exec": true
@@ -54,23 +51,25 @@
 
     "sample_queries": {
         "num_query_samples": 100,
-        "exec": true
+        "exec": false
     },
 
     "query": {
-        "k": 20,
-        "force_sampling_cost": true,
-        "exec": true
+        "k": 10,
+        "token_table_on_mem": false,
+        "reset_cost_function_parameters": false,
+        "force_sampling_cost": false,
+        "exec": false
     },
 
     "extract": {
-        "clear_results_table": true,
-        "exec": true
+        "clear_results_table": false,
+        "exec": false
     },
 
     "analyses": {
         "k_values": [
-            1, 5, 10, 20
+            1, 5, 10
         ],
         "exec": false
     },

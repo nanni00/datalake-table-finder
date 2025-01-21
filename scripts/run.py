@@ -4,7 +4,7 @@ from itertools import product
 from argparse import ArgumentParser
 
 from scripts.analysis import analyses
-from scripts.gsa_pipeline import tester_pipeline
+from scripts.gsa_pipeline import gsa_pipeline
 from extract_results import extract_results
 
 from dltf.utils.misc import numerize
@@ -17,22 +17,22 @@ def run(configuration_file):
         configurations = json.load(fp)
     
     # general configuration
-    g_conf = configurations['general']
+    g_conf              = configurations['general']
 
     # datalake configuration
-    # used for data preparation, query and extraction steps
-    datalake_location = g_conf['datalake_config']['location']
-    datalake_name =     g_conf['datalake_config']['name']
-    datalake_options =  g_conf['datalake_config']['options']
-    dlhargs = [datalake_location, datalake_name, datalake_options]
+    datalake_location   = g_conf['datalake_config']['location']
+    datalake_name       = g_conf['datalake_config']['name']
+    datalake_options    = g_conf['datalake_config']['options']
+    dlhargs             = [datalake_location, datalake_name, datalake_options]
     del g_conf['datalake_config']
 
-    algorithms =        g_conf['algorithms']
-    modes =             g_conf['modes']
+    # which algorithms-modes have to be executed
+    algorithms          = g_conf['algorithms']
+    modes               = g_conf['modes']
     del g_conf['algorithms']
     del g_conf['modes']
 
-    num_query_samples = configurations['sample_queries']['num_query_samples']
+    num_query_samples   = configurations['sample_queries']['num_query_samples']
 
     if configurations['sample_queries']['exec']:
         str_num_query_samples = numerize(num_query_samples)
@@ -48,15 +48,18 @@ def run(configuration_file):
         else:
             print(f'Query file for {num_query_samples} already exists: {query_file}')
 
-    dp_conf = configurations['data_preparation']
-    q_conf = configurations['query']
-    c_conf = configurations['clean']
+    # the steps configurations
+    dp_conf     = configurations['data_preparation']
+    q_conf      = configurations['query']
+    c_conf      = configurations['clean']
 
-    dp_exec = dp_conf['exec']
-    q_exec = q_conf['exec']
-    c_exec = c_conf['exec']
+    # 'exec' defines if the relative part has to be executed
+    dp_exec     = dp_conf['exec']
+    q_exec      = q_conf['exec']
+    c_exec      = c_conf['exec']
 
-    k = q_conf['k']
+    # the number of results to return on query
+    k           = q_conf['k']
 
     tasks = []
     tasks += ['data_preparation'] if dp_exec else []
@@ -70,7 +73,7 @@ def run(configuration_file):
 
     if any(tasks):
         for algorithm, mode in product(algorithms, modes):
-            tester_pipeline(
+            gsa_pipeline(
                 algorithm=algorithm, 
                 mode=mode, 
                 tasks=tasks,
@@ -89,7 +92,7 @@ def run(configuration_file):
     if 'embedding_model_size' in g_conf:
         del g_conf['embedding_model_size']
 
-
+    # The extraction step
     if configurations['extract']['exec']:
         clear_results_table = configurations['extract']['clear_results_table']
         connection_info=g_conf['josie_db_connection_info']
@@ -103,7 +106,7 @@ def run(configuration_file):
                         num_query_samples=num_query_samples,
                         **g_conf)
 
-
+    # The analysis step
     if configurations['analyses']['exec']:
         analyses(datalake_name=datalake_name, 
                  k=k, 

@@ -4,7 +4,7 @@ import pandas as pd
 from tqdm import tqdm
 import multiprocessing as mp
 
-from dltf.utils.parallel import chunks
+from dltf.utils.misc import chunks
 from dltf.utils.settings import DefaultPath as defpath
 from dltf.utils.datalake import DataLakeHandlerFactory
 from dltf.utils.tables import is_valid_table, table_rows_to_rows

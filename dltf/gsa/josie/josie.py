@@ -19,14 +19,14 @@ from dltf.utils.spark import get_spark_session
 from dltf.utils.datalake import DataLakeHandler
 from dltf.utils.tables import is_valid_table, table_to_tokens
 
-from dltf.testers.base_tester import AbstractGlobalSearchAlgorithm
-from dltf.testers.josie.db import JOSIEDBHandler
-from dltf.testers.josie.exp import write_all_results
-from dltf.testers.josie.josie_io import RawTokenSet
-from dltf.testers.josie.josie_core import JOSIE
-from dltf.testers.josie.tokentable import TokenTableDisk, TokenTableMem
+from dltf.gsa.base_tester import AbstractGlobalSearchAlgorithm
+from dltf.gsa.josie.db import JOSIEDBHandler
+from dltf.gsa.josie.exp import write_all_results
+from dltf.gsa.josie.josie_io import RawTokenSet
+from dltf.gsa.josie.josie_core import JOSIE
+from dltf.gsa.josie.tokentable import TokenTableDisk, TokenTableMem
 
-
+__all__ = ['JOSIEGS']
 
 def get_result_ids(s):
     return str(list(map(int, re.findall(r'\d+', s)[::2])))
@@ -38,33 +38,36 @@ def get_result_overlaps(s):
 
 
 class JOSIEGS(AbstractGlobalSearchAlgorithm):
-    def __init__(self, mode, blacklist, datalake_handler:DataLakeHandler, string_translators, string_patterns,
+    def __init__(self, mode, datalake_handler:DataLakeHandler, 
+                 string_blacklist, string_translators, string_patterns,
                  dbstatfile:str,
                  tokens_bidict_file:str,
                  josie_db_connection_info:dict,
                  spark_config:dict) -> None:
-        super().__init__(mode, blacklist, datalake_handler, string_translators, string_patterns)
+        super().__init__(mode, datalake_handler, string_blacklist, string_translators, string_patterns)
         self.db_stat_file = dbstatfile
         self.tokens_bidict_file = tokens_bidict_file
         self.josie_db_connection_info = josie_db_connection_info
         self.spark_config = spark_config
         
+        # Create the database handler
         self.db = JOSIEDBHandler(mode=self.mode, **self.josie_db_connection_info)
+
+        self.tokens_bidict = None
         
     def data_preparation(self):
         info('Creating integer sets and inverted index tables...')
         start = time()
         self.db.create_tables()
         
-        # PySpark cannot access self.arg, like self.mode
-        mode, blacklist, dlh, string_translators, string_patterns = self.mode, self.blacklist, self.dlh, self.string_translators, self.string_patterns
+        # PySpark cannot access self.arg
+        mode, dlh, string_blacklist, string_translators, string_patterns = (
+            self.mode, self.dlh, self.string_blacklist, self.string_translators, self.string_patterns
+        )
         
         info('Preparing inverted index and integer set tables...')
         spark, initial_rdd = get_spark_session(dlh, **self.spark_config)
 
-        # initial_rdd = initial_rdd.filter(lambda t: t['num_header_rows'] == 1)
-        # info(f'Tables with num_header_rows=1: {initial_rdd.count()}')
-        
         token_sets = (
             initial_rdd
             .map(lambda t: [t['_id_numeric'], 
@@ -79,7 +82,7 @@ class JOSIEGS(AbstractGlobalSearchAlgorithm):
                 lambda t: [t[0], table_to_tokens(t[1], t[2], 
                                                  mode=mode, 
                                                  encode=None, 
-                                                 blacklist=blacklist, 
+                                                 string_blacklist=string_blacklist, 
                                                  string_translators=string_translators,
                                                  string_patterns=string_patterns)]
             ).flatMap(
@@ -282,74 +285,96 @@ class JOSIEGS(AbstractGlobalSearchAlgorithm):
         info('Completed JOSIE data preparation.')
         return round(time() - start, 3), dbstat['total_size'].map_elements(convert_to_giga, return_dtype=pl.Float64).sum()
         
-    def query(self, results_file, k, queries:List[int]|Dict[int,List[int]], reset_cost_function_parameters=False, force_sampling_cost=False, token_table_on_memory=False, verbose=False):
-        """Run the query with the passed queries. If it is a list of integer, it assumes that 
-        it's a list of table IDs already present in the index. Otherwise, it assumes that it's a 
-        dictionary with pairs <QueryID, QueryTokenIDs>, where the token IDs are relative to tokens
-        in the index, and they are already sorted. """
-        
-        if verbose: info('Starting JOSIE tests...')
+    def query(self, queries:List[int]|Dict[int,List], k:int, results_file:str=None, 
+              reset_cost_function_parameters:bool=False, force_sampling_cost:bool=False, token_table_on_memory:bool=False, verbose:bool=False):
+        info('Starting JOSIE tests...')
+
+        info('Loading database tables...')
         self.db.load_tables()
-        
-        start_query = time()
+
+        if not self.tokens_bidict:
+            info('Loading tokens bi-dictionary...')
+            with open(self.tokens_bidict_file, 'rb') as fr:
+                self.tokens_bidict = pickle.load(fr)
+            
         if isinstance(queries, list):
-            # insert the queries into the Queries table
             self.db.clear_query_table()
             self.db.add_queries_from_existing_tables(queries)
-            # get the queries as tuples 
-            # <query/set_id, list[token_ids], list[raw_tokens]>
             queries = [RawTokenSet(*row) for row in self.db.get_query_sets()]
-        else:
+        elif isinstance(queries, dict):
+            queries = {
+                qid: list(table_to_tokens(table, [1] * len(table[0]), self.mode, None, 
+                                     self.string_blacklist, self.string_translators, self.string_patterns))
+                for qid, table in queries.items()
+            }
+            try:
+                queries = {
+                    qid: [self.tokens_bidict.inverse[raw_token] for raw_token in qset]
+                    for qid, qset in queries.items()
+                }
+                set_error = False
+            except KeyError:
+                for qid, qset in queries.items():
+                    if '{{ken}}@#38' in qset:
+                        print(f'>>> {qid}')
+                        set_error = True
+            if set_error:
+                raise Exception()
             self.db.clear_query_table()
             self.db.add_queries(*zip(*queries.items()))
             queries = [RawTokenSet(qid, qtokens, self.db.get_raw_tokens(qtokens)) for qid, qtokens in queries.items()]
 
         if not self.db.are_costs_sampled() or force_sampling_cost:
-            if verbose: info('Deleting old cost tables values...')
+            info('Deleting old cost tables values...')
             self.db.delete_cost_tables()
-            if verbose: info('Sampling costs...')
+            info('Sampling costs...')
             self.db.sample_costs()
 
         # reset the cost function parameters used by JOSIE 
         # for the cost estimation
         if reset_cost_function_parameters:
-            if verbose: info(f'Resetting cost function parameters...')
+            info(f'Resetting cost function parameters...')
             self.db.reset_cost_function_parameters(verbose)
 
-        if verbose: info(f"Number of sets: {self.db.count_sets()}")
+        info(f"Number of sets: {self.db.count_sets()}")
 
         # create the token table, on memory or on disk
-        if verbose: info(f"Creating token table on {'memory' if token_table_on_memory else 'disk'}...")
+        info(f"Creating token table on {'memory' if token_table_on_memory else 'disk'}...")
         tb = TokenTableMem(self.db, True) if token_table_on_memory else TokenTableDisk(self.db, True)
 
-        if verbose: info(f"Begin experiment for {k=}...")
+        info(f"Begin experiment for {k=}...")
         
         perfs = []
         start = time()
 
+        start_query = time()
         # execute the JOSIE algorithm for each query
-        for q in tqdm(queries, disable=not verbose):
+        for q in tqdm(queries):
             try:
-                perfs.append(JOSIE(self.db, tb, q, k, ignore_self=True)[1])
+                perfs.append(JOSIE(self.db, tb, q, k, ignore_self=True))
             except Exception as e:
                 error(f'JOSIE error with query={q.set_id}: {e}')
 
-
-        if verbose: info(f"Finished experiment for {k=} in {round((time() - start) / 60, 3)} minutes")
+        info(f"Finished experiment for {k=} in {round((time() - start) / 60, 3)} minutes")
         
         # rewrite the results in a common format, i.e.
         # tuples <query_id, duration (s), list[result_table_ids]>
-        write_all_results(perfs, f'{results_file}.raw')        
-        (
-            pl.read_csv(f'{results_file}.raw').select(['query_id', 'duration', 'results'])
-            .with_columns((pl.col('duration') / 1000).name.keep())
-            .with_columns(pl.col('results').map_elements(get_result_ids, return_dtype=pl.String).alias('result_ids'))
-            .drop('results')
-            .write_csv(results_file)
-        )
+        if results_file is not None:
+            write_all_results([p[1] for p in perfs], f'{results_file}.raw')        
+            (
+                pl.read_csv(f'{results_file}.raw').select(['query_id', 'duration', 'results'])
+                .with_columns((pl.col('duration') / 1000).name.keep())
+                .with_columns(pl.col('results').map_elements(get_result_ids, return_dtype=pl.String).alias('result_ids'))
+                .drop('results')
+                .write_csv(results_file)
+            )
 
-        if verbose: info('Completed JOSIE tests.')
-        return round(time() - start_query, 5)
+        results = [
+            [p[1].query_id, list(zip(eval(get_result_ids(p[1].results)), eval(get_result_overlaps(p[1].results))))]
+            for p in perfs
+        ]
+
+        return round(time() - start_query, 5), results
 
     def clean(self):
         os.remove(self.tokens_bidict_file)

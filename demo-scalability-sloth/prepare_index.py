@@ -1,6 +1,6 @@
 import os
 
-from dltf.testers.josie.josie import JOSIEGS
+from dltf.gsa.josie.josie import JOSIEGS
 from dltf.utils.datalake import MongoDBDataLakeHandler
 from dltf.utils.loghandler import logging_setup
 
@@ -44,7 +44,7 @@ db_config = {
 # spark configuration used during index creation
 spark_config = {
     "spark.app.name"                : "JOSIE Data Preparation",
-    "spark.master"                  : "local[8]",
+    "spark.master"                  : "local[10]",
     "spark.executor.memory"         : "100g",
     "spark.driver.memory"           : "20g",
     "spark.local.dir"               : tmp_path,

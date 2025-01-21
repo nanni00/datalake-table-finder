@@ -1,9 +1,3 @@
-"""
-The main pipeline. For each tester, here you can do the data preparation and query steps
-Headers are considered as part of table, to modify that see how each tester loads tables
-from the datalake
-"""
-
 import os
 
 import pandas as pd
@@ -24,32 +18,43 @@ from dltf.utils.misc import (
     numerize,
     mmh3_hashfunc,
     get_local_time,
-    get_string_translator,
 )
 
 
-def tester_pipeline(test_name:str, algorithm:str, mode:str, tasks:list[str], 
-                  k:int=10, num_query_samples:int=1000, num_cpu:int=72, 
-                  datalake_location:str=None,
-                  datalake_name:str=None, 
-                  datalake_options:list[str]=None,
-                  token_translators=[],
-                  blacklist:list[str]=[],
+def gsa_pipeline(
+        test_name:str, 
+        algorithm:str, 
+        mode:str, 
+        tasks:list[str], 
+        
+        datalake_location:str=None,
+        datalake_name:str=None, 
+        datalake_options:list[str]=None,
+        string_blacklist:list[str]=[],
+        string_translators:list=[],
+        string_patterns:list=[],
+        num_cpu:int=72, 
+        
+        # Query parameters
+        k:int=10, num_query_samples:int=1000, 
 
-                  # JOSIE specific parameters
-                  tokens_bidict_file=None,
-                  josie_db_connection_info:dict=None,
-                  force_sampling_cost:bool=False,
-                  token_table_on_mem:bool=False, 
-                  spark_config:dict=None,
-                  
-                  # LSH Forest specific parameters
-                  num_perm:int=256, l:int=16, hash_func=mmh3_hashfunc,
-                  forest_file=None,
+        # JOSIE specific parameters
+        tokens_bidict_file=None,
+        josie_db_connection_info:dict=None,
+        reset_cost_function_parameters:bool=False,
+        force_sampling_cost:bool=False,
+        token_table_on_mem:bool=False, 
+        spark_config:dict=None,
+        
+        # LSH Forest specific parameters
+        l:int=16, 
+        num_perm:int=256, 
+        hash_func=mmh3_hashfunc,
+        forest_file=None,
 
-                  # fastText-FAISS specific parameters
-                  embedding_model_path:str|None=None,
-                  embedding_model_size:int=300):
+        # fastText-FAISS specific parameters
+        embedding_model_path:str|None=None,
+        embedding_model_size:int=300):
     
     # check configuration
     if (algorithm, mode) not in ALGORITHM_MODE_CONFIG:
@@ -64,14 +69,14 @@ def tester_pipeline(test_name:str, algorithm:str, mode:str, tasks:list[str],
     assert int(embedding_model_size) > 0
     assert (not embedding_model_path and algorithm != 'embedding') or os.path.exists(embedding_model_path)
     
-    test_name = test_name.lower()
-    num_query_samples = int(num_query_samples)
+    test_name           = test_name.lower()
+    num_query_samples   = int(num_query_samples)
     str_num_query_samples = numerize(num_query_samples)
     
     # tasks to complete in current run
-    DATA_PREPARATION =          'data_preparation' in tasks
-    QUERY =                     'query' in tasks
-    CLEAN =                     'clean' in tasks
+    DATA_PREPARATION    = 'data_preparation' in tasks
+    QUERY               = 'query' in tasks
+    CLEAN               = 'clean' in tasks
 
 
     p = get_all_paths(test_name, datalake_name, k, str_num_query_samples)
@@ -99,6 +104,9 @@ def tester_pipeline(test_name:str, algorithm:str, mode:str, tasks:list[str],
     logging_setup(logfile=p['logfile'])
 
     info(f" MAIN PIPELINE - {test_name.upper()} - {algorithm.upper()} - {mode.upper()} - {datalake_name.upper()} ".center(150, '#'))
+    info(f"{string_blacklist=}")
+    info(f"{string_translators=}")
+    info(f"{string_patterns=}")
 
     # create folders
     if DATA_PREPARATION or QUERY:
@@ -107,20 +115,17 @@ def tester_pipeline(test_name:str, algorithm:str, mode:str, tasks:list[str],
                 info(f'Creating directory {directory}...')
                 os.makedirs(directory)
     
-    tokens_bidict_file =    f'{josie_dir}/tokens_bidict_file_{mode}.pickle'
-    forest_file =           f'{forest_dir}/forest_{mode}.json' if not forest_file else forest_file
-    cidx_tag =              'ft' if mode in ['ft', 'ftdist'] else 'cft' if mode in ['cft', 'cftdist'] else ''
-    cidx_file =             f'{embedding_dir}/col_idx_{cidx_tag}.index' 
-    topk_results_file =     f'{results_base_dir}/{algorithm}_{mode}.csv'
-    db_stat_file =          f'{statistics_dir}/db.csv' 
+    tokens_bidict_file  = f'{josie_dir}/tokens_bidict_file_{mode}.pickle' if not tokens_bidict_file else tokens_bidict_file
+    forest_file         = f'{forest_dir}/forest_{mode}.pickle' if not forest_file else forest_file
+    cidx_tag            = 'ft' if mode in ['ft', 'ftdist'] else 'cft' if mode in ['cft', 'cftdist'] else ''
+    cidx_file           = f'{embedding_dir}/col_idx_{cidx_tag}.index' 
+    topk_results_file   = f'{results_base_dir}/{algorithm}_{mode}.csv'
+    db_stat_file        = f'{statistics_dir}/db.csv' 
 
 
     # tokens that will be filtered
-    blacklist = set(blacklist)
-    info(f"Blacklist: {blacklist}")
+    string_blacklist = set(string_blacklist)
 
-    token_translators = [get_string_translator(tr) for tr in token_translators]
-    
     # a list containing information about timing of each step
     runtime_metrics = []
 
@@ -130,14 +135,16 @@ def tester_pipeline(test_name:str, algorithm:str, mode:str, tasks:list[str],
 
     # selecting the right tester accordingly to the specified algorithm and mode
     tester = None
-    default_args = (mode, blacklist, dlh, token_translators)
+    default_args_dp = [mode, dlh, string_blacklist, string_translators, string_patterns]
+    args_query = []
     match algorithm:
         case 'josie':
-            tester = josie.JOSIEGS(*default_args, db_stat_file, tokens_bidict_file, josie_db_connection_info, spark_config)
+            args_query += [reset_cost_function_parameters, force_sampling_cost, token_table_on_mem]
+            tester = josie.JOSIEGS(*default_args_dp, db_stat_file, tokens_bidict_file, josie_db_connection_info, spark_config)
         case 'lshforest':
-            tester = lshforest.LSHForestGS(*default_args, forest_file, num_perm, l, hash_func, spark_config)
+            tester = lshforest.LSHForestGS(*default_args_dp, forest_file, num_perm, l, hash_func, spark_config)
         case 'embedding':
-            tester = embedding.EmbeddingGS(*default_args, num_cpu, embedding_model_path, cidx_file, embedding_model_size)
+            tester = embedding.EmbeddingGS(*default_args_dp, num_cpu, embedding_model_path, cidx_file, embedding_model_size)
 
     
     if CLEAN:
@@ -157,12 +164,9 @@ def tester_pipeline(test_name:str, algorithm:str, mode:str, tasks:list[str],
     if QUERY:
         info(f' QUERY - {k} - {str_num_query_samples} '.center(150, '-'))
         query_ids = read_query_ids(p['query_file'])
-        exec_time = tester.query(topk_results_file, k, query_ids, 
-                                 # JOSIE specific parameters
-                                 results_directory=results_base_dir, 
-                                 token_table_on_memory=token_table_on_mem, 
-                                 force_sampling_cost=force_sampling_cost)
-        runtime_metrics.append((('query', numerize(len(query_ids), asint=True)), exec_time, get_local_time()))
+        args_query = [query_ids, k, topk_results_file] + args_query
+        exec_time, _ = tester.query(*args_query)
+        runtime_metrics.append((('query', numerize(len(query_ids))), exec_time, get_local_time()))
 
 
     if DATA_PREPARATION or QUERY:

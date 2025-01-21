@@ -1,7 +1,7 @@
 import numpy as np
 
 import fasttext
-import compress_fasttext
+# import compress_fasttext
 
 from dltf.utils.tables import table_rows_to_columns, column_to_text
 

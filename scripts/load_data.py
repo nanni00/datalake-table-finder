@@ -9,10 +9,9 @@ from bidict import bidict
 from pymongo import MongoClient, InsertOne, UpdateOne
 
 from dltf.utils.tables import naive_detect_valid_columns
-from dltf.utils.datalake import DataLakeHandlerFactory
     
 
-def create_numeric_index_on_mongodb(*table_collections):
+def create_numeric_index_on_mongodb(table_collections, keep_existing=False):
     """
     Create a numeric index on the MongoDB collections passed as input, in case the tables were already stored on it
     :param table_collections: The MongoDB collections that store the tables
@@ -24,6 +23,8 @@ def create_numeric_index_on_mongodb(*table_collections):
     for collection in table_collections:
         print(f'Scanning documents from {collection.database.name}.{collection.name}...')
         for doc in tqdm(collection.find({}, projection={"_id": 1}), total=collection.count_documents({})):
+            if '_id_numeric' in doc and keep_existing:
+                continue
             batch_update.append(UpdateOne({"_id": doc["_id"]}, {"$set": {"_id_numeric": _id_numeric}}))
             _id_numeric += 1
             if len(batch_update) == batch_size:
@@ -52,17 +53,14 @@ def _columns_detection_worker(t: tuple[str, list[list]]):
     return (t[0], naive_detect_valid_columns(t[1]))
     
 
-def mongodb_detect_valid_columns(task, num_cpu, *datalake_args):
+def mongodb_detect_valid_columns(task, num_cpu, table_collections):
     if os.cpu_count() < num_cpu:
         print(f"Using {os.cpu_count()} cores")
     num_cpu = min(os.cpu_count(), num_cpu)
     
-    dlh = DataLakeHandlerFactory.create_handler(*datalake_args)
-    collections = dlh._collections
-
     if task == 'set':
         with mp.get_context('spawn').Pool(processes=num_cpu) as pool:
-            for collection in collections:
+            for collection in table_collections:
                 collsize = collection.count_documents({})
                 batch_update = []
                 batch_size = 10000
@@ -81,7 +79,7 @@ def mongodb_detect_valid_columns(task, num_cpu, *datalake_args):
                     collection.bulk_write(batch_update, ordered=False)
                 print(f'{collection.database.name}.{collection.name} updated.')
     else:
-        for collection in collections:
+        for collection in table_collections:
             print(f'Start unsetting field "valid_columns" from {collection.database.name}.{collection.name}...')
             collection.update_many({}, {"$unset": {"valid_columns": 1}})
             print(f'{collection.database.name}.{collection.name} updated.')
@@ -229,25 +227,22 @@ def main_wiki():
     path_tables = f'{os.environ["HOME"]}/datasets_datalakes/WikiTables/tables.json'
     
     client = MongoClient()  # connect to MongoDB
-    db = client.optitab  # define the database to use
-    table_collection = db.turl_training_set  # define the collection in the database to store the tables
+    mongo_collection = client.optitab.turl_training_set  # define the collection in the database to store the tables
     milestone = 10000  # table interval to use for tracking the progress
     n = 100
-    wiki2mongo(path_tables, table_collection, milestone, n)
-    mongodb_detect_valid_columns('set', 16, 'mongodb', 'wikiturlsnap', [table_collection.full_name])
+    wiki2mongo(path_tables, mongo_collection, milestone, n)
+    mongodb_detect_valid_columns('set', 16, 'mongodb', 'wikiturlsnap', [mongo_collection])
     
 
 def main_gittables():
-    # path_tables = f'{os.environ["HOME"]}/datasets_datalakes/GitTables'
-    
-    client = MongoClient()  # connect to MongoDB
-    db = client.sloth  # define the database to use
-    table_collection = db.gittables  # define the collection in the database to store the tables
-    milestone = 10000  # table interval to use for tracking the progress
+    path_tables = f'{os.environ["HOME"]}/datasets_datalakes/GitTables'
     n = 100
+    milestone = 10000  # table interval to use for tracking the progress
+    client = MongoClient()  # connect to MongoDB
+    table_collection = client.sloth.gittables
     # gittables2mongo(path_tables, table_collection, milestone, n)
     print("Detecting valid columns of the loaded tables...")
-    mongodb_detect_valid_columns('set', os.cpu_count(), 'mongodb', 'gittables', [table_collection.full_name])
+    mongodb_detect_valid_columns('set', os.cpu_count(), 'mongodb', 'gittables', [table_collection])
     
 
 def main_santos_large():
@@ -269,11 +264,18 @@ def main_santos_small():
 def set_index_on_small_wiki_collections():
     mongoclient = MongoClient()
     collections = [mongoclient.sloth.latest_snapshot_tables, mongoclient.optitab.turl_training_set]
-    create_numeric_index_on_mongodb(*collections)
+    create_numeric_index_on_mongodb(collections)
+
+
+def demo_setup():
+    mongoclient = MongoClient()
+    collections = [mongoclient.sloth.demo]
+    create_numeric_index_on_mongodb(collections, keep_existing=True)
+    mongodb_detect_valid_columns('set', 10, collections)
 
 if __name__ == "__main__":
     # main_wiki()
     # main_gittables()
     # main_santos_small()
     # main_santos_large()
-    set_index_on_small_wiki_collections()
+    demo_setup()

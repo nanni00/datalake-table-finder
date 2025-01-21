@@ -36,16 +36,14 @@ Base = declarative_base()
 
 
 class MATEInvertedLists(Base):
-    __tablename__ = 'mate_inverted_lists'
-    # token =         Column(Integer, primary_key=True, index=True)
-    tableid =       Column(Integer, primary_key=True, index=True)
-    colid =         Column(Integer, primary_key=True, index=True)
-    rowid =         Column(Integer, primary_key=True, index=True)
-    tokenized =     Column(VARCHAR(255))
-    superkey =      Column(VARCHAR(255))
+    __tablename__   = 'mate_inverted_lists'
+    # token         = Column(Integer, primary_key=True, index=True)
+    tableid         = Column(Integer, primary_key=True, index=True)
+    colid           = Column(Integer, primary_key=True, index=True)
+    rowid           = Column(Integer, primary_key=True, index=True)
+    tokenized       = Column(VARCHAR(255))
+    superkey        = Column(VARCHAR(255))
     
-
-
 
 class MATEDBHandler:
     def __init__(self, mate_cache_path:str, connection_info:dict|None=None):
@@ -93,13 +91,12 @@ class MATEDBHandler:
                                 func.regexp_replace(MATEInvertedLists.tokenized, '\W+', ' '), ' +', ' '
                             ).in_(distinct_clean_values))
                         .limit(top_k)
-                    )
-                    select([MATEInvertedLists.superkey, MATEInvertedLists.colid]).where()
+                    )                    
                 else:
                     stmt = (
                         select(MATEInvertedLists.tableid, MATEInvertedLists.rowid, MATEInvertedLists.colid, MATEInvertedLists.tokenized, MATEInvertedLists.superkey)
                         .distinct()
-                        .where(MATEInvertedLists.in_(distinct_clean_values))
+                        .where(MATEInvertedLists.tokenized.in_(distinct_clean_values))
                     )
                 
             pl = session.execute(stmt)
@@ -133,33 +130,37 @@ class MATEDBHandler:
         with Session(self.engine) as session:
             return list(session.execute(query))
 
-    def create_inverted_index(self, hash_size:int, blacklist:set, string_translators:dict|None, dlhconfig, spark_config:dict|None):
+    def create_inverted_index(self, hash_size:int, string_blacklist:set, string_translators, string_patterns, dlhconfig, spark_config:dict|None):
+        def prepare_tuple(table_id:int, table_rows:list, valid_columns:list):
+            nonlocal hash_size, string_blacklist, string_translators
+            return table_to_posting_lists(table_id, table_rows, valid_columns, hash_size=hash_size, str_blacklist=string_blacklist, str_translators=string_translators, str_patterns=string_patterns)
+        
         jdbc_url = f'jdbc:{URL.create(drivername=self.url.drivername, database=self.url.database, host=self.url.host, port=self.url.port)}'
+        
         jdbc_properties = {
             'user': self.url.username,
-            'password': self.url.password
+            'password': self.url.password,
+            
         }
-        print(jdbc_url, jdbc_properties)
-        
+
         schema = StructType(
             [
-                StructField('tableid',      IntegerType(),  False), 
-                StructField('colid',        IntegerType(),  False),
-                StructField('rowid',        IntegerType(),  False),
-                StructField('tokenized',    StringType(),   False),
-                StructField('superkey',     StringType(),   False)
+                StructField('tableid'   , IntegerType() , False), 
+                StructField('colid'     , IntegerType() , False),
+                StructField('rowid'     , IntegerType() , False),
+                StructField('tokenized' , StringType()  , False),
+                StructField('superkey'  , StringType()  , False)
             ]
         )
 
-        def prepare_tuple(table_id:int, table_rows:list, valid_columns:list):
-            nonlocal hash_size, blacklist, string_translators
-            return table_to_posting_lists(table_id, table_rows, valid_columns, hash_size=hash_size, blacklist=blacklist, string_translators=string_translators)
-
         dlh = DataLakeHandlerFactory.create_handler(*dlhconfig)
-        spark, data_rdd = get_spark_session(dlh, **spark_config)
+        spark, rdd = get_spark_session(dlh, **spark_config)
 
         (
-            data_rdd
+            rdd
+            .map(lambda t: [t['_id_numeric'], 
+                            t['content'] if 'num_header_rows' not in t else t['content'][t['num_header_rows']:],
+                            t['valid_columns']])
             .filter(lambda t: is_valid_table(t[1], t[2]))
             .flatMap(lambda t: prepare_tuple(*t))
             .toDF(schema=schema)
@@ -168,8 +169,6 @@ class MATEDBHandler:
         )
 
         spark.sparkContext.stop()
-
-
 
 
 def XASH(token: str, hash_size: int = 128) -> int:
@@ -224,15 +223,15 @@ def XASH(token: str, hash_size: int = 128) -> int:
     return int(result)
 
 
-def table_to_posting_lists(table_id:int, table:list, valid_columns:list[int], blacklist:set, hash_size:int, string_translators=[]):
+def table_to_posting_lists(table_id:int, table:list, valid_columns:list[int], hash_size:int, str_blacklist:set, str_translators=[], str_patterns=[]):
     def row_xash(row):
         return reduce(lambda a, b: a | b, map(lambda t: XASH(str(t)[:255], hash_size), row), 0)
-    
+    table = [[clean_string(cell, str_translators, str_patterns) for cell in row] for row in table]
     return sorted([
-        [table_id, column_id, row_id, clean_string(cell, *string_translators)[:255], str(row_xash(row))]
+        [table_id, column_id, row_id, cell[:255], str(row_xash(row))]
         for row_id, row in enumerate(table)
             for column_id, cell in enumerate(row)
-                if valid_columns[column_id] and clean_string(cell, *string_translators) not in blacklist and cell not in blacklist
+                if valid_columns[column_id] and cell not in str_blacklist
         ], key=lambda x: (x[0], x[1], x[2]))
 
 
@@ -241,42 +240,46 @@ def table_to_posting_lists(table_id:int, table:list, valid_columns:list[int], bl
 def main():
     connection_info = {
         'drivername':   'postgresql',
-        'database':     'DLTFGitTables',
-        'username':     'nanni',
-        'password':     'nanni',
-        'port':         5442,
-        'host':         'localhost'
+        'database':     'DEMODB',
+        'username':     'demo',
+        'password':     'demo',
+        'host':         'localhost',
+        'port':         5442
     }
 
-    num_cpu = 64
-    dlhconfig = ['mongodb', 'gittables', ['sloth.gittables']]
-
-    # the Spark JAR for JDBC should not be inserted there, since it's a known issue
-    # that a JAR passed as package here won't be retrieved as driver class
-    spark_jars_packages = [
-        'org.mongodb.spark:mongo-spark-connector_2.12:10.3.0'
-    ]
+    num_cpu = 10
+    dlhconfig = ['mongodb', 'demo', ['sloth.demo']]
 
     spark_config = {
         'spark.app.name':               'MATE Index Preparation',
         'spark.master':                 f"local[{num_cpu}]",
         'spark.executor.memory':        '100g',
         'spark.driver.memory':          '20g',
-        'spark.local.dir':              f'{os.environ["DLTFPATH"]}/data/tmp_spark',
+        'spark.local.dir':              f'{os.path.dirname(__file__)}/tmp',
         'spark.driver.maxResultSize':   '12g',
-        'spark.jars.packages':          ','.join(spark_jars_packages),
-        'spark.driver.extraClassPath':  '/home/nanni/.ivy2/jars/org.postgresql_postgresql-42.7.3.jar'
+        'spark.jars.packages':          'org.mongodb.spark:mongo-spark-connector_2.12:10.3.0',
+        'spark.driver.extraClassPath':  f'{os.environ["HOME"]}/.ivy2/jars/org.postgresql_postgresql-42.7.3.jar'
     }
 
     hash_size = 128
-    custom_translator = str.maketrans(';$_\n|', '     ')
+    custom_translator = str.maketrans('"', ' ')
     
+    tmp_dir = f'{os.path.dirname(__file__)}/tmp'
+    if not os.path.exists(tmp_dir):
+        os.makedirs(tmp_dir)
+
     matedb = MATEDBHandler('', connection_info)
     start = time()
     matedb.create_index_table()
-    matedb.create_inverted_index(hash_size, set(), [custom_translator], dlhconfig, spark_config)
+    matedb.create_inverted_index(
+        hash_size, 
+        string_blacklist=set(), 
+        string_translators=['lowercase', 'whitespace', custom_translator], 
+        string_patterns=[],
+        dlhconfig=dlhconfig,
+        spark_config=spark_config
+    )
     end = time()
-    
     print(f'create init index time: {round(end - start, 3)}s')
 
 

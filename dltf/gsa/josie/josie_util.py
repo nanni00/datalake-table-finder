@@ -1,6 +1,6 @@
 from typing import Any, List
-from dltf.testers.josie.common import next_distinct_list
-from dltf.testers.josie.db import JOSIEDBHandler
+from dltf.gsa.josie.common import next_distinct_list
+from dltf.gsa.josie.db import JOSIEDBHandler
 
 
 class CandidateEntry:

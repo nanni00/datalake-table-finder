@@ -2,7 +2,7 @@ import csv
 from typing import Optional
 from dataclasses import dataclass
 
-from dltf.testers.josie.heap import SearchResult
+from dltf.gsa.josie.heap import SearchResult
 
 
 @dataclass

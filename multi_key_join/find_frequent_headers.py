@@ -24,7 +24,13 @@ def task(data):
         table_obj = dlh.get_table_by_numeric_id(i)
         if not is_valid_table(table_obj['content'], table_obj['valid_columns']) or 'headers' not in table_obj or not table_obj['headers']: 
             continue
-        headers.append(sorted([h.lower().strip() for i, h in enumerate(table_obj['headers']) 
+        
+        # for wikitables there could be num_header_rows>=2, 
+        # but for simplicity we use only those tables with num_header_rows==1
+        if isinstance(table_obj['headers'][0], list) and len(table_obj['headers']) > 1:
+            continue
+        
+        headers.append(sorted([h.lower().strip() for i, h in enumerate(table_obj['headers'][0]) 
                             if table_obj['valid_columns'][i] == 1 
                             and not _is_number(h) 
                             and 'nnamed: ' not in str(h)]))
@@ -46,9 +52,9 @@ def find_frequent_headers(dlhconfig, k, min_support, num_cpu=os.cpu_count()):
     :param s: Threshold search parameter of A-Priori
     :param num_cpu: Number of CPUs that can be used
     """
-    headers_list_file =     f'{dp.root_project_path}/experiments/multi_key_join/all_headers/{dlhconfig[1]}.json'
-    frequent_headers_file = f'{dp.root_project_path}/experiments/multi_key_join/frequent_headers/{dlhconfig[1]}.json'
-    read_headers =          not os.path.exists(headers_list_file)
+    headers_list_file       = f'{os.path.dirname(__file__)}/headers/{dlhconfig[1]}_all.json'
+    frequent_headers_file   = f'{os.path.dirname(__file__)}/headers/{dlhconfig[1]}_frequent.json'
+    read_headers            = not os.path.exists(headers_list_file)
 
     for f in [frequent_headers_file, headers_list_file]:
         if not os.path.exists(os.path.dirname(f)):
@@ -72,8 +78,6 @@ def find_frequent_headers(dlhconfig, k, min_support, num_cpu=os.cpu_count()):
         with open(headers_list_file) as fr:
             headers = json.load(fr)
 
-    # headers, items_mapping = create_items_table(headers)
-
     print('Running A-Priori algorithm...')
     min_support = min_support / len(headers) 
     itemsets, _ = apriori(transactions=headers, max_length=k, min_support=min_support, verbosity=True)
@@ -87,38 +91,25 @@ def find_frequent_headers(dlhconfig, k, min_support, num_cpu=os.cpu_count()):
     }
 
 
-    """
-    results = {
-        k: {
-            tuple(sorted(str(items_mapping.inverse[item]) for item in itemset)) if not isinstance(itemset, int) else items_mapping.inverse[itemset]: freq
-            for itemset, freq in k_res.items()
-        } for k, k_res in results.items() 
-    }
-
-    results = {
-        k: {
-            ' : '.join(sorted(itemset)) if isinstance(itemset, tuple) else itemset: freq
-            for itemset, freq in sorted(k_res.items(), key=lambda x: x[0])
-        } for k, k_res in results.items() 
-    }
-    """
-
     print(f'Saving results in {frequent_headers_file}...')
     with open(frequent_headers_file, 'w') as fw:
         json.dump(itemsets, fw, indent=4)
 
 
 def main_wikitables():
-    dlhconfig = ['mongodb', 'wikiturlsnap', ['optitab.turl_training_set']]
-    find_frequent_headers(dlhconfig, k=3, min_support=1000)
+    find_frequent_headers(['mongodb', 'wikiturlsnap', ['optitab.turl_training_set']], k=3, min_support=1000)
 
 
 def main_gittables():
-    dlhconfig = ['mongodb', 'gittables', ['sloth.gittables']]
-    find_frequent_headers(dlhconfig, k=3, min_support=1000)
+    find_frequent_headers(['mongodb', 'gittables', ['sloth.gittables']], k=3, min_support=1000)
+
+
+def main_demo():
+    find_frequent_headers(['mongodb', 'demo', ['sloth.demo']], k=3, min_support=50)
 
 
 
 if __name__ == '__main__':
     # main_wikitables()
-    main_gittables()
+    # main_gittables()
+    main_demo()

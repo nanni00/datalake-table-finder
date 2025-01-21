@@ -5,7 +5,6 @@ import multiprocessing as mp
 from collections import defaultdict
 
 import numpy as np
-import pandas as pd
 import polars as pl
 from tqdm import tqdm
 import matplotlib.pyplot as plt
@@ -75,32 +74,31 @@ def analyses(test_name, k, num_query_samples, num_cpu,
              k_values, 
              save_silver_standard_to:str=None, load_silver_standard_from:str=None, *args, **kwargs):
     
-    k_search = k
-    assert int(k_search) > 0
+    assert int(k) > 0
     assert int(num_cpu) > 0
     assert datalake_name in DATALAKES
     
-    alpha = 1
-    showfliers = False
+    # General parameters
+    test_name           = test_name.lower()
+    k_search            = k
+    q                   = numerize(num_query_samples)
 
-    test_name = test_name.lower()
-    q = numerize(num_query_samples)
+    # Define paths and folders
+    paths               = get_all_paths(test_name, datalake_name, k_search, num_query_samples)
+    TEST_DATASET_DIR    = paths['TEST_DATASET_DIR']
+    analyses_dir        = f'{TEST_DATASET_DIR}/results/analyses/k{k_search}_q{q}'
     
-    paths = get_all_paths(test_name, datalake_name, k_search, num_query_samples)
-    TEST_DATASET_DIR =      paths['TEST_DATASET_DIR']
-    analyses_dir =          f'{TEST_DATASET_DIR}/results/analyses'
-    analyses_query_dir =    f'{analyses_dir}/k{k_search}_q{q}'
-    
+    # matplotlib graphics options
+    alpha               = 1
+    showfliers          = False
 
+    # If the analysis directory doesn't exist, create it
     if not os.path.exists(analyses_dir):
-        os.mkdir(analyses_dir)
+        os.makedirs(analyses_dir)
     
-    if not os.path.exists(analyses_query_dir):
-        os.mkdir(analyses_query_dir)
-    
-    analyses_dir = analyses_query_dir
+    # Logging just on stdout
+    logging_setup(on_stdout=True)
 
-    logging_setup(paths['logfile'])
     info(f' {test_name.upper()} - {datalake_name.upper()} - ANALYSES - {k_search} - {q} '.center(150, '-'))
 
     all_colors = colors = list(mcolors.TABLEAU_COLORS.keys())
@@ -108,11 +106,12 @@ def analyses(test_name, k, num_query_samples, num_cpu,
     markers = {m: 'o' if m[0] == 'josie' else 'x' if m[0] == 'lshforest' else 'd' for m in methods}
     methods = {m: c for m, c in zip(methods, colors[:len(methods)])}
 
-    results = pl.read_csv(f"{paths['results_extr_dir']}/final_results_k{k_search}_q{q}.csv")
+    results = pl.read_csv(f"{paths['results_extr_dir']}/k{k_search}_q{q}.csv")
     results = results.filter(pl.struct(['algorithm', 'mode']).is_in(list(map(lambda am: {'algorithm': am[0], 'mode': am[1]}, methods.keys()))))
 
-    results = results.drop_nulls() # queries without any results
-    results = results.filter(pl.col('sloth_overlap') != -1) # pairs that have had a SLOTH failure while computing the overlap
+    results = results.drop_nulls()
+    # This should no longer happen
+    # results = results.filter(pl.col('sloth_overlap') != -1) # pairs that have had a SLOTH failure while computing the overlap
 
     results = results.with_columns((pl.col('algorithm_overlap') - pl.col('sloth_overlap')).alias('difference_overlap'))
 
@@ -120,48 +119,14 @@ def analyses(test_name, k, num_query_samples, num_cpu,
     start_filtering = time()
     bad_groups = []
     for query_id, q_group in tqdm(results.to_pandas().groupby('query_id'), total=results.select('query_id').unique().shape[0], leave=False):
-        for (alg, mode), data in q_group.groupby(['algorithm', 'mode']):
+        for _, data in q_group.groupby(['algorithm', 'mode']):
             if data.shape[0] < k_search:
                 bad_groups.append(query_id)
                 break
     results = results.filter(~pl.col('query_id').is_in(bad_groups))
     end_filtering = time()
-    print(len(bad_groups), num_query_samples, results.select('query_id').unique().shape[0])
     
     info(f'Filtered {len(bad_groups)} groups in {round(end_filtering - start_filtering, 3)}s')
-
-
-
-    ##########################################################
-    ##################### False positive #####################
-    ##########################################################
-    
-    info('Computing False Positives...')
-    
-    # False Positives per single query result
-    start_zr = time()
-    with mp.get_context('spawn').Pool(len(methods)) as pool:
-        r = pool.map(worker_fp_per_query, 
-                     results.select(['algorithm', 'mode', 'query_id', 'result_id', 'sloth_overlap'])
-                     .to_pandas().groupby(['algorithm', 'mode'], group_keys=True))
-    
-    x = pd.DataFrame([z for y in r for z in y], columns=['algorithm', 'mode', 'FP_count', 'FP_rate'])
-    fp_per_query_pivot = x.pivot_table(values=['FP_rate'], index=['algorithm', 'mode'], aggfunc=['mean', 'std'])
-
-    # False Positives per algorithm-mode
-    z = []
-    for am, am_group in results.select(['algorithm', 'mode', 'query_id', 'result_id', 'sloth_overlap']).group_by('algorithm', 'mode'):
-        false_positives = am_group.filter(pl.col('sloth_overlap') == 0).shape[0]
-        ntot = am_group.shape[0]
-        z.append((am[0], am[1], false_positives, ntot, round(false_positives / ntot, 5)))
-    fp_per_algmode = pd.DataFrame(z, columns=['algorithm', 'mode', 'FP_count', 'total_results', 'FP_rate'])
-    end_zr = time()
-
-    # Saving the results
-    info(f'Finished. Total time: {round(end_zr - start_zr, 3)}s')
-    fp_per_query_pivot.to_csv(analyses_dir + f'/false_positives_per_group.csv')
-    fp_per_algmode.to_csv(analyses_dir + f'/false_positives_per_alg_mode.csv')
-    
 
 
     #############################################################################
@@ -276,9 +241,17 @@ def analyses(test_name, k, num_query_samples, num_cpu,
         info(f'Finished. Total time: {round(end_prec - start_prec, 3)}s')
 
     prec_rec_results = [x for qres in prec_rec_results for x in qres]
-    prec_rec_results = pd.DataFrame(prec_rec_results, columns=['query_id', 'silver_std_size', 'algorithm', 'mode', 'k', 'precision', 'RP', 'recall', 'f1'])
+    prec_rec_results = pl.DataFrame(
+        prec_rec_results, 
+        schema=['query_id', 'silver_std_size', 'algorithm', 'mode', 'k', 'precision', 'RP', 'recall', 'f1'],
+        orient='row'
+    ).to_pandas()
 
-    res_pivot = pd.pivot_table(prec_rec_results, values=['precision', 'RP', 'recall', 'f1'], index=['algorithm', 'mode'], columns=['k'], aggfunc=['mean', 'std', 'max'])
+    res_pivot = prec_rec_results.pivot_table(
+        values=['precision', 'RP', 'recall', 'f1'], 
+        index=['algorithm', 'mode'], 
+        columns=['k'], 
+        aggfunc=['mean', 'std', 'max'])
     res_pivot.to_csv(analyses_dir + f'/precision_recall@K.csv')
 
     # basic plot
@@ -346,13 +319,18 @@ def analyses(test_name, k, num_query_samples, num_cpu,
         except:
             print(ndcg_results)
 
-    df = pd.DataFrame(ndcg_results, columns=['query_id', 'silver_standard_size', 'algorithm', 'mode', 'k', 'ndcg@k'])
+    df = pl.DataFrame(ndcg_results, schema=['query_id', 'silver_standard_size', 'algorithm', 'mode', 'k', 'ndcg@k'], orient='row')
 
     # consider only those groups that have more than X elements
     silver_standard_size_threshold = max(k_values)
-    df_thr = df[df['silver_standard_size'] >= silver_standard_size_threshold]
+    df_thr = df.filter(pl.col('silver_standard_size') >= silver_standard_size_threshold).to_pandas()
 
-    ndcg_pivot = df_thr.pivot_table(index=['algorithm', 'mode'], columns=['k'], values=['ndcg@k'], aggfunc=['mean', 'max']).convert_dtypes()
+    ndcg_pivot = df_thr.pivot_table(
+        index=['algorithm', 'mode'], 
+        columns=['k'], 
+        values=['ndcg@k'], 
+        aggfunc=['mean', 'max']
+    ).convert_dtypes()
     ndcg_pivot.to_csv(analyses_dir + f'/ndcg@k.csv')
 
     for row, label in zip(ndcg_pivot['mean', 'ndcg@k'].values, ndcg_pivot.index):
@@ -368,7 +346,7 @@ def analyses(test_name, k, num_query_samples, num_cpu,
     plt.close()
     
     # boxplots with nDCG@K
-    data = [(amp[0], amp[1], amp[2], group) for amp, group in df.groupby(by=['algorithm', 'mode', 'k'])]
+    data = [(amp[0], amp[1], amp[2], group) for amp, group in df.group_by('algorithm', 'mode', 'k')]
     
     fig, axes = plt.subplots(1, len(k_values), figsize=(15, 7), sharey=True)
     for i, k in enumerate(k_values):

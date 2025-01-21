@@ -12,7 +12,7 @@ from sqlalchemy import (
 )
 
 from dltf.utils.loghandler import info, error
-from dltf.testers.josie.josie_io import RawTokenSet, ListEntry
+from dltf.gsa.josie.josie_io import RawTokenSet, ListEntry
 
 
 # TODO handle dynamic custom tablename in some good way

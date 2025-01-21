@@ -1,19 +1,17 @@
 import os
 import re
-import pickle
 
 import pymongo
-import polars as pl
 
+from dltf.gsa.josie.josie import JOSIEGS
 from dltf.utils import tables
 from dltf.utils.misc import clean_string, largest_overlap_sloth
-from dltf.gsa.josie.josie import JOSIEGS
 from dltf.utils.datalake import MongoDBDataLakeHandler
 from dltf.utils.loghandler import error, logging_setup, info
 
 
 def prepare_query(qdoc):    
-    global tokens_bidict, string_translators, string_patterns, blacklist, mode
+    global tokens_bidict, string_translators, string_patterns, string_blacklist, mode
 
     # Extract a bag of tokens from the document's content
     query_sets = [
@@ -23,7 +21,7 @@ def prepare_query(qdoc):
                 table=doc['content'], 
                 valid_columns=doc['valid_columns'], 
                 mode=mode, 
-                blacklist=blacklist,
+                string_blacklist=string_blacklist,
                 string_translators=string_translators,
                 string_patterns=string_patterns
             )
@@ -63,8 +61,8 @@ collection = mongoclient.sloth.latest_snapshot_tables
 # Query and general parameters
 data_path                   = f'{os.path.dirname(__file__)}/data'
 k                           = 5
-blacklist                   = set(['–', '—', '-', '●', '&nbsp', '&nbsp;', '&nbsp; &nbsp;', 'yes', 'no', 'n/a', 'none', '{{y}}', '{{n}}', '{{yes}}', '{{no}}', '{{n/a}}'] + list(map(str, range(1000))))
 
+string_blacklist            = set(['–', '—', '-', '●', '&nbsp', '&nbsp;', '&nbsp; &nbsp;', 'yes', 'no', 'n/a', 'none', '{{y}}', '{{n}}', '{{yes}}', '{{no}}', '{{n/a}}'] + list(map(str, range(1000))))
 string_translators          = ['whitespace', 'lowercase']
 string_patterns             = []
 
@@ -78,6 +76,7 @@ dlh                         = MongoDBDataLakeHandler(datalake_location, datalake
 mode                        = 'bag'
 force_sampling_cost         = False # force JOSIE to do cost sampling before querying
 token_table_on_memory       = False # build the token table used by JOSIE directly on disk
+reset_cost_function_param   = False # force JOSIE to reset the cost function parameters
 tokens_bidict_file          = f'{data_path}/josie-tokens-bidict.pickle'
 results_file                = f'{data_path}/tmp/results.csv'
 
@@ -105,8 +104,8 @@ db_config = {
 # Instatiate JOSIE
 josie = JOSIEGS(
     mode=mode,
-    blacklist=blacklist,
     datalake_handler=dlh,
+    string_blacklist=string_blacklist,
     string_translators=string_translators,
     string_patterns=string_patterns,
     dbstatfile=None,
@@ -115,16 +114,9 @@ josie = JOSIEGS(
     spark_config=None
 )
 
-# Load the bidictionary between the JOSIE tokens IDs and the correspondent original string
-info('Start loading bidict...')
-with open(tokens_bidict_file, 'rb') as fr:
-    tokens_bidict = pickle.load(fr)
-
-
 
 # Define what we want to search and what not
 search_tokens = set(['cit']) # set(['city', 'state', 'country', 'env', 'path', 'cance', 'health', 'space', 'air', 'gdp', 'rich', 'poor', 'clima', 'weath'])
-'List of cities in the Democratic Republic of the Congo', 'Towns and cities'
 
 filter_tokens = {'election', 'building', 'cup', 'fifa', 'team', 'finals', 'club', 'achievements', 'tour', 'open', 
                  'career', 'disc', 'dates',
@@ -155,8 +147,8 @@ for i, qdoc in enumerate(collection.find({})):
         continue
 
     try:
-        josie.query(results_file, k, prepare_query(qdoc))
-        josie_results = [[q, list(zip(get_result_ids(r), get_result_overlaps(r)))] for q, r in pl.read_csv(f'{results_file}.raw').select('query_id', 'results').rows() if r]
+        table = tables.table_rows_to_rows(qdoc['content'], qdoc['num_header_rows'], len(qdoc['content'][0]), qdoc['valid_columns'])
+        _, josie_results = josie.query({table['_id_numeric']: table}, k)
     except Exception as exc:
         error(exc) 
         continue

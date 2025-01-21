@@ -3,7 +3,7 @@ from collections import defaultdict
 from tqdm import tqdm
 
 from dltf.utils.loghandler import info
-from dltf.testers.base_tester import AbstractGlobalSearchAlgorithm
+from dltf.gsa.base_tester import AbstractGlobalSearchAlgorithm
 from dltf.utils.tables import table_to_tokens, is_valid_table
 
 
@@ -25,7 +25,7 @@ class BruteForceGS(AbstractGlobalSearchAlgorithm):
                                                     table['valid_columns'],
                                                     self.mode,
                                                     encode=None,
-                                                    blacklist=[],
+                                                    string_blacklist=[],
                                                     string_translators=self.string_translators,
                                                     string_patterns=self.string_patterns))
         info("Tokenized tables created.")

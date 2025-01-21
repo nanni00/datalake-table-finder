@@ -1,6 +1,6 @@
 import os
 import math
-import time
+from time import time
 from collections import Counter
 from typing import List, Dict, Any, Tuple
 from heapq import heapify, heappush, heappop
@@ -58,27 +58,31 @@ class MATETableExtraction:
                  dataset_name: str,
                  mate_cache_path:str,
                  t_k: int,
-                 inverted_index_table: str,
                  ones: int = 5,
                  log_file_name: str = '',
                  min_join_ratio: int = 0,
                  is_min_join_ratio_absolute: bool = True,
+                 string_blacklist=set(), 
+                 string_translators=[], 
+                 string_patterns=[],
                  database_request: bool = True,
-                 engine = None,
                  db_connection_info:dict|None = None
                  ):
-        self.main_inverted_index_table_name = inverted_index_table
         self.top_k = t_k
         self.dataset_name = dataset_name
         self.mate_cache_path = mate_cache_path
         self.database_request = database_request
-        self.dbh = MATEDBHandler(self.mate_cache_path, self.main_inverted_index_table_name, engine, db_connection_info)
+        self.dbh = MATEDBHandler(self.mate_cache_path, db_connection_info)
         self.number_of_ones = ones
         self.log_file_name = log_file_name
         self.min_join_ratio = min_join_ratio
         self.is_min_join_ratio_absolute = is_min_join_ratio_absolute
         # self.original_data = self.input_data.copy()
-        
+
+        self.string_blacklist = string_blacklist
+        self.string_translators = string_translators
+        self.string_patterns = string_patterns
+    
     def evaluate_rows(self, input_row: Any, col_dict: Dict) -> Tuple[bool, str]:
         """Evaluates a row.
 
@@ -486,7 +490,7 @@ class MATETableExtraction:
         for q in query_column_list:
             self.input_data[q] = (
                 self.input_data[q]
-                .apply(lambda x: clean_string(x)[:255])
+                .apply(lambda x: clean_string(x, self.string_translators, self.string_patterns)[:255])
                 .replace('', np.nan)
                 .replace('nan', np.nan)
                 .replace('unknown', np.nan)
@@ -496,7 +500,11 @@ class MATETableExtraction:
         self.input_data = self.input_data[self.query_columns]
         self.input_size = len(self.input_data)
         
-        row_block_size = 100
+        # TODO clearly understand this param
+        # What does that 'row_block_size' mean?? This seems to be a tunable argument
+        # to easily prune out tables with few matches (?)
+        row_block_size = 0
+
         total_match = 0
         total_approved = 0
 
@@ -545,6 +553,8 @@ class MATETableExtraction:
 
         overlaps_dict = {}
         pruned = False
+
+        # Inspect each candidate table
         for tableid in tqdm(sorted(table_dictionary, key=lambda k: len(table_dictionary[k]), reverse=True), disable=True):
             set_of_rowids = set()
             hitting_posting_list_concatinated = table_dictionary[tableid]
@@ -565,13 +575,6 @@ class MATETableExtraction:
                     break
                 tableid, rowid, colid, token, superkey = hit
                 superkey = int(superkey)
-                # tablerowid = hit.split(';')[0]
-                # rowid = tablerowid.split('_')[1]
-                # colid = hit.split(';')[1].split('$')[0].split('_')[0]
-                # token = hit.split(';')[1].split('$')[0].split('_')[1]
-                
-                # the super key should be saved as a VARCHAR or smth similar?
-                # superkey = int(hit.split('$')[1])
 
                 relevant_input_rows = gd[token]
 
@@ -585,14 +588,16 @@ class MATETableExtraction:
                         candidate_table_rows += [f'{tableid}_{rowid}']
 
                 already_checked_hits += 1
+
             if pruned or len(candidate_external_row_ids) >= row_block_size:
                 if len(candidate_external_row_ids) == 0:
                     break
                 candidate_input_rows = np.array(candidate_input_rows)
                 candidate_table_ids = np.array(candidate_table_ids)
-                start = time.time()
+                start = time()
                 pls = self.dbh.get_pl_by_table_and_rows(candidate_table_rows)
-                timing.append(round(time.time() - start, 5))
+                
+                timing.append(round(time() - start, 5))
 
                 table_row_dict = {}
                 for i in pls:
@@ -636,58 +641,54 @@ class MATETableExtraction:
             if pruned:
                 break
 
+        # TODO add some kind of "verbosity" argument to mate
         # print('---------------------------------------------')
-        # print(top_joinable_tables)
-        # print(len(top_joinable_tables))
+        # print(f'{top_joinable_tables=}')
+        # print(f'{len(top_joinable_tables)=}')
         # print(f'FP = {total_approved - total_match}')
 
         return sorted(top_joinable_tables, key=lambda x: x[0], reverse=True)
 
 if __name__ == '__main__':
-    top_k = 50
+    top_k = 10
     one_bits = 5
 
-
-    dataset_name = 'mate_wikiturlsnap'
+    dataset_name = 'demo'
     query_dataset_path = f"{os.path.dirname(__file__)}/query.csv"
     
-    cache_path = f"{os.path.dirname(__file__)}/cache"
-    if not os.path.exists(cache_path):
-        os.makedirs(cache_path)
-    
     hash_size = 128
-    table_name = f'mate__wikiturlsnap_table_{hash_size}'
     query_dataset = pd.read_csv(query_dataset_path)
-    query_columns_list = ['party', 'member']
+    query_columns_list = ['Country']
     
     db_connection_info = {
-        'url': f'postgresql://localhost:5442/nanni',
-        # 'url': f'duckdb:///{dp.data_path.base}/mate_index.db',
-        # 'connect_args': {
-        #    'read_only': True
-        # }
-        'connect_args': {
-            'options': "-c default_transaction_read_only=on"
-        }
+        'drivername': 'postgresql',
+        'database'  : 'DEMODB', 
+        'host'      : 'localhost',
+        'port'      : 5442,
+        'username'  : 'demo',
+        'password'  : 'demo'
     }
 
-    run_ics = True
-    min_join_ratio = 0.9
+    run_ics = False
+    min_join_ratio = 0
 
     query_dataset = pd.read_csv(query_dataset_path)[query_columns_list]
 
     mate = MATETableExtraction(
-        dataset_name, 
-        cache_path, 
-        top_k, 
-        table_name,
-        one_bits, 
-        None, 
+        dataset_name=dataset_name,
+        mate_cache_path=None,
+        t_k=top_k,
+        ones=one_bits,
+        log_file_name=None,
         min_join_ratio=min_join_ratio,
-        is_min_join_ratio_absolute=False,
+        is_min_join_ratio_absolute=True,
+        string_blacklist=set(),
+        string_translators=['lowercase', 'whitespace'],
+        string_patterns=[],
         database_request=True,
-        **db_connection_info)
-    start = time.time()
+        db_connection_info=db_connection_info
+    )
+    start = time()
     print(mate.MATE(hash_size, run_ics, query_dataset, query_columns_list))
-    print('run_ics=', run_ics, round(time.time() - start, 3))
+    print('run_ics=', run_ics, round(time() - start, 3))
     mate.dbh.engine.dispose()

@@ -2,8 +2,8 @@ import hashlib
 import logging
 from typing import List, Tuple
 
-from dltf.testers.josie.db import JOSIEDBHandler
-from dltf.testers.josie.josie_io import RawTokenSet
+from dltf.gsa.josie.db import JOSIEDBHandler
+from dltf.gsa.josie.josie_io import RawTokenSet
 
 
 # Constants

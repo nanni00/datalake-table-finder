@@ -9,26 +9,31 @@ import pandas as pd
 from dltf.sloth.sloth import sloth
 
 
-whitespace_translator =     str.maketrans(whitespace, ' ' * len(whitespace))
-digits_translator =         str.maketrans(digits, ' ' * len(digits))
-punctuation_translator =    str.maketrans(punctuation, ' ' * len(punctuation))
-lowercase_translator =      str.maketrans(ascii_uppercase, ascii_lowercase)
+whitespace_translator   = str.maketrans(whitespace,     ' ' * len(whitespace))
+digits_translator       = str.maketrans(digits,         ' ' * len(digits))
+punctuation_translator  = str.maketrans(punctuation,    ' ' * len(punctuation))
+lowercase_translator    = str.maketrans(ascii_uppercase, ascii_lowercase)
 
 
 def get_string_translator(tr):
     match tr:
-        case 'whitespace':  return whitespace_translator
-        case 'digits':      return digits_translator
-        case 'punctuation': return punctuation_translator
-        case 'lowercase':   return lowercase_translator
-        case _:             raise ValueError(f'Unknown translator: {tr}')
+        case 'whitespace'   : return whitespace_translator
+        case 'digits'       : return digits_translator
+        case 'punctuation'  : return punctuation_translator
+        case 'lowercase'    : return lowercase_translator
+        case _              : raise ValueError(f'Unknown translator: {tr}')
 
 
-def clean_string(s, translators=[], replace_patterns=[]):
-    if len(translators) == 0:
-        translators = [str.maketrans('\n|', '  ')]
-    translators = [t if isinstance(t, dict) else get_string_translator(t) for t in translators]
-    s = reduce(lambda ss, rp: re.sub(rp[0], rp[1], ss), replace_patterns, s)
+def clean_string(s:str, translators:list=[], patterns:list=[]) -> str:
+    """
+    Clean the string with the given translators and patterns
+    :param s: the string to clean
+    :param translators: a list of string transaltors, either as string or list of pairs <old, new> strings
+    :param patterns: a list of pairs <pattern, replace_string>; each pattern is
+                     searched into the string, and is replaced with the replace_string string
+    """
+    translators = [str.maketrans(t[0], t[1]) if isinstance(t, list) else get_string_translator(t) for t in translators]
+    s = reduce(lambda ss, rp: re.sub(r'{}'.format(rp[0]), r'{}'.format(rp[1]), ss), patterns, s)
     return reduce(lambda si, tr: str(si).translate(tr), translators, str(s)).strip()
 
 
@@ -65,7 +70,6 @@ def largest_overlap_sloth(r_tab, s_tab, r_valid_cols, s_valid_cols, blacklist=[]
     
     metrics = []
     _, metrics = sloth(r_tab, s_tab, metrics=metrics, **sloth_args)
-    # print(f'{metrics=}')
     if len(metrics) < 8:
         return 0, 0
     largest_ov_sloth = metrics[-2]

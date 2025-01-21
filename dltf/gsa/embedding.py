@@ -2,6 +2,7 @@ import os
 import math
 from time import time
 import multiprocessing as mp
+from typing import Dict, List
 
 import faiss
 import numpy as np
@@ -10,14 +11,14 @@ from tqdm import tqdm
 
 from dltf.utils.misc import chunks
 from dltf.utils.loghandler import info
-from dltf.testers.base_tester import AbstractGlobalSearchAlgorithm
+from dltf.gsa.base_tester import AbstractGlobalSearchAlgorithm
 from dltf.utils.datalake import DataLakeHandlerFactory
 from dltf.utils.table_embedder import table_embedder_factory
 from dltf.utils.tables import is_valid_table
 
 
 def worker_embedding_data_preparation(data) -> tuple[np.ndarray, np.ndarray]:
-    global mode, num_cpu, blacklist, string_translators, string_patterns, emb_model_path, dlhargs
+    global mode, num_cpu, string_blacklist, string_translators, string_patterns, emb_model_path, dlhargs
     
     dlh = DataLakeHandlerFactory.create_handler(*dlhargs)
     model = table_embedder_factory(mode, emb_model_path)
@@ -45,7 +46,7 @@ def worker_embedding_data_preparation(data) -> tuple[np.ndarray, np.ndarray]:
             xb_ids = np.concatenate((xb_ids, xb_ids_batch))
             xb_batch, xb_ids_batch = np.empty(shape=(0, d)), np.empty(shape=(0, 1))
         
-        colemb = model.embed_columns(table, valid_columns, blacklist, string_translators, string_patterns)
+        colemb = model.embed_columns(table, valid_columns, string_blacklist, string_translators, string_patterns)
         if colemb.shape[0] == 0:
             continue
 
@@ -62,24 +63,21 @@ def worker_embedding_data_preparation(data) -> tuple[np.ndarray, np.ndarray]:
     return xb, xb_ids
 
 
-
-
-def initializer( _mode, _num_cpu, _blacklist, _string_translators, _string_patterns, _emb_model_path, *_dlhargs):
-    global mode, num_cpu, blacklist, string_translators, string_patterns, emb_model_path, dlhargs
+def initializer( _mode, _num_cpu, _string_blacklist, _string_translators, _string_patterns, _emb_model_path, *_dlhargs):
+    global mode, num_cpu, string_blacklist, string_translators, string_patterns, emb_model_path, dlhargs
     dlhargs             = _dlhargs[0]
     mode                = _mode
     num_cpu             = _num_cpu
-    blacklist           = _blacklist
+    string_blacklist    = _string_blacklist
     string_translators  = _string_translators
     string_patterns     = _string_patterns
     emb_model_path      = _emb_model_path
 
 
-
 class EmbeddingGS(AbstractGlobalSearchAlgorithm):
-    def __init__(self, mode, blacklist, dlh, string_translators, string_patterns, 
+    def __init__(self, mode, dlh, string_blacklist, string_translators, string_patterns, 
                  num_cpu, model_path, column_index_file, embedding_dimension) -> None:
-        super().__init__(mode, blacklist, dlh, string_translators, string_patterns)
+        super().__init__(mode, dlh, string_blacklist, string_translators, string_patterns)
         self.num_cpu = num_cpu
         self.model_path = model_path
         self.cidx_file = column_index_file
@@ -100,7 +98,7 @@ class EmbeddingGS(AbstractGlobalSearchAlgorithm):
         work = range(self.dlh.count_tables())
         chunk_size = max(len(work) // self.num_cpu, 1)
 
-        initargs = (self.mode, self.num_cpu, self.blacklist, self.string_translators, self.string_patterns, self.model_path, self.dlh.config())
+        initargs = (self.mode, self.num_cpu, self.string_blacklist, self.string_translators, self.string_patterns, self.model_path, self.dlh.config())
 
         with mp.get_context('spawn').Pool(self.num_cpu, initializer=initializer, initargs=initargs) as pool:
             info(f'Start embedding tables, chunk-size={chunk_size}...')
@@ -138,7 +136,7 @@ class EmbeddingGS(AbstractGlobalSearchAlgorithm):
         faiss.write_index(self.cidx, self.cidx_file)
         return round(time() - start, 5), os.path.getsize(self.cidx_file) / (1024 ** 3)
 
-    def query(self, results_file, k, query_ids, **kwargs):
+    def query(self, queries:List[int]|Dict[int,List], k:int, results_file:str):
         start = time()
         info('Loading model...')
         model = table_embedder_factory(self.mode, self.model_path)
@@ -153,7 +151,7 @@ class EmbeddingGS(AbstractGlobalSearchAlgorithm):
         
         info('Running top-K...')
         # batch query processing, because it's significantly faster
-        for i, qid in tqdm(enumerate(query_ids), total=len(query_ids)):
+        for i, qid in tqdm(enumerate(queries), total=len(queries)):
             # when reached the batch threshold, 
             # execute the search for the current batch vectors
             if xq.shape[0] > batch_size:
@@ -169,9 +167,13 @@ class EmbeddingGS(AbstractGlobalSearchAlgorithm):
                     results.append((qid, round(batch_mean_time, 3), [int(y[0]) for y in x if y[0] not in {qid, -1}][:k + 1]))
                 xq, xq_ids = np.empty(shape=(0, d), dtype=np.float64), np.empty(shape=(0, 1), dtype=np.int32)
 
-            doc = self.dlh.get_table_by_numeric_id(int(qid))
-            
-            colemb = model.embed_columns(doc['content'], doc['valid_columns'], self.blacklist, self.string_translators, self.string_patterns)
+            if isinstance(queries, list):
+                doc = self.dlh.get_table_by_numeric_id(int(qid))
+                table, valid_columns = doc['content'], doc['valid_columns']
+            elif isinstance(queries, dict):
+                table, valid_columns = queries[qid], [1] * len(queries[qid][0])
+
+            colemb = model.embed_columns(table, valid_columns, self.string_blacklist, self.string_translators, self.string_patterns)
             ids = np.expand_dims(np.repeat([qid], colemb.shape[0]), axis=0)
             xq_ids = np.concatenate((xq_ids, ids.T))
             xq = np.concatenate((xq, colemb), axis=0)
@@ -186,10 +188,10 @@ class EmbeddingGS(AbstractGlobalSearchAlgorithm):
             start_sort = time()
             x = sorted(list(zip(*np.unique(res[i], return_counts=True))), key=lambda z: z[1], reverse=True)
             sort_time = time() - start_sort
-            results.append((qid, round(batch_mean_time + sort_time, 3), str([int(y[0]) for y in x if y[0] not in {qid, -1}][:k + 1])))
+            results.append((qid, round(batch_mean_time + sort_time, 3), [int(y[0]) for y in x if y[0] not in {qid, -1}][:k + 1]))
 
-        pl.DataFrame(results, schema=['query_id', 'duration', 'results'], orient='row').write_csv(results_file)    
-        return round(time() - start, 5)
+        pl.DataFrame([[qid, t, str(r)] for qid, t, r in results], schema=['query_id', 'duration', 'results'], orient='row').write_csv(results_file)    
+        return round(time() - start, 5), [[qid, r] for qid, _, r in results]
     
     def clean(self):
         if os.path.exists(self.cidx_file):

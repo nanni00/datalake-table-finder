@@ -13,20 +13,20 @@ Base = declarative_base()
 
 
 class Overlaps(Base):
-    __tablename__ = 'overlaps'
-    r_id = Column(Integer, primary_key=True, index=True)
-    s_id = Column(Integer, primary_key=True, index=True)
-    table_overlap = Column(Integer)
-    set_q_size = Column(Integer)
-    set_r_size = Column(Integer)
-    set_overlap = Column(Integer)
-    set_union_size = Column(Integer)
-    bag_q_size = Column(Integer)
-    bag_r_size = Column(Integer)
-    bag_overlap = Column(Integer)
-    sloth_time = Column(Float)
-    set_time = Column(Float)
-    bag_time = Column(Float)
+    __tablename__   = 'overlaps'
+    r_id            = Column(Integer, primary_key=True, index=True)
+    s_id            = Column(Integer, primary_key=True, index=True)
+    table_overlap   = Column(Integer)
+    set_q_size      = Column(Integer)
+    set_r_size      = Column(Integer)
+    set_overlap     = Column(Integer)
+    set_union_size  = Column(Integer)
+    bag_q_size      = Column(Integer)
+    bag_r_size      = Column(Integer)
+    bag_overlap     = Column(Integer)
+    sloth_time      = Column(Float)
+    set_time        = Column(Float)
+    bag_time        = Column(Float)
 
 
 class OverlapsDBHandler:
