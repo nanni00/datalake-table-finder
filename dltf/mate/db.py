@@ -9,26 +9,24 @@ we didn't do any of these passages (except a basic replacement for characters '\
 so here we keep the same
 """
 import os
-from typing import List
 import math
 from time import time
+from typing import List
 from functools import reduce
 from collections import Counter
 
-import pandas as pd
 import numpy as np
+import pandas as pd
 
-from sqlalchemy.orm import Session, declarative_base
 from sqlalchemy.engine import URL
+from sqlalchemy.orm import Session, declarative_base
 from pyspark.sql.types import StructType, StructField, StringType, IntegerType
 from sqlalchemy import Column, create_engine, Integer, VARCHAR, MetaData, func, select
 
-
-from dltf.mate.base import *
-from dltf.utils.datalake import DataLakeHandlerFactory
+from dltf.utils.misc import clean_string
 from dltf.utils.tables import is_valid_table
 from dltf.utils.spark import get_spark_session
-from dltf.utils.misc import clean_string
+from dltf.utils.datalake import DataLakeHandlerFactory
 
 
 
@@ -37,7 +35,6 @@ Base = declarative_base()
 
 class MATEInvertedLists(Base):
     __tablename__   = 'mate_inverted_lists'
-    # token         = Column(Integer, primary_key=True, index=True)
     tableid         = Column(Integer, primary_key=True, index=True)
     colid           = Column(Integer, primary_key=True, index=True)
     rowid           = Column(Integer, primary_key=True, index=True)
@@ -46,11 +43,12 @@ class MATEInvertedLists(Base):
     
 
 class MATEDBHandler:
-    def __init__(self, mate_cache_path:str, connection_info:dict|None=None):
+    def __init__(self, mate_cache_path:str, read_only:bool=True, connection_info:dict|None=None):
         self.mate_cache_path = mate_cache_path
         
         self.url = URL.create(**connection_info)
-        self.engine = create_engine(self.url)
+        self.engine = create_engine(self.url, connect_args={'read_only': read_only})
+
         self.metadata = MetaData()
         self.metadata.reflect(bind=self.engine)
 
@@ -135,13 +133,19 @@ class MATEDBHandler:
             nonlocal hash_size, string_blacklist, string_translators
             return table_to_posting_lists(table_id, table_rows, valid_columns, hash_size=hash_size, str_blacklist=string_blacklist, str_translators=string_translators, str_patterns=string_patterns)
         
+        # DuckDB concurrency error if the DBHandler keeps the lock 
+        # when pyspark attempts to write the database
+        self.engine.dispose()
+
         jdbc_url = f'jdbc:{URL.create(drivername=self.url.drivername, database=self.url.database, host=self.url.host, port=self.url.port)}'
-        
         jdbc_properties = {
-            'user': self.url.username,
-            'password': self.url.password,
-            
+            'user'      : self.url.username if self.url.username else '',
+            'password'  : self.url.password if self.url.password else ''
         }
+
+        print(f'{jdbc_url=}')
+        print(f'{jdbc_properties=}')
+
 
         schema = StructType(
             [
@@ -155,7 +159,7 @@ class MATEDBHandler:
 
         dlh = DataLakeHandlerFactory.create_handler(*dlhconfig)
         spark, rdd = get_spark_session(dlh, **spark_config)
-
+    
         (
             rdd
             .map(lambda t: [t['_id_numeric'], 
@@ -165,10 +169,15 @@ class MATEDBHandler:
             .flatMap(lambda t: prepare_tuple(*t))
             .toDF(schema=schema)
             .write
-            .jdbc(jdbc_url, MATEInvertedLists.__tablename__, 'append', jdbc_properties) # the overwrite mode drops also the index...
+            .jdbc(
+                url=jdbc_url, 
+                table=MATEInvertedLists.__tablename__, 
+                mode='append', # the overwrite mode drops also the index...
+                properties=jdbc_properties
+            )
         )
 
-        spark.sparkContext.stop()
+        spark.stop()
 
 
 def XASH(token: str, hash_size: int = 128) -> int:
@@ -237,7 +246,7 @@ def table_to_posting_lists(table_id:int, table:list, valid_columns:list[int], ha
 
 
 
-def main():
+def main_demo_postgres():
     connection_info = {
         'drivername':   'postgresql',
         'database':     'DEMODB',
@@ -283,5 +292,49 @@ def main():
     print(f'create init index time: {round(end - start, 3)}s')
 
 
+
+def main_demo_duckdb():
+    dbpath = f'{os.path.dirname(__file__)}/mate_duck.db'
+    
+    connection_info = {
+        'drivername':   'duckdb',
+        'database':     dbpath,
+    }
+
+    num_cpu = 10
+    dlhconfig = ['mongodb', 'demo', ['sloth.demo']]
+
+    spark_config = {
+        'spark.app.name':               'MATE Index Preparation',
+        'spark.master':                 f"local[{num_cpu}]",
+        'spark.executor.memory':        '100g',
+        'spark.driver.memory':          '20g',
+        'spark.local.dir':              f'{os.path.dirname(__file__)}/tmp',
+        'spark.driver.maxResultSize':   '12g',
+        'spark.jars.packages':          'org.mongodb.spark:mongo-spark-connector_2.12:10.3.0',
+        'spark.driver.extraClassPath':  f'{os.environ["HOME"]}/.ivy2/jars/org.duckdb-duckdb_jdbc-1.1.3.jar'
+    }
+
+    hash_size = 128
+    
+    tmp_dir = f'{os.path.dirname(__file__)}/tmp'
+    if not os.path.exists(tmp_dir):
+        os.makedirs(tmp_dir)
+
+    matedb = MATEDBHandler('', connection_info)
+    start = time()
+    matedb.create_index_table()
+    matedb.create_inverted_index(
+        hash_size, 
+        string_blacklist=set(), 
+        string_translators=['lowercase', 'whitespace', ['"', ' ']], 
+        string_patterns=[],
+        dlhconfig=dlhconfig,
+        spark_config=spark_config
+    )
+    end = time()
+    print(f'create init index time: {round(end - start, 3)}s')
+
+
 if __name__ == '__main__':
-    main()
+    main_demo_duckdb()

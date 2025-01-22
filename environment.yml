@@ -10,23 +10,30 @@ dependencies:
   - tqdm
   - nltk
   - pip:
-    - pyside6
-    - ipykernel
-    - tabulate
     - polars
-    - psycopg2
-    - scikit-learn
     - bidict
+    - tabulate
+    - ipykernel
     - matplotlib
-    - sqlalchemy
-    - pymongo
+    - scikit-learn
+    
     - bitarray
-    - datasketch
     - fasttext
+    - datasketch
     - faiss-cpu # that's the basic installation for the CPU-only version
-    - efficient-apriori # just for MATE testing
     - wrapt_timeout_decorator # different timeout for sloth
+    - efficient-apriori # just for MATE testing
+
+    # DuckDB is used just for testing MATE
+    # and could be replaced with Postgres
+    - duckdb=1.1.3
+    - duckdb_engine=0.15.0
+    - pymongo
+    - psycopg2
+    - sqlalchemy=2.0
+
     # these are used just for the demo interface
+    - pyside6
     - gtk3
     - gobject-introspection
     - adwaita-icon-theme

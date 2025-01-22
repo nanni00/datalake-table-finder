@@ -8,9 +8,7 @@ from heapq import heapify, heappush, heappop
 import numpy as np
 from tqdm import tqdm
 
-from dltf.mate.base import *
 from dltf.mate.db import *
-
 from dltf.utils.misc import clean_string
 
 import warnings
@@ -66,13 +64,14 @@ class MATETableExtraction:
                  string_translators=[], 
                  string_patterns=[],
                  database_request: bool = True,
+                 read_only:bool = True,
                  db_connection_info:dict|None = None
                  ):
         self.top_k = t_k
         self.dataset_name = dataset_name
         self.mate_cache_path = mate_cache_path
         self.database_request = database_request
-        self.dbh = MATEDBHandler(self.mate_cache_path, db_connection_info)
+        self.dbh = MATEDBHandler(self.mate_cache_path, read_only, db_connection_info)
         self.number_of_ones = ones
         self.log_file_name = log_file_name
         self.min_join_ratio = min_join_ratio
@@ -218,19 +217,6 @@ class MATETableExtraction:
         """
         return self.run_system(self.XASH, hash_size, run_ics=run_ics, query_dataset=query_dataset, query_column_list=query_column_list)
 
-    def SCR(self) -> None:
-        """Runs SCI.
-
-        """
-        print('Linear')
-        self.run_system(False, True)
-
-    def MCR(self, hash_size=128):
-        """Runs SCI.
-
-        """
-        print('Multi SCI')
-        self.run_system_multi_sci(False, True)
 
     def run_SCI_system(self, run_ics: bool = False, active_pruning: bool = True):
         """Runs SCI.
@@ -648,6 +634,7 @@ class MATETableExtraction:
         # print(f'FP = {total_approved - total_match}')
 
         return sorted(top_joinable_tables, key=lambda x: x[0], reverse=True)
+
 
 if __name__ == '__main__':
     top_k = 10

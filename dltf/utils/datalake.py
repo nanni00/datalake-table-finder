@@ -8,6 +8,10 @@ import pymongo.collection
 
 class DataLakeHandler(ABC):
     @abstractmethod
+    def __init__(self, datalake_location:str, *args):
+        pass
+
+    @abstractmethod
     def get_table_by_id(self, _id:str):
         pass
 

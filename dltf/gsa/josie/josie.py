@@ -47,11 +47,11 @@ class JOSIEGS(AbstractGlobalSearchAlgorithm):
         super().__init__(mode, datalake_handler, string_blacklist, string_translators, string_patterns)
         self.db_stat_file = dbstatfile
         self.tokens_bidict_file = tokens_bidict_file
-        self.josie_db_connection_info = josie_db_connection_info
+        self.connection_info = josie_db_connection_info
         self.spark_config = spark_config
         
         # Create the database handler
-        self.db = JOSIEDBHandler(mode=self.mode, **self.josie_db_connection_info)
+        self.db = JOSIEDBHandler(mode=self.mode, **self.connection_info)
 
         self.tokens_bidict = None
         
@@ -227,7 +227,7 @@ class JOSIEGS(AbstractGlobalSearchAlgorithm):
         
         properties = {
             'user': self.db.url.username,
-            'password': self.db.url.password,
+            'password': self.db.url.password
         }
 
 

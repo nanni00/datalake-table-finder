@@ -64,7 +64,7 @@ def initializer_mate(_k, _dataset, _db_connection_info, _is_absolute_rate, _min_
     string_patterns         = _string_patterns
 
 
-def task_compute_overlaps(data):
+def task_overlaps(data):
     global dlhconfig
     qid, res_list, query_cols, min_h_values, min_w, max_w = data
     dlh = DataLakeHandlerFactory.create_handler(*dlhconfig)
@@ -96,7 +96,8 @@ def initializer_overlaps(_dlhconfig):
 
 def multi_key_search(dlhconfig,
                      num_cpu, 
-                     db_connection_info,
+                     josie_db_config,
+                     mate_db_config,
                      string_blacklist,
                      string_translators,
                      string_patterns,
@@ -130,13 +131,10 @@ def multi_key_search(dlhconfig,
                     string_patterns=string_patterns,
                     dbstatfile=None, 
                     tokens_bidict_file=token_bidict_path,
-                    josie_db_connection_info=db_connection_info,
+                    josie_db_connection_info=josie_db_config,
                     spark_config=None)
     
     josie.db.load_tables()
-
-    # mate_engine = create_engine(URL.create(**db_connection_info))
-    mate_inv_idx_table_name = 'mate_inv_idx'
 
     logfile = f"{multi_key_join_directory}/N{num_queries}_K{k}.log"
 
@@ -155,7 +153,7 @@ def multi_key_search(dlhconfig,
     # valid means that have at least 5 rows and 2 columns, not considering numeric or null ones
     # and in case the attributes are in the headers they actual form a valid key (i.e. no FD)
     if search_queries:
-        # stdscr = curses.initscr()
+        stdscr = curses.initscr()
         for i, table_obj in enumerate(dlh.scan_tables()):
             table, headers, valid_columns = table_obj['content'], table_obj['headers'], table_obj['valid_columns']
             # for wikitables there could be num_header_rows>=2, 
@@ -172,12 +170,12 @@ def multi_key_search(dlhconfig,
                         
             if len(queries_for_name) > 0 and all([len(queries) >= num_queries for _, queries in queries_for_name.items()]):
                 break
-        #     if i % 100 == 0:
-        #         stdscr.addstr(0, 0, f'Scastr_blacklistnned {i} tables')        
-        #         for j, (names, queries) in enumerate(queries_for_name.items()):
-        #             stdscr.addstr(j+1, 0, f'{len(queries)}/{num_queries} - {names}')
-        #         stdscr.refresh()
-        # curses.endwin()
+            if i % 100 == 0:
+                stdscr.addstr(0, 0, f'Scastr_blacklistnned {i} tables')        
+                for j, (names, queries) in enumerate(queries_for_name.items()):
+                    stdscr.addstr(j+1, 0, f'{len(queries)}/{num_queries} - {names}')
+                stdscr.refresh()
+        curses.endwin()
         
         print('Saving queries IDs...')
         for i, names in enumerate(list_names):
@@ -256,15 +254,11 @@ def multi_key_search(dlhconfig,
         info('\t- Compute largest overlap for single-column candidates')
         with mp.get_context('spawn').Pool(num_cpu, initializer_overlaps, (dlhconfig, )) as pool:
             work = [(qid, single_josie_results[qid], query_columns[qid], min_h_values, min_w, max_w) for qid in single_josie_results.keys()]
-            single_josie_results = dict(pool.map(task_compute_overlaps, work))
+            single_josie_results = dict(pool.map(task_overlaps, work))
         
 
-
         info('3. Apply JOSIE with multi-column queries')
-        multi_queries = {
-            qid: qcolumns
-            for qid, qcolumns in query_columns.items()
-        }
+        multi_queries = {qid: qcolumns for qid, qcolumns in query_columns.items()}
         
         info('\t- Compute JOSIE overlaps...')
         _, josie_results = josie.query(multi_queries, k)
@@ -273,12 +267,12 @@ def multi_key_search(dlhconfig,
         info('\t- Compute largest overlap for multi-column candidates')
         with mp.get_context('spawn').Pool(num_cpu, initializer_overlaps, (dlhconfig, )) as pool:
             work = [(qid, multi_josie_results[qid], query_columns[qid], min_h_values, min_w, max_w) for qid in multi_josie_results.keys()]
-            multi_josie_results = dict(pool.map(task_compute_overlaps, work))
+            multi_josie_results = dict(pool.map(task_overlaps, work))
 
 
         info('4. Apply MATE')
         info(f'\t- Search candidates with MATE, len(work)={len(list(query_columns.items()))}...')
-        initargs = (k, dlhconfig[1], db_connection_info, is_absolute_rate, min_join_ratio, one_bits, hash_size, string_blacklist, string_translators, string_patterns)
+        initargs = (k, dlhconfig[1], mate_db_config, is_absolute_rate, min_join_ratio, one_bits, hash_size, string_blacklist, string_translators, string_patterns)
         with mp.get_context('spawn').Pool(num_cpu, initializer_mate, initargs) as pool:
             work = list(query_columns.items())
             
@@ -294,12 +288,11 @@ def multi_key_search(dlhconfig,
         info('\t- Compute largest overlap for MATE candidates')
         with mp.get_context('spawn').Pool(num_cpu, initializer_overlaps, (dlhconfig, )) as pool:
             work = [(qid, mate_results[qid], query_columns[qid], min_h_values, min_w, max_w) for qid in mate_results.keys()]
-            mate_results = dict(pool.map(task_compute_overlaps, work))
+            mate_results = dict(pool.map(task_overlaps, work))
 
         # save the results from both the baseline and MC versions for future analyses
         # no filtering on queries with a non-null results set
-        final_results = []
-        final_results += [['BSL', qid, *r] for qid, res_list in single_josie_results.items() for r in res_list]
+        final_results  = [['BSL', qid, *r] for qid, res_list in single_josie_results.items() for r in res_list]
         final_results += [['MC', qid, *r] for qid, res_list in multi_josie_results.items() for r in res_list]
         final_results += [['MATE', qid, *r] for qid, res_list in mate_results.items() for r in res_list]
 
@@ -309,13 +302,22 @@ def multi_key_search(dlhconfig,
 
 
 def main_demo():
-    db_connection_info = {
+    # we assume the JOSIE database 
+    # has already been created
+    josie_db_config = {
         'drivername': 'postgresql',
         'database'  : 'DEMODB', 
         'host'      : 'localhost',
         'port'      : 5442,
         'username'  : 'demo',
         'password'  : 'demo'
+    }
+
+    # we assume the MATE database 
+    # has already been created
+    mate_db_config = {
+        'drivername': 'duckdb',
+        'database'  : f'{os.path.dirname(__file__)}/mate_duck.db'
     }
 
     list_names = [
@@ -327,7 +329,8 @@ def main_demo():
         # general parameters
         dlhconfig=['mongodb', 'demo', ['sloth.demo']],
         num_cpu=10,
-        db_connection_info=db_connection_info,
+        josie_db_config=josie_db_config,
+        mate_db_config=mate_db_config,
         string_blacklist=set(),
         string_translators=['whitespace', 'lowercase', ['"', ' ']],
         string_patterns=[],
